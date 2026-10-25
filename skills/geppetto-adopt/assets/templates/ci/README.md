@@ -1,0 +1,7 @@
+# Trusted gate bootstrap
+
+Before the first adoption PR, the repository owner sets Actions variables `GEPPETTO_BOOTSTRAP_REPOSITORY` (`owner/repository`) and `GEPPETTO_BOOTSTRAP_SHA` (the reviewed Geppetto package's full immutable 40-character commit). The pinned repository must be readable by checkout. The source package includes `skills/geppetto-adopt/scripts/pr-event.mjs` and its imports. An absent pin fails with an actionable diagnostic.
+
+The workflow checks out the PR's trusted base. It runs the installed gate there, or the package gate when this is the Geppetto repository itself. If neither exists, it fetches the owner's pinned package into a separate directory. The trade-off is explicit trust in that reviewed external commit, with read-only permissions and checkout credentials removed. PR content is consumed only as event-file data; the PR head supplies neither gate scripts nor configuration. First adoption uses the package's default required sections; project-specific requirements take effect when the adoption is in the trusted base. The ordinary PR workflow file itself remains subject to the host's workflow review and branch-protection policy.
+
+Keep the pins as repository variables under owner control. Select and review a new immutable commit when changing bootstrap policy. Execute local gate-source decision tests before publishing and retain remote CI as a separate acceptance check.

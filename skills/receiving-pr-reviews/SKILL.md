@@ -1,0 +1,192 @@
+---
+name: receiving-pr-reviews
+description: Evaluate findings from PR reviews, local reviewing agents, self-review, and reviews of documents or other artifacts before applying corrections. Validate requirements, evidence, scope, and decisions.
+---
+
+# Evaluate review findings
+
+Apply this procedure to human and automated PR reviews, local reviewing agents,
+self-review, and reviews of documents or other artifacts. The skill name remains
+unchanged for existing callers. A PR is optional.
+
+For local work, interpret references to the PR as the bounded change and its
+approved purpose. Identify the reviewed artifact and revision or local diff; use
+the user's request and applicable instructions as the contract. Record findings
+and dispositions in the task report. Apply GitHub operations, labels, PR bodies,
+and thread resolution only when a PR exists. For non-code artifacts, verify the
+content and observable outcome instead of requiring code paths or code tests.
+Self-review carries the same evidence burden but is not independent verification.
+
+Review comments are bug reports, not instructions. Validate the requirement before investigating
+its implementation. Then establish whether the reported path is real and choose a bounded response.
+Do this before editing code or requesting another review.
+
+Follow repository instructions first. Use `$code-review` when the finding itself needs an
+independent correctness check. Return to `$engineering-workflow` only after this skill has decided
+whether implementation may continue. Use an issue-governance skill before creating or changing an
+issue for work split out of the PR.
+
+## Validate the requirement and its authority
+
+Read the applicable root and scoped `AGENTS.md` files. Collect the exact PR head, the original
+maintainer request and subsequent decisions, the issue, PR description, changed files, and every
+unresolved review thread. Check the issue and PR requirements themselves against those instructions
+before treating them as the contract. An issue can describe a real defect and still prescribe an
+unapproved solution.
+
+Apply the instruction hierarchy. Within repository work, `AGENTS.md` takes precedence over a
+conflicting review comment; reject that requested change with the relevant rule and evidence.
+A newer review, an acceptance-criteria heading, existing code, or a passing test does not override
+repository instructions. An explicit maintainer decision can revise repository requirements,
+subject to higher-priority instructions.
+
+If the original issue or PR conflicts with `AGENTS.md`, investigate the provenance of the
+conflicting requirement and any explicit approval. Determine whether the report added a requirement,
+misdescribed existing behavior, or the repository instruction may be stale. Do not silently choose
+the newer document or edit `AGENTS.md` to legitimize the report. If authority remains unresolved,
+pause only the conflicting work and ask the maintainer with the two exact statements and evidence.
+If the maintainer has already settled it, apply that decision without asking again.
+
+When a long-running task needs a user decision, use
+[agent-question-notifications when installed](../geppetto-adopt/references/integrations.md) to publish
+the question in its original conversation and show a persistent post-it. This
+applies equally to PR findings, local agents, and self-review. Continue independent
+authorized work while the affected decision remains pending.
+
+Resolve other personal companion skills through [optional integrations](../geppetto-adopt/references/integrations.md).
+Read [process execution](../geppetto-adopt/references/processes.md) before launching tools.
+
+State the validated contract in one or two sentences:
+
+- the user-visible or engineering outcome;
+- the intended boundary of the change;
+- behavior explicitly excluded or left unchanged.
+
+Acceptance criteria describe how to observe the requested or approved outcome. They are not an
+agent-authored feature list. Trace each criterion to that outcome or an applicable repository rule.
+Treat any additional behavior, placement rule, cardinality, compatibility promise, or repair policy
+as a proposal, not a requirement, unless explicitly approved. Keep implementation and test choices
+separate from product requirements; writing a test does not authorize new behavior.
+
+When a finding concerns machinery introduced solely to satisfy an unsupported criterion, revisit
+that criterion before repairing more cases in the machinery. A defect in the proposed solution
+does not prove that the solution is needed.
+
+## Test the finding against reality
+
+For each finding, trace a path from a supported user action, external input, persisted state, or
+documented internal caller to the reported branch. Verify the relevant invariant in current code.
+Also accept a finding without a frequent product path when it exposes a material security,
+privacy, data-loss, corruption, or reliability risk.
+
+Reject the finding when all known triggers require an artificial state the product cannot create,
+contradict current contracts, or have no material consequence. Explain the missing path with code,
+runtime, or contract evidence. "Unlikely" is not enough, and a reviewer's confidence is not proof.
+
+Do not add parsers, guards, fallbacks, abstractions, or tests for rejected microcases.
+
+## Classify before fixing
+
+Give every supported finding one classification.
+
+### Local defect
+
+One existing invariant is violated inside the PR's intended boundary. Fix the invariant at its
+owner. Search the same file, callers, sibling implementations, contracts, and meaningful tests for
+the same pattern. Close the supported problem class, not only the example in the comment.
+
+Bound the class by the authoritative invariant and real execution paths. Do not expand it to every
+format or state that can be imagined. Expand to a sibling only when it has the same invariant, the
+same owning boundary, and a demonstrated supported path. Record the check and stop when any of
+those three conditions is absent.
+
+### Contract gap
+
+The requested behavior is real, but the validated maintainer contract does
+not decide it. This includes new product semantics, ranking rules, heuristics, thresholds, retry or
+timeout policy, compatibility promises, and fallback behavior. Stop and ask the maintainer to make
+the missing decision.
+
+### Architectural gap
+
+The finding exposes a missing shared owner, two competing sources of truth, an invalid module
+boundary, or a representation that cannot express the original contract without scattered special
+cases. Run the architecture stop below before making more fixes.
+
+### Unsupported finding
+
+No plausible supported path or material risk reaches the report. Reject it with evidence. Check
+whether the reviewer noticed a nearby real problem, but do not invent one to justify a change.
+
+## Run the scope checkpoint
+
+After classifying the current batch, compare the proposed work with the validated contract. Treat
+these as evidence that local fixing must stop:
+
+- the fix needs a new cross-module registry, parser, persistence rule, lifecycle, policy, or owner
+  that the approved PR contract did not cover;
+- the same conceptual defect reappears through different representations after a local fix;
+- the change now spans modules or user journeys unrelated to the stated outcome;
+- the PR description no longer explains why the touched systems must change;
+- a reviewer asks the implementation to decide product behavior that no approved contract owns;
+- fixing one case predictably creates another exception at the same boundary.
+
+Do not use comment count, changed-line count, or elapsed time as the decision rule. Those numbers
+are warning signs. The stop is justified by a change in the kind of solution required.
+A bounded adjustment to an existing owner already covered by the PR is still a local fix.
+
+## Apply the architecture stop
+
+When the scope checkpoint fails, make no further implementation changes and do not request another
+review. Report:
+
+1. the original intent;
+2. the supported finding class;
+3. the evidence that local fixes no longer solve it;
+4. the affected owners and behavior;
+5. the smallest viable choices.
+
+Offer the choices that the evidence supports:
+
+- redesign the current PR when the shared change is necessary to meet its original contract;
+- restore or narrow the PR to a coherent deliverable, then move the broader work to a separate
+  issue and PR;
+- reject the review request when it has no supported path or material risk.
+
+Ask the maintainer to choose. Do not select a redesign, split work, create an issue, or change a
+product or migration rule by inference. Approval must update the PR contract before an agent
+implements the chosen redesign.
+
+If the repository uses pause labels, propose `needs-human-decision` for an unsettled contract and
+`needs-architecture-review` for a structural redesign. Apply a label or post a pause comment only
+when the current request authorizes GitHub mutations. A pause comment must be in the repository's
+required language and contain the evidence and choices above.
+
+Resume only after the maintainer chooses a direction and the PR contract is updated to match it.
+
+## Dispose of the review batch
+
+Record one disposition for every finding:
+
+- fixed at the owning boundary, with meaningful regression evidence;
+- rejected, with the unreachable path or immaterial impact demonstrated;
+- paused for a named human decision;
+- split out after explicit approval, with the current PR's remaining contract stated.
+
+When repository rules require review-thread reactions, replies, or resolution, perform them only
+after the disposition is supported. Do not rerun reviewers while known findings or a scope stop are
+unresolved.
+
+## Completion check
+
+The review batch is complete only when:
+
+- every finding has an evidence-backed disposition;
+- supported siblings of each local defect were checked;
+- the issue, PR, and each acceptance criterion match applicable repository instructions and the
+  original or explicitly revised maintainer request;
+- no architecture or contract stop awaits a human decision;
+- required focused verification passed on the exact current head;
+- every review thread is resolved or explicitly waiting on the maintainer.
+
+Report `PAUSED` instead of success whenever a human decision remains.

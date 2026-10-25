@@ -1,0 +1,6 @@
+interface:
+  display_name: "Retro"
+  short_description: "Improvements grounded in session evidence"
+  default_prompt: "Use $retro to examine this session and propose tool and instruction improvements."
+policy:
+  allow_implicit_invocation: false

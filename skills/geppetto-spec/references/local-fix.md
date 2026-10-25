@@ -1,0 +1,9 @@
+# Local fix
+
+Use this route when the change is already located at one existing owner, preserves public/data/permission contracts and UI, and introduces no dependency. Callers and adjacent tests may span files; they must retain those contracts. Record these conditions with the current revision. An uncovered owner, changed contract, UI change or dependency returns the work to the full `$geppetto-spec` path.
+
+1. **Specify.** State the existing owner, supported defect, preserved invariant and observable regression proof. Reuse the approved brief or requirements map. Complete when the acceptance result and affected callers are known.
+2. **Build.** Run a behaviour regression against the original implementation and observe failure for the intended reason. Make the smallest complete correction at the owner, check siblings for the same defect class and run the regression green. Complete when both results and sibling dispositions refer to the candidate.
+3. **Verify.** Run the host's affected-file checks and relevant caller regressions; inspect the actual delivered diff. Record the selected profile, red/green proof, checks, evidence locations and limits in the PR/ticket `## Observability`. Apply `$geppetto-verify` steps 3–7 for review, finding decisions and delivery, including its constrained-session state when necessary. Complete when every required result identifies the delivered revision and each gap or finding has a named disposition.
+
+Read a principle skill when a concrete unresolved concern invokes it, such as adding instrumentation or making a speedup claim. Update the feature's existing document when a documented fact or observability surface changes; otherwise the PR/ticket Observability section is the record. The route changes preparation effort; ownership, red-then-green proof and review requirements stay the same.

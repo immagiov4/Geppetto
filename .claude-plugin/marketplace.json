@@ -1,0 +1,13 @@
+{
+  "name": "geppetto",
+  "description": "Portable engineering skills and deterministic checks for small, proven changes.",
+  "owner": { "name": "immagiov4" },
+  "plugins": [
+    {
+      "name": "geppetto",
+      "source": "./",
+      "description": "Portable engineering skills and deterministic gates.",
+      "version": "0.1.0"
+    }
+  ]
+}
