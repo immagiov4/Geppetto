@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync } from 'node:fs';
+import { cpSync, symlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, invoke, git, config, scripts } from './helpers.mjs';
 
@@ -46,4 +46,15 @@ test('verification names live-evidence gaps and fails when the configured memory
   let result = JSON.parse(r.stdout); assert.equal(result.memory.remote.matchesConfigured, true); assert.deepEqual(result.memory.remote.urls, ['https://example.com/intended.git']);
   git(memory, ['remote', 'set-url', '--push', 'origin', 'https://example.com/unintended-push.git']);
   r = invoke('audit.mjs', ['--verify', '--json'], { cwd, home }); assert.equal(r.status, 1); result = JSON.parse(r.stdout); assert.equal(result.memory.remote.matchesConfigured, false);
+});
+
+
+test('memory audit recognizes a repository configured through a directory alias', t => {
+  const cwd = fixture(t); const home = fixture(t); const memory = fixture(t); const links = fixture(t);
+  git(memory, ['init', '-q']);
+  const alias = resolve(links, 'memory');
+  symlinkSync(memory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  put(cwd, '.geppetto/config.json', { ...config(), memory: { localPath: alias } });
+  const r = invoke('audit.mjs', ['--json'], { cwd, home }); assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).memory.clone, 'present');
 });

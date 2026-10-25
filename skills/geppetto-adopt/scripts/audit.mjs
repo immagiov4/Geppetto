@@ -1,4 +1,4 @@
-import { readdir, mkdtemp, writeFile, rm, stat } from 'node:fs/promises';
+import { readdir, mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
 import { resolve, delimiter, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cli, isMain, parseArgs, UsageError, exists, jsonFile, validateConfig, validateMemory, userHome, run } from './common.mjs';
@@ -26,7 +26,7 @@ async function memoryReport(project) {
   const bucketIndex = localPath && merged.buckets.length === 1 ? resolve(localPath, 'buckets', merged.buckets[0], 'index.md') : null;
   const bucketIndexes = await Promise.all(merged.buckets.map(async bucket => ({ bucket, path: localPath ? resolve(localPath, 'buckets', bucket, 'index.md') : null, status: status(localPath && await file(resolve(localPath, 'buckets', bucket, 'index.md'))) })));
   const root = localPath && await directory(localPath) ? run('git', ['rev-parse', '--show-toplevel'], { cwd: localPath }) : null;
-  const cloneExists = Boolean(root?.status === 0 && resolve(root.stdout.trim()).toLowerCase() === localPath.toLowerCase());
+  const cloneExists = Boolean(root?.status === 0 && await realpath(resolve(root.stdout.trim())) === await realpath(localPath));
   const remote = cloneExists ? run('git', ['remote'], { cwd: localPath }) : null;
   const names = remote?.status === 0 ? remote.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
   const selected = names.includes('origin') ? 'origin' : names.length === 1 ? names[0] : null;

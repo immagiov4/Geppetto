@@ -30,7 +30,7 @@ test('both shipped hook fragments execute from nested directories, preserve feed
 });
 
 test('first-adoption CI selects only base scripts or a valid owner-pinned package and runs its gate', t => {
-  const workflow = get(templates, 'ci/pr-gate.yml'); assert.equal(get(repo, '.github/workflows/pr-gate.yml'), workflow);
+  const workflow = get(templates, 'ci/pr-gate.yml').replaceAll('\r\n', '\n'); assert.equal(get(repo, '.github/workflows/pr-gate.yml').replaceAll('\r\n', '\n'), workflow);
   const selection = workflow.match(/run: \|\n([\s\S]*?)      - name: Fetch owner-pinned bootstrap/)[1].split('\n').map(line => line.slice(10)).join('\n');
   const shell = process.platform === 'win32' ? resolve(git(repo, ['--exec-path']).stdout.trim(), '../../../bin/bash.exe') : 'bash';
   const cwd = fixture(t); const output = resolve(cwd, 'output').replaceAll('\\', '/');
