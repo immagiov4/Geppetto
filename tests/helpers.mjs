@@ -13,8 +13,8 @@ export function fixture(t) {
 }
 export function put(dir, path, text) { mkdirSync(dirname(resolve(dir, path)), { recursive: true }); writeFileSync(resolve(dir, path), typeof text === 'string' ? text : JSON.stringify(text)); }
 export const get = (dir, path) => readFileSync(resolve(dir, path), 'utf8');
-export function invoke(script, args = [], { cwd = repo, home = cwd, input = '' } = {}) {
-  return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home } });
+export function invoke(script, args = [], { cwd = repo, home = cwd, input = '', env = {} } = {}) {
+  return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } });
 }
 export function parallel(script, args, { cwd, home = cwd }) {
   return new Promise((resolveResult, reject) => {

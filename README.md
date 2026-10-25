@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/geppetto.png" width="220" alt="Geppetto, the old woodcarver, in pixel art">
+  <img src="assets/geppetto-transparent.png" width="220" alt="Geppetto, the old woodcarver, in pixel art">
 </p>
 
 <h1 align="center">Geppetto</h1>
@@ -76,7 +76,7 @@ At the end of a long turn, a deterministic hook asks the agent whether a difficu
 Memories live in one private Git repository of Markdown files, grouped into buckets: one per project, plus global topics such as working preferences. Each bucket has an index linking to its pages. Pages describe the current facts; Git history records how they changed. Agents with file and Git access can use the same repository across their development environments.
 
 <p align="center">
-  <img src="assets/readme/memory.png" width="880" alt="Memory is stored as Markdown in a Git repository. The startup hook supplies bucket descriptions and linked project indexes; the agent opens relevant pages.">
+  <img src="assets/readme/memory-flow.png" width="880" alt="Memory repository, project index loaded at startup, and relevant pages read when needed.">
 </p>
 
 The repository is configured once at user level in `~/.geppetto/config.json`; a project selects its linked buckets in its own configuration. At session start, the hook supplies the repository location, a one-line description of every bucket, and the full indexes of the selected buckets. It excludes the private bucket's index. The agent then follows index links to read relevant pages as the task develops.

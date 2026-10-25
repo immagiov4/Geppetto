@@ -44,5 +44,5 @@ test('CI event adapter rechecks edited PR bodies as inert stdin and rejects miss
   let r = invoke('pr-event.mjs', ['--event', 'event.json'], { cwd }); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Sections OK/);
   put(cwd, 'event.json', { action: 'edited', pull_request: { body: null } }); r = invoke('pr-event.mjs', ['--event', 'event.json'], { cwd }); assert.equal(r.status, 1); assert.match(r.stderr, /Missing section/);
   put(cwd, 'event.json', {}); assert.equal(invoke('pr-event.mjs', ['--event', 'event.json'], { cwd }).status, 1);
-  assert.equal(invoke('pr-event.mjs', [], { cwd }).status, 2);
+  assert.equal(invoke('pr-event.mjs', [], { cwd, env: { GITHUB_EVENT_PATH: '' } }).status, 2);
 });
