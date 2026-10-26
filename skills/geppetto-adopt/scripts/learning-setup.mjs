@@ -1,6 +1,7 @@
 import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { atomicJson, cli, defaultConfig, isMain, jsonFile, parseArgs, UsageError } from './common.mjs';
+import { fileURLToPath } from 'node:url';
+import { atomicJson, cli, defaultConfig, isMain, jsonFile, parseArgs, run, UsageError, userHome } from './common.mjs';
 import { learningPolicy, probeLearningHost } from './learning-config.mjs';
 
 /** Call --accept only for the owner's accepted adoption answer, never for inferred consent. */
@@ -15,11 +16,13 @@ export async function adoptLearning(root, { accepted = false, ...options } = {})
   let grants = '';
   try { grants = await readFile(path, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const prior = grants.split(/\r?\n/).find(line => /^\[signal-learning\]/.test(line));
-  if (prior && !prior.includes(`provider=${probe.host} `)) throw new Error('Existing learning grant uses another provider; reconcile the adoption answer explicitly');
   if (!prior) {
     await mkdir(resolve(root, '.geppetto'), { recursive: true });
     await appendFile(path, `${grants && !grants.endsWith('\n') ? '\n' : ''}[signal-learning] provider=${probe.host} budget_usd=0 per=1d scope="project signals; file tools; isolated local branches; stage or commit; no publication" expires=never\n`, { mode: 0o600 });
   }
+  const home = options.home ?? userHome();
+  const consent = run(process.execPath, [fileURLToPath(new URL('./authz.mjs', import.meta.url)), 'check', 'signal-learning', '--cost', '0', '--provider', probe.host], { cwd: root, env: { ...process.env, HOME: home, USERPROFILE: home } });
+  if (consent.status !== 0) return { enabled: false, action: 'Renew or reconcile the standing signal-learning authorization, then rerun adoption.' };
   config.hooks ??= {};
   config.hooks.signalLearning = { ...policy, enabled: true, host: probe.host, provider: probe.host === 'codex' ? 'openai' : 'anthropic', boundary: policy.boundary ?? defaultConfig().hooks.signalLearning.boundary, billing: 'subscription' };
   for (const key of ['assessmentMaxUsd', 'investigationMaxUsd']) if (config.hooks.signalLearning[key] === null) delete config.hooks.signalLearning[key];

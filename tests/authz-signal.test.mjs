@@ -1,5 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+
+test('unlimited paid reservations require standing grants even with task consent', t => {
+  const root = fixture(t), home = fixture(t);
+  const result = invoke('authz.mjs', ['reserve', 'memory-classifier', '--provider', 'openrouter', '--cost', 'none', '--id', 'unbounded-task', '--task-grant', 'Approved comparison'], { cwd: root, home });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout, /standing|unlimited/i);
+});
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, get, invoke, parallel, git } from './helpers.mjs';

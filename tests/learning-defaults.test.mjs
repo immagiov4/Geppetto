@@ -9,7 +9,8 @@ import { learningStep, ledgerAuthority } from '../skills/geppetto-adopt/scripts/
 import { spawnSync } from 'node:child_process';
 import { learningFileTool } from '../skills/geppetto-adopt/scripts/learning-files.mjs';
 import { symlinkSync } from 'node:fs';
-import { probeLearningHost } from '../skills/geppetto-adopt/scripts/learning-config.mjs';
+import { probeLearningHost, learningReadiness } from '../skills/geppetto-adopt/scripts/learning-config.mjs';
+import { learningWorktree, finishLearningWorktree } from '../skills/geppetto-adopt/scripts/learning-worktree.mjs';
 
 function nativeFixture(root) {
   put(root, 'native.mjs', `import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
@@ -27,9 +28,9 @@ for(const e of [{type:'thread.started',thread_id:'native-'+Date.now()},{type:'it
 
 test('fresh accepted adoption records subscription consent once and next signal event launches exactly once', async t => {
   const root = fixture(t), home = fixture(t); nativeFixture(root);
-  const result = await adoptLearning(root, { accepted: true });
+  const result = await adoptLearning(root, { accepted: true, home });
   assert.equal(result.enabled, true);
-  await adoptLearning(root, { accepted: true });
+  await adoptLearning(root, { accepted: true, home });
   assert.equal(get(root, '.geppetto/authorizations').trim().split('\n').length, 1);
   const policy = JSON.parse(get(root, '.geppetto/config.json')).hooks.signalLearning;
   assert.equal(policy.enabled, true); assert.equal(policy.hosts.codex.model, 'gpt-6.1-sol'); assert.equal(policy.hosts.codex.serviceTier, 'default');
@@ -54,6 +55,15 @@ test('missing CLI stays disabled with one actionable adoption item and no grant'
   assert.equal(invoke('authz.mjs', ['check', 'signal-learning', '--cost', '0', '--provider', 'codex'], { cwd: root }).status, 1);
 });
 
+test('accepted adoption keeps an expired standing grant pending for renewal', async t => {
+  const root = fixture(t), home = fixture(t); nativeFixture(root);
+  put(root, '.geppetto/authorizations', '[signal-learning] provider=codex budget_usd=0 per=1d scope="project signals" expires=2000-01-01\n');
+  const result = await adoptLearning(root, { accepted: true, home });
+  assert.equal(result.enabled, false);
+  assert.match(result.action, /renew|reconcile/i);
+  assert.equal(JSON.parse(get(root, '.geppetto/config.json')).pillars.signalLearning, undefined);
+});
+
 test('accepted adoption enables a shipped disabled policy while a recorded refusal remains declined', async t => {
   for (const declined of [false, true]) {
     const root = fixture(t); nativeFixture(root);
@@ -61,7 +71,7 @@ test('accepted adoption enables a shipped disabled policy while a recorded refus
     config.hooks.signalLearning.enabled = false;
     if (declined) config.pillars.signalLearning = 'declined';
     put(root, '.geppetto/config.json', config);
-    const result = await adoptLearning(root, { accepted: true });
+    const result = await adoptLearning(root, { accepted: true, home: fixture(t) });
     assert.equal(result.enabled, !declined);
     assert.equal(JSON.parse(get(root, '.geppetto/config.json')).hooks.signalLearning.enabled, !declined);
   }
@@ -124,7 +134,7 @@ for (const writeApproval of [false, true]) test(`one reusable correction produce
   git(root, ['add', 'docs/lesson.md']); assert.equal(git(root, ['commit', '-qm', 'fixture baseline']).status, 0);
   const initial = git(root, ['rev-parse', 'HEAD']).stdout.trim();
   const config = JSON.parse(get(root, '.geppetto/config.json')); config.hooks.signalLearning.writeApproval = writeApproval; put(root, '.geppetto/config.json', config);
-  await adoptLearning(root, { accepted: true });
+  await adoptLearning(root, { accepted: true, home });
   invoke('signal.mjs', ['Reusable user correction', '--metric', 'reliability', '--episode', 'fixture-turn', '--source', 'fixture:correction'], { cwd: root, home });
   const runCommand = (exe, args, opts) => spawnSync(exe, args, { ...opts, windowsHide: true, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } });
   await handleLearningHostEvent({ hook_event_name: 'Stop', cwd: root }, 'codex', { authorize: ledgerAuthority(root, runCommand) });
@@ -136,6 +146,35 @@ for (const writeApproval of [false, true]) test(`one reusable correction produce
   assert.equal(get(root, 'docs/lesson.md'), 'Original lesson\n'); assert.equal(git(root, ['rev-parse', 'HEAD']).stdout.trim(), initial);
   assert.equal(git(proposal.path, ['diff', '--cached', '--name-only']).stdout.trim(), writeApproval ? 'docs/lesson.md' : '');
   assert.equal(git(proposal.path, ['rev-parse', 'HEAD']).stdout.trim() === initial, writeApproval);
+  const nativeCalls = get(root, 'calls.jsonl').trim().split('\n').map(JSON.parse);
+  for (const call of nativeCalls) assert.equal(call.args[call.args.indexOf('--sandbox') + 1], 'read-only');
+  assert.ok(nativeCalls.some(call => call.args.some(arg => arg.includes('default_tools_approval_mode="approve"'))));
+});
+
+test('finalization accounts for ignored output before retaining a learning result', async t => {
+  const root = fixture(t); put(root, '.gitignore', 'ignored/\n');
+  git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']); git(root, ['config', 'user.email', 'fixture@example.invalid']);
+  git(root, ['add', '.gitignore']); assert.equal(git(root, ['commit', '-qm', 'baseline']).status, 0);
+  const worktree = await learningWorktree(root, 'ignored-output');
+  const baseline = git(worktree.path, ['rev-parse', 'HEAD']).stdout.trim();
+  put(worktree.path, 'ignored/lesson.md', 'Retained improvement');
+  await assert.rejects(finishLearningWorktree(worktree, false), /ignored/i);
+  assert.equal(git(worktree.path, ['rev-parse', 'HEAD']).stdout.trim(), baseline);
+});
+
+test('API learning readiness reports the same missing host controls as launch', async t => {
+  for (const missing of ['boundary', 'provider', 'budgetControl', 'executable', null]) {
+    const root = fixture(t), home = fixture(t);
+    const configured = { executable: process.execPath, boundary: 'project-file-tools', provider: 'openrouter', budgetControl: 'fixture:limit' };
+    if (missing === 'executable') configured.executable = resolve(root, 'missing-native.exe');
+    else if (missing) delete configured[missing];
+    put(root, '.geppetto/config.json', { ...defaultConfig(), hooks: { signalLearning: { enabled: true, billing: 'api', host: 'codex', provider: 'openrouter', boundary: 'project-file-tools', assessmentMaxUsd: '1', investigationMaxUsd: '1', hosts: { codex: configured } } } });
+    const grants = ['assessment', 'investigation'].map(phase => `[signal-${phase}] provider=openrouter budget_usd=2 per=1d scope="project" expires=never`).join('\n') + '\n';
+    for (const owner of [root, home]) put(owner, '.geppetto/authorizations', grants);
+    const result = await learningReadiness(root, { home, env: { OPENROUTER_API_KEY: 'synthetic' } });
+    assert.equal(result.enabled, missing === null);
+    if (missing) assert.match(result.action, missing === 'executable' ? /install|executable|unavailable/i : /boundary|provider|budget/i);
+  }
 });
 
 test('file tools can improve project owners while rejecting secrets, grants, private paths, escapes and junctions', async t => {

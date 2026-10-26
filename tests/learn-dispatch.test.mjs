@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, put, get, invoke } from './helpers.mjs';
-import { learningStep, learningStatus } from '../skills/geppetto-adopt/scripts/learn-dispatch.mjs';
+import { learningStep, learningStatus, ledgerAuthority } from '../skills/geppetto-adopt/scripts/learn-dispatch.mjs';
 
 const policy = { enabled: true, provider: 'synthetic', assessmentMaxUsd: '0', investigationMaxUsd: '0', boundary: 'fixture-only', scope: 'project' };
 function signals(root, more = []) {
@@ -18,6 +18,28 @@ function hostFor(records, extra = {}) {
   return { name: 'synthetic', calls, async submit(request, ack) { calls.push(request); await ack({ runId: `run-${calls.length}` }); return { ready: true, runId: `run-${calls.length}`, costUsd: '0', payload: request.phase === 'assessment' ? judgment(records) : { disposition: 'keep', owner: 'fixture/launcher', rationale: 'Measured improvement', evidence: ['test:baseline', 'test:treatment', 'test:verify'], limitations: ['synthetic only'] } }; }, ...extra };
 }
 const allow = async () => ({ decision: 'allow', reference: 'synthetic task grant' });
+
+for (const overrun of [false, true]) test(`paid finalization ${overrun ? 'waits for overrun reconciliation' : 'does not reserve the settled cost again'}`, async t => {
+  const root = fixture(t), home = fixture(t); const records = signals(root);
+  const grants = `[signal-assessment] provider=synthetic budget_usd=0 per=1d scope="project" expires=never\n[signal-investigation] provider=synthetic budget_usd=${overrun ? 3 : 1} per=1d scope="project" expires=never\n`;
+  for (const owner of [root, home]) put(owner, '.geppetto/authorizations', grants);
+  let finalized = 0;
+  const host = hostFor(records, {
+    async submit(request, ack) {
+      this.calls.push(request); const runId = `paid-${this.calls.length}`; await ack({ runId });
+      return { ready: true, runId, costUsd: request.phase === 'assessment' ? '0' : overrun ? '1.5' : '1',
+        payload: request.phase === 'assessment' ? judgment(records) : { disposition: 'keep', owner: 'docs/lesson.md', rationale: 'Verified correction', evidence: ['test:verified'], limitations: [] },
+        ...(request.phase === 'investigation' ? { proposal: { status: 'pending-review', path: 'synthetic-worktree' } } : {}) };
+    },
+    async finalize(proposal) { finalized++; return { ...proposal, status: 'committed' }; },
+  });
+  const authorize = ledgerAuthority(root, (_executable, args) => invoke('authz.mjs', args.slice(1), { cwd: root, home }));
+  await learningStep(root, { policy: { ...policy, billing: 'api', investigationMaxUsd: '1' }, host, authorize });
+  const state = await learningStatus(root);
+  assert.equal(finalized, overrun ? 0 : 1);
+  assert.equal(state.status, overrun ? 'pending' : 'keep');
+  if (overrun) assert.equal(state.attempts[1].proposal.status, 'pending-review');
+});
 
 test('recorder stays append-only and learning without an available authorized host remains inspectably pending', async t => {
   const root = fixture(t);

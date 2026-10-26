@@ -220,10 +220,11 @@ export async function learningStep(root, { host, policy, authorize, taskGrant } 
     // Finalize previously acknowledged asynchronous work before considering new evidence.
     const prior = state.attempts.filter(a => a.phase === 'investigation' && a.cluster === cluster.id && a.status !== 'retired');
     const applyOutcome = async attempt => {
+      if (accountingHeld()) return 'Actual cost is unknown, unsettled or exceeds the authorized maximum; reconcile before finalizing local changes';
       if (!validOutcome(attempt.result)) return 'Investigation result is invalid; evidence, owner and limitations are required';
       if (attempt.proposal?.status === 'pending-review') {
         const subscription = attempt.billing === 'subscription';
-        const consent = await authorize({ command: 'check', capability: subscription ? 'signal-learning' : 'signal-investigation', provider: subscription ? host.name : policy.provider, maximum: attempt.maximumUsd, taskGrant });
+        const consent = await authorize({ command: 'check', capability: subscription ? 'signal-learning' : 'signal-investigation', provider: subscription ? host.name : policy.provider, maximum: '0', taskGrant });
         if (consent.decision !== 'allow') return `Authorization local changes: ${consent.reference}`;
         try { attempt.proposal = await host.finalize(attempt.proposal, policy.writeApproval === true || attempt.result.disposition !== 'keep'); }
         catch (error) { return error.message; }

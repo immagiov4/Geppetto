@@ -1,9 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync } from 'node:fs';
-import { delimiter, resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { probeLearningHost, subscriptionEnvironment } from './learning-config.mjs';
+import { probeLearningHost, subscriptionEnvironment, learningHostControlGap, learningCommand } from './learning-config.mjs';
 import { learningWorktree, finishLearningWorktree } from './learning-worktree.mjs';
 import { learningFileTools } from './common.mjs';
 
@@ -14,15 +12,14 @@ export function cliLearningHost(name, { executable = name, prefix = [], model, s
   if (!['read-only', 'workspace-write'].includes(sandbox)) throw new Error('Learning cannot bypass the host sandbox');
   if (!Array.isArray(tools) || tools.some(tool => !learningFileTools.includes(tool))) throw new Error('Learning tools must be explicitly narrowed; no shell or delegation');
   return { name, async preflight(policy, root) {
-    if (!boundary || boundary !== policy.boundary) return 'Host privacy/write boundary is unconfirmed';
-    if (!provider || provider !== policy.provider) return 'Host provider routing has not been confirmed against the grant';
+    const gap = learningHostControlGap(policy, { boundary, provider, budgetControl, billing });
+    if (gap) return gap;
     if (provider === 'openrouter' && !process.env.OPENROUTER_API_KEY) return 'Add OPENROUTER_API_KEY to the learning hook launcher through its secret store';
     if (billing === 'subscription') {
       const probe = await probeLearningHost({ ...policy, host: name, hosts: { [name]: { executable, prefix } } }, { cwd: root });
       if (!probe.available) return probe.action;
-    } else if ((policy.assessmentMaxUsd !== undefined || policy.investigationMaxUsd !== undefined) && !budgetControl) return 'Native host budget enforcement has not been verified against the maximum';
-    const paths = isAbsolute(executable) ? [executable] : (process.env.PATH ?? '').split(delimiter).flatMap(dir => [resolve(dir, executable), resolve(dir, `${executable}.exe`)]);
-    if (!paths.some(existsSync)) return 'Native host executable is unavailable; no reservation or launch made';
+    }
+    if (!learningCommand(name, { executable, prefix })) return 'Native host executable is unavailable; no reservation or launch made';
     return null;
   }, async submit(request, onAck) {
     if (!boundary || request.boundary !== boundary) throw new Error('Host privacy/write boundary has not been confirmed');
@@ -36,11 +33,11 @@ export function cliLearningHost(name, { executable = name, prefix = [], model, s
       ...(subscription ? ['--ignore-user-config', '--config', 'forced_login_method="chatgpt"'] : []), '--config', 'approval_policy="never"',
       ...['shell_tool', 'multi_agent', 'multi_agent_v2', 'apps', 'plugins', 'browser_use', 'computer_use', 'image_generation', 'memories', 'code_mode', 'code_mode_only', 'skill_mcp_dependency_install'].flatMap(feature => ['--config', `features.${feature}=false`]),
       '--config', 'web_search="disabled"', ...(serviceTier ? ['--config', `service_tier=${JSON.stringify(serviceTier)}`] : []),
-      '--config', `mcp_servers=${!fileTools.length ? '{}' : `{geppetto_files={command=${JSON.stringify(server.command)},args=${JSON.stringify(server.args)},enabled_tools=${JSON.stringify(fileTools)}}}`}`,
+      '--config', `mcp_servers=${!fileTools.length ? '{}' : `{geppetto_files={command=${JSON.stringify(server.command)},args=${JSON.stringify(server.args)},enabled_tools=${JSON.stringify(fileTools)},default_tools_approval_mode="approve"}}`}`,
     ];
     const claudeTools = ['--strict-mcp-config', '--mcp-config', JSON.stringify({ mcpServers: fileTools.length ? { geppetto_files: server } : {} }), '--tools', '', ...(fileTools.length ? ['--allowedTools', ...fileTools.map(tool => `mcp__geppetto_files__${tool}`)] : ['--disallowedTools', 'mcp__*'])];
     const args = name === 'codex'
-      ? ['exec', '--json', ...codexConfig, ...(request.provider ? ['--config', `model_provider=${JSON.stringify(request.provider)}`] : []), '--sandbox', effectiveSandbox, ...(model ? ['--model', model] : []), '-']
+      ? ['exec', '--json', ...codexConfig, ...(request.provider ? ['--config', `model_provider=${JSON.stringify(request.provider)}`] : []), '--sandbox', 'read-only', ...(model ? ['--model', model] : []), '-']
       : ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'dontAsk', ...(subscription ? ['--setting-sources', ''] : []), ...claudeTools, ...(!subscription && request.maximumUsd != null ? ['--max-budget-usd', request.maximumUsd] : []), ...(model ? ['--model', model] : [])];
     const child = spawnProcess(executable, [...prefix, ...args], { cwd: workingRoot, windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'], env: { ...(subscription ? subscriptionEnvironment() : process.env), GEPPETTO_LEARNING_CHILD: '1' } });
     let processError;

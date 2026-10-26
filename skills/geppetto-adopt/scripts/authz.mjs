@@ -84,6 +84,7 @@ function decide(capability, cost, user, project, runs, projectPath, taskGrant, r
   if (!personal.length && !taskGrant && !subscription) return ['ask', 'No personal grant; ask the owner for a standing authorization or use explicit task-scoped consent'];
   const local = project.filter(g => g.capability === capability);
   if (!local.length && !taskGrant) return ['deny', 'Project does not grant this capability'];
+  if (cost === null && (!personal.length || !local.length)) return ['deny', 'Unlimited paid requests require personal and project standing grants'];
   const now = Date.now();
   for (const grant of [...personal, ...local]) {
     if (grant.expires !== 'never' && now >= Date.parse(grant.expires) + DAY_MS) return ['deny', `${grant.file}:${grant.line}: Grant expired`];

@@ -18,6 +18,8 @@ export async function learningWorktree(root, id) {
 }
 
 export async function finishLearningWorktree(worktree, writeApproval) {
+  const ignored = git(worktree.path, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z']).split('\0').filter(Boolean);
+  if (ignored.length) throw new Error('Learning output is ignored by Git; reconcile retention before finalizing');
   const paths = git(worktree.path, ['ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
   for (const path of new Set(paths)) {
     await learningFilePath(worktree.path, path);
