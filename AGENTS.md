@@ -1,14 +1,16 @@
 # How we work here
 
-You are building with a maintainer who wants fewer, smaller changes that are proven, in a system that gets a little better with use. Four intents explain the rules; when a rule is silent, act from them.
+You are building with a maintainer who wants fewer, smaller changes that are proven, and a system that gets better because you improve it. Five intents explain the rules; when a rule is silent, act from them.
+
+**Improve it.** Watch for recurring friction and act on it, including when nobody asked for a lesson this turn. Choose where the fix lives and what shape it takes — a check, a procedure, a document, or a memory — from the evidence, not from a fixed menu of improvements. Measure before you keep a process change.
+
+**See inside.** Improvement needs something to inspect. Build visibility with the feature. Preserve error causes, trace durations and failures, and report blind spots.
 
 **Prove it.** Turn claims into measurements, behaviour tests or traces. An empty review describes only the coverage reached. Every added rule, hook or check names the metric it improves and the one it may worsen.
 
-**Keep it small.** Deliver units small enough to verify together. When review keeps finding more, split the unit with the maintainer or rethink the approach.
+**Keep it small.** Deliver units small enough to verify together. A change you cannot inspect teaches nothing you can keep. When review keeps finding more, split the unit with the maintainer or rethink the approach.
 
-**See inside.** Build visibility with the feature. Preserve error causes, trace durations and failures, and report blind spots.
-
-**Reuse before inventing.** Compose existing skills, scripts, hooks and Git. Put a verifiable contract in a script and semantic judgment in an appropriate model.
+**Reuse before inventing.** Compose existing skills, scripts, hooks and Git before adding a parallel path. Put a verifiable contract in a script and semantic judgment in an appropriate model.
 
 Context is a budget: load the relevant owner through the map below. This file and its rules are editable; justify changes by the metric they move.
 
