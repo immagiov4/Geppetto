@@ -1,0 +1,12 @@
+# Installed skill copies and local ownership/state
+.agents/skills/
+.claude/skills/
+.geppetto/install.json
+.geppetto/install.json.lock
+.geppetto/hook-state/
+.geppetto/hook-events.jsonl
+.geppetto/signals.jsonl
+.geppetto/ledger.jsonl
+.geppetto/ledger.jsonl.lock
+
+.geppetto/local/

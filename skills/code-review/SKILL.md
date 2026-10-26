@@ -43,7 +43,7 @@ The script selects `gpt-6.1-sol` with `-m`, sets `review_model` in the same proc
 
 The process runs two searches in distinct sessions: contract and correctness; flows, regressions and security. The second receives the same material as the first. A third session retraces every candidate and returns `accept`, `reject` or `unverified`, with evidence and deduplication. Even with no candidates, retain reading limitations. The three calls run serially, and each output directory retains responses, events, usage, actual model, duration and fingerprints.
 
-Check each candidate using [receiving-pr-reviews](../receiving-pr-reviews/SKILL.md): authoritative requirement, supported path, material consequence and evidence in the change. Reviewer agreement is a clue; code and observations support the decision. A contract ambiguity requires a maintainer decision. The review brief keeps sources read-only.
+Check each candidate using [receive-work-feedback](../receive-work-feedback/SKILL.md): authoritative requirement, supported path, material consequence and evidence in the change. Reviewer agreement is a clue; code and observations support the decision. A contract ambiguity requires a maintainer decision. The review brief keeps sources read-only.
 
 To confirm behaviour, run a lightweight reproduction in another copy and compare with the base. Coordinate expensive checks with the repository's gate owner. Distinguish static analysis, executed reproduction and visual verification. When proof remains open, keep the candidate with its limitation.
 

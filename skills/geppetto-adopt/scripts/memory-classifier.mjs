@@ -3,9 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { jsonFile, userHome, run } from './common.mjs';
 import { memorySettings } from './memory-config.mjs';
-import { memoryCatalog, memoryIndex } from './memory-index.mjs';
+import { memoryCatalog } from './memory-index.mjs';
+import { candidateClassifier, traverseMemory } from './memory-traversal.mjs';
 import { logHookEvent } from './hook-events.mjs';
-import { openRouterClassify } from './memory-provider.mjs';
+import { openRouterClassify, classificationPayload } from './memory-provider.mjs';
 import { redact } from './signal.mjs';
 
 function validateSettings(settings) {
@@ -13,6 +14,7 @@ function validateSettings(settings) {
   for (const field of ['bucketThreshold', 'pageThreshold']) if (!Number.isFinite(settings[field]) || settings[field] < 0 || settings[field] > 1) throw new Error(`memoryClassifier.${field} must be between 0 and 1`);
   for (const field of ['timeoutMs', 'maxOutputTokens']) if (!Number.isSafeInteger(settings[field]) || settings[field] <= 0) throw new Error(`memoryClassifier.${field} must be a positive integer`);
   if (!Number.isFinite(settings.maxCostUsd) || settings.maxCostUsd < 0 || !/^\d+(?:\.\d{1,6})?$/.test(String(settings.maxCostUsd))) throw new Error('memoryClassifier.maxCostUsd must bound this run in USD (at most six decimals)');
+  for (const field of ['maxRequestBytes', 'maxConcurrentRequests']) if (settings[field] !== undefined && (!Number.isSafeInteger(settings[field]) || settings[field] <= 0)) throw new Error(`memoryClassifier.${field} must be a positive integer`);
   if (['key', 'apiKey', 'api_key', 'secret'].some(field => field in settings)) throw new Error('Memory classifier credentials belong in the environment or secret store, outside config');
 }
 
@@ -26,21 +28,6 @@ function selections(result, candidates, threshold) {
   return result.selections.filter(entry => entry.score >= threshold);
 }
 
-function indexedPages(text, bucket) {
-  const pages = new Map();
-  for (const line of text.split(/\r?\n/)) for (const link of line.matchAll(/\[([^\]]+)\]\(([^\s)]+)\)/g)) {
-    let target;
-    try { target = decodeURIComponent(link[2].split('#')[0]); } catch { continue; }
-    target = target.replace(/^\.\//, '');
-    const prefix = `buckets/${bucket}/`;
-    if (target.startsWith(prefix)) target = target.slice(prefix.length);
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9._/-]*\.md$/.test(target) || target.split('/').some(segment => segment === '..' || segment === '.') || target === 'index.md' || target.startsWith('buckets/')) continue;
-    const id = `${prefix}${target}`;
-    pages.set(id, { id, description: line.replace(link[0], link[1]).trim() });
-  }
-  return [...pages.values()];
-}
-
 function ledgerAuthorization(project, home) {
   const command = args => {
     const result = run(process.execPath, [fileURLToPath(new URL('./authz.mjs', import.meta.url)), ...args], { cwd: project, env: { ...process.env, HOME: home, USERPROFILE: home } });
@@ -51,14 +38,16 @@ function ledgerAuthorization(project, home) {
 
 async function withDeadline(action, milliseconds) {
   const controller = new AbortController(); let timer;
+  const deadlineAt = performance.now() + milliseconds;
   const deadline = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('Memory classifier timed out')); }, milliseconds); });
-  try { return await Promise.race([action(controller.signal), deadline]); }
+  try { return await Promise.race([action(controller.signal, deadlineAt), deadline]); }
+  catch (error) { controller.abort(); throw error; }
   finally { clearTimeout(timer); }
 }
 
-/** Two deterministic candidate boundaries surround optional provider classification. */
+/** Authorize one bounded traversal; providers see only validated indexed candidates. */
 export async function classifyMemory(event, { project, home = userHome(), provider = openRouterClassify, authorization = ledgerAuthorization(project, home), env = process.env } = {}) {
-  let modelCalls = 0; let costUsd = 0; let costKnown = true; let text = ''; let runId; let reserved = false; let status = 'ok'; let error;
+  let modelCalls = 0; let costUsd = 0; let unknownCosts = 0; let text = ''; let runId; let reserved = false; let status = 'ok'; let error;
   const started = Date.now();
   try {
     const user = await jsonFile(resolve(home, '.geppetto/config.json'), {}); const local = await jsonFile(resolve(project, '.geppetto/config.json'), {});
@@ -78,25 +67,23 @@ export async function classifyMemory(event, { project, home = userHome(), provid
     const request = async (stage, choices, signal) => {
       if (signal.aborted) throw new Error('Memory classifier timed out');
       modelCalls++;
-      const priorCostsKnown = costKnown; costKnown = false;
+      unknownCosts++;
       const result = await provider({ stage, model: settings.model, prompt: event.prompt, candidates: choices, apiKey: env.OPENROUTER_API_KEY, signal, maxOutputTokens: settings.maxOutputTokens });
+      if (typeof result.costUsd === 'number' && Number.isFinite(result.costUsd) && result.costUsd >= 0) { costUsd += result.costUsd; unknownCosts--; }
       if (signal.aborted) throw new Error('Memory classifier timed out');
-      if (typeof result.costUsd === 'number' && Number.isFinite(result.costUsd) && result.costUsd >= 0) { costUsd += result.costUsd; costKnown = priorCostsKnown; }
       return selections(result, choices, stage === 'buckets' ? settings.bucketThreshold : settings.pageThreshold);
     };
-    await withDeadline(async signal => {
-      const selected = new Set((await request('buckets', candidates, signal)).map(entry => entry.id));
-      const pages = [];
-      for (const bucket of candidates.filter(candidate => selected.has(candidate.id))) pages.push(...indexedPages(await memoryIndex(memory, bucket.id), bucket.id));
-      if (!pages.length || signal.aborted) return;
-      const chosen = await request('pages', pages, signal);
-      if (chosen.length) text = `You may want to check out:\n${chosen.sort((a, b) => a.id.localeCompare(b.id, 'en')).map(entry => `- ${entry.id} — ${redact(entry.reason).replace(/\s+/g, ' ').trim()}`).join('\n')}`;
+    await withDeadline(async (signal, deadlineAt) => {
+      const classify = candidateClassifier({ request, signal, deadlineAt, maxRequestBytes: settings.maxRequestBytes, maxConcurrentRequests: settings.maxConcurrentRequests, requestBytes: (stage, candidates) => Buffer.byteLength(JSON.stringify(classificationPayload({ stage, candidates, model: settings.model, prompt: event.prompt, maxOutputTokens: settings.maxOutputTokens }))) });
+      const selected = await classify('buckets', candidates);
+      const chosen = await traverseMemory({ memory, buckets: selected.map(entry => entry.id), classify, signal });
+      if (chosen.length) text = `You may want to check out:\n${chosen.map(entry => `- ${entry.id} — ${redact(entry.reason).replace(/\s+/g, ' ').trim()}`).join('\n')}`;
     }, settings.timeoutMs);
   } catch (failure) { text = ''; status = 'error'; error = redact(failure.message).replace(/\s+/g, ' '); }
-  if (reserved && costKnown) {
+  if (reserved && unknownCosts === 0) {
     try { await authorization.settle(runId, costUsd); }
     catch (failure) { text = ''; status = 'error'; error = redact(failure.message).replace(/\s+/g, ' '); }
   }
-  await logHookEvent(project, { hook: 'memoryClassifier', event: 'UserPromptSubmit', status, modelCalls, costUsd: costKnown ? costUsd : null, reservationId: reserved ? runId : undefined, injectedBytes: Buffer.byteLength(text), durationMs: Date.now() - started, ...(error ? { error } : {}) });
+  await logHookEvent(project, { hook: 'memoryClassifier', event: 'UserPromptSubmit', status, modelCalls, costUsd: unknownCosts === 0 ? costUsd : null, reservationId: reserved ? runId : undefined, injectedBytes: Buffer.byteLength(text), durationMs: Date.now() - started, ...(error ? { error } : {}) });
   return text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
 }

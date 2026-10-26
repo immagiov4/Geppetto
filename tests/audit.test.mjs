@@ -58,3 +58,12 @@ test('memory audit recognizes a repository configured through a directory alias'
   const r = invoke('audit.mjs', ['--json'], { cwd, home }); assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout).memory.clone, 'present');
 });
+
+
+test('memory audit accepts the same HTTPS repository with an optional .git suffix', t => {
+  const cwd = fixture(t); const home = fixture(t); const memory = fixture(t);
+  git(memory, ['init', '-q']); git(memory, ['remote', 'add', 'origin', 'https://example.com/memory.git']);
+  put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.com/memory', localPath: memory } });
+  const r = invoke('audit.mjs', ['--json'], { cwd, home }); assert.equal(r.status, 0, r.stderr);
+  assert.equal(JSON.parse(r.stdout).memory.remote.matchesConfigured, true);
+});

@@ -6,6 +6,7 @@ import { hostLintReport } from './host-lint.mjs';
 import { memorySettings } from './memory-config.mjs';
 
 const status = value => value ? 'present' : 'absent';
+const repositoryIdentity = value => /^https?:\/\//.test(value) ? value.replace(/\.git$/, '') : value;
 async function directory(path) { try { return (await stat(path)).isDirectory(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 async function file(path) { try { return (await stat(path)).isFile(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 async function entries(path) { return await directory(path) ? (await readdir(path)).sort() : []; }
@@ -34,7 +35,7 @@ async function memoryReport(project) {
   const push = selected ? run('git', ['remote', 'get-url', '--push', '--all', selected], { cwd: localPath }) : null;
   const urls = url?.status === 0 ? url.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
   const pushUrls = push?.status === 0 ? push.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
-  const matchesConfigured = Boolean(merged.repo && urls.length && pushUrls.length && [...urls, ...pushUrls].every(value => value === merged.repo));
+  const matchesConfigured = Boolean(merged.repo && urls.length && pushUrls.length && [...urls, ...pushUrls].every(value => repositoryIdentity(value) === repositoryIdentity(merged.repo)));
   return { status: 'configured', ...merged, localPath, clone: status(cloneExists), rootIndex: { path: rootIndex, status: status(rootIndex && await file(rootIndex)) }, projectBucketIndex: { path: bucketIndex, status: status(bucketIndex && await file(bucketIndex)) }, bucketIndexes, remote: { status: remote ? remote.status === 0 ? status(Boolean(remote.stdout.trim())) : 'unverifiable' : 'absent', names, selected, urls, pushUrls, matchesConfigured } };
 }
 

@@ -3,7 +3,7 @@
 Offer each hook separately in two lines: what it does and why it may help. Keep a recorded decline across adoption reruns.
 
 - **Bridge/System 1:** Suggests relevant skills for each request. Measure whether it reduces missed procedures without excessive noise or context.
-- **Memory classifier (`hooks.memoryClassifier`):** With an OpenRouter key, a per-message two-stage classifier suggests relevant pages as “You may want to check out: buckets/<b>/<page>.md — reason”. Measure retrieval value, privacy boundaries, noise and added context; the agent opens and judges pages itself.
+- **Memory classifier (`hooks.memoryClassifier`):** With an OpenRouter key, a per-message recursive classifier suggests relevant pages as “You may want to check out: buckets/<b>/<page>.md — reason”. Measure retrieval value, privacy boundaries, noise and added context; the agent opens and judges pages itself.
 - **Requirements screen:** Ranks candidate source files before requirements discovery. Measure additional missed-path discovery; source reading and caller tracing still decide relevance.
 
 All semantic hooks start disabled; record the owner’s decision according to [project choices](choices.md). The memory classifier starts with `hooks.memoryClassifier.enabled: false`; the deterministic session-start bucket listing and linked-index injection work without a key or classifier. After interest, request the OpenRouter key through the harness's private secret mechanism; use another provider only where the chosen hook supports it. Keep the key out of chat, configuration committed to Git, signals and reports. If private secret entry is unavailable, report that prerequisite and keep the hook disabled.

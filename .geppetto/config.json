@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "docs": {
+    "root": "docs",
+    "style": "project",
+    "referenceRepo": null
+  },
+  "sections": {
+    "pr": [
+      "Observability"
+    ],
+    "featureDocs": [
+      "Observability"
+    ],
+    "optional": [
+      "Verification"
+    ]
+  },
+  "review": {
+    "engine": "code-review"
+  },
+  "unitCoverage": "behaviour",
+  "packs": [],
+  "pillars": {
+    "review": "installed",
+    "gates": "installed"
+  },
+  "hooks": {
+    "learnNudge": {
+      "enabled": true,
+      "benchmark": null
+    },
+    "memoryClassifier": {
+      "enabled": false,
+      "benchmark": null
+    }
+  },
+  "memory": {
+    "buckets": [
+      "geppetto"
+    ]
+  },
+  "hostChecks": {
+    "changed": [
+      "node",
+      "scripts/check-skills.mjs"
+    ]
+  }
+}

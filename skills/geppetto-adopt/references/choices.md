@@ -6,7 +6,7 @@ Reuse current configuration before asking questions. Present defaults as proposa
 | --- | --- |
 | Documentation location/style | Existing owner and style; when absent, `docs/` with concise feature pages. Offer a reference repository if the maintainer wants examples. Infer structure, tone and update rules from authorized material. |
 | Existing development system | Preserve it and map equivalent pillars. |
-| Review engine | Bundled `code-review` plus `receiving-pr-reviews`; retain both unless the user chooses a replacement. |
+| Review engine | Bundled `code-review` plus `receive-work-feedback`; retain both unless the user chooses a replacement. |
 | CI provider / ticket gate transition | Existing provider. With no ticket engine, record the transition `n/a`; PR merge remains the enforcement boundary. With an engine, agree its blocking step. |
 | Observability format | Per-feature declaration and PR/ticket `## Observability`; template fields are editable. |
 | Significant test documentation | Adjacent to tests; opt into per-feature `## Verification`. |
@@ -20,7 +20,7 @@ Reuse current configuration before asking questions. Present defaults as proposa
 | Periodic skill curation | Explain how the pass reviews skill overlap and stale instructions; ask whether to schedule it. |
 | Periodic memory maintenance | Explain that the pass deduplicates facts, reconciles contradictions, removes obsolete material and repairs indexes; ask: “Would you like periodic memory maintenance enabled?” After acceptance, use the [job procedure](../../geppetto-learn/references/jobs.md) to agree on cadence, buckets, permitted writes and publication, then test before activation. |
 | Semantic hooks | Disabled until the explanation, authorized benchmark and explicit keep decision in [semantic hooks](semantic-hooks.md). Offer once: “Compare this hook on your project's cases before deciding whether to enable it?” |
-| Per-message memory classifier | Disabled, with `hooks.memoryClassifier.enabled: false`. Offer the OpenRouter two-stage page suggestions through the same explanation, benchmark and keep-decision flow; session-start bucket listing works without it. |
+| Per-message memory classifier | Disabled, with `hooks.memoryClassifier.enabled: false`. Offer the OpenRouter recursive page suggestions through the same explanation, benchmark and keep-decision flow; session-start bucket listing works without it. |
 | End-of-turn learning nudge | Enabled by default under `hooks.learnNudge`; deterministic, with no handler model call or key. Inspect the shipped [thresholds, rationale and continuation cost](../assets/templates/hooks/README.md). This is separate from semantic hooks and periodic jobs. |
 
 Configuration follows this shared shape; retain unrelated keys. Paths and bucket name are chosen per project. The memory URL/path below are the maintainer's configuration, not a universal destination.

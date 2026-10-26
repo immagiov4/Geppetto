@@ -5,7 +5,6 @@ The bundled and host skills may require companion skills outside this pack. When
 If a required companion is absent everywhere, report its name and blocked branch and use only a substitute explicitly permitted by the owning skill or project. Installation follows the task's existing authorization. Optional companions use the alternatives below.
 
 - `writing-for-humans`: use it for human prose when installed; otherwise follow the project's writing rules and reread for supported meaning and audience.
-- `engineering-workflow`: return to it after finding disposition when installed; otherwise return to the invoking project workflow.
 - `agent-question-notifications`: use its persistent notice mechanism when installed and applicable; otherwise leave the decision in the original conversation and maintain the pause only on dependent work.
 - An issue-governance skill: use before authorized issue mutations when installed; otherwise follow the project's issue rules and publication authorization.
 - `skill-creator`: use the harness's installed validator; otherwise inspect `name`, `description`, references and observable completion criteria directly.

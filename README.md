@@ -81,7 +81,7 @@ Memories live in one private Git repository of Markdown files, grouped into buck
 
 The repository is configured once at user level in `~/.geppetto/config.json`; a project selects its linked buckets in its own configuration. At session start, the hook supplies the repository location, a one-line description of every bucket, and the full indexes of the selected buckets. It excludes the private bucket's index. The agent then follows index links to read relevant pages as the task develops.
 
-This startup context works without an API key. An optional two-stage OpenRouter classifier can suggest specific pages for each request. Adoption explains the feature, obtains authorization for a benchmark on your cases, and shows the results before you decide whether to enable it. Private retrieval requires explicit access scope.
+This startup context works without an API key. An optional OpenRouter classifier can choose relevant buckets and follow selected subtopic indexes recursively to suggest pages for each request. Adoption explains the feature, obtains authorization for a benchmark on your cases, and shows the results before you decide whether to enable it. Private retrieval requires explicit access scope.
 
 ## Install
 
@@ -125,7 +125,7 @@ I want to follow Geppetto on this project.
 |---|---|
 | **Procedures** | `geppetto-adopt`, `geppetto-spec`, `geppetto-build`, `geppetto-verify`, `geppetto-learn`, `geppetto-memory`, `geppetto-authorize` |
 | **Principles** | `geppetto-measure-it`, `geppetto-x-ray`, `geppetto-reuse-it`, `geppetto-living-docs`, `geppetto-behaviour-tests` |
-| **Bundled** | `writing-for-agents`, `requirements-blast-radius`, `skill-learning-patterns`, `code-review`, `receiving-pr-reviews`, `retro` (optional) |
+| **Bundled** | `writing-for-agents`, `requirements-blast-radius`, `skill-learning-patterns`, `code-review`, `receive-work-feedback`, `retro` (optional) |
 | **Scripts** | `audit`, `install`, `gate-sections`, `gate-agents`, `authz`, `signal`, `memory-hook`, `learn-nudge`, `migrate-agents`, `host-lint` |
 
 Bundled skills are pinned copies with their provenance in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Your own principle packs install alongside; Geppetto's skills stay complete either way.

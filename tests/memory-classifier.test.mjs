@@ -16,20 +16,21 @@ function setup(t, overrides = {}) {
 }
 const auth = calls => ({ reserve: async (...args) => calls.push(['reserve', ...args]), settle: async (...args) => calls.push(['settle', ...args]) });
 
-test('two stages select global plus linked project buckets, then only indexed pages, without reading private/page content', async t => {
+test('bucket selection explores global and linked project indexes without reading private/page content', async t => {
   const { cwd, home, event } = setup(t); const calls = []; const spending = [];
   const provider = async request => {
     calls.push(request);
-    return request.stage === 'buckets' ? { selections: [{ id: 'preferences', score: 0.75, reason: 'Windows preferences' }, { id: 'my-app', score: 0.9, reason: 'Playback' }], costUsd: 0.001 } : { selections: [{ id: 'buckets/my-app/playback.md', score: 0.8, reason: 'Explains\nplayback.' }, { id: 'buckets/preferences/windows.md', score: 0.79, reason: 'Below threshold.' }], costUsd: 0.002 };
+    const selections = request.stage === 'buckets' ? [{ id: 'preferences', score: 0.75, reason: 'Windows preferences' }, { id: 'my-app', score: 0.9, reason: 'Playback' }] : [{ id: 'buckets/my-app/playback.md', score: 0.8, reason: 'Explains\nplayback.' }, { id: 'buckets/preferences/windows.md', score: 0.79, reason: 'Below threshold.' }];
+    return { selections: selections.filter(entry => request.candidates.some(candidate => candidate.id === entry.id)), costUsd: request.stage === 'buckets' ? 0.001 : 0.002 };
   };
   const result = await handleMemoryEvent(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture-key' } });
   assert.equal(result.hookSpecificOutput.additionalContext, 'You may want to check out:\n- buckets/my-app/playback.md — Explains playback.');
-  assert.equal(calls.length, 2); assert.deepEqual(calls[0].candidates.map(c => c.id), ['preferences', 'my-app']);
-  assert.deepEqual(calls[1].candidates.map(c => c.id), ['buckets/preferences/windows.md', 'buckets/my-app/playback.md']);
+  assert.equal(calls.length, 3); assert.deepEqual(calls[0].candidates.map(c => c.id), ['preferences', 'my-app']);
+  assert.deepEqual(calls.slice(1).flatMap(call => call.candidates.map(c => c.id)).sort(), ['buckets/my-app/playback.md', 'buckets/preferences/windows.md']);
   assert.equal(calls[0].model, 'owner/model'); assert.equal(calls[0].prompt, event.prompt); assert.equal(calls[1].maxOutputTokens, 256);
   assert.doesNotMatch(JSON.stringify(calls), /PRIVATE INDEX|PAGE SECRET|UNLINKED INDEX|secret\.md/);
-  assert.equal(spending[0][0], 'reserve'); assert.equal(spending[0][2], 0.01); assert.equal(spending[1][0], 'settle'); assert.equal(spending[1][2], 0.003);
-  const log = JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')); assert.equal(log.modelCalls, 2); assert.equal(log.costUsd, 0.003); assert.equal(log.injectedBytes, Buffer.byteLength(result.hookSpecificOutput.additionalContext));
+  assert.equal(spending[0][0], 'reserve'); assert.equal(spending[0][2], 0.01); assert.equal(spending[1][0], 'settle'); assert.equal(spending[1][2], 0.005);
+  const log = JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')); assert.equal(log.modelCalls, 3); assert.equal(log.costUsd, 0.005); assert.equal(log.injectedBytes, Buffer.byteLength(result.hookSpecificOutput.additionalContext));
 });
 
 test('disabled and missing-key classifiers make no provider call; config credentials are never used', async t => {

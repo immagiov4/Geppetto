@@ -8,7 +8,7 @@ export const ownSkills = [
 ].map(name => `geppetto-${name}`);
 export const bundledSkills = [
   'writing-for-agents', 'requirements-blast-radius', 'skill-learning-patterns',
-  'code-review', 'receiving-pr-reviews', 'retro',
+  'code-review', 'receive-work-feedback', 'retro',
 ];
 const requiredTemplates = [
   'AGENTS.md', 'CLAUDE.md', 'pr-ticket.md', 'feature-doc.md', 'authorizations',

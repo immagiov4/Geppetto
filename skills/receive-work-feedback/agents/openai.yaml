@@ -1,0 +1,7 @@
+interface:
+  display_name: "Receive work feedback"
+  short_description: "Triage review findings without scope spirals"
+  default_prompt: "Use $receive-work-feedback to evaluate findings from a PR, local agent, or self-review before applying corrections."
+
+policy:
+  allow_implicit_invocation: false

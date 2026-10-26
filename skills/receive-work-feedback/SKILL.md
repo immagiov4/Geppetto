@@ -1,13 +1,12 @@
 ---
-name: receiving-pr-reviews
+name: receive-work-feedback
 description: Evaluate findings from PR reviews, local reviewing agents, self-review, and reviews of documents or other artifacts before applying corrections. Validate requirements, evidence, scope, and decisions.
 ---
 
 # Evaluate review findings
 
 Apply this procedure to human and automated PR reviews, local reviewing agents,
-self-review, and reviews of documents or other artifacts. The skill name remains
-unchanged for existing callers. A PR is optional.
+self-review, and reviews of documents or other artifacts. A PR is optional.
 
 For local work, interpret references to the PR as the bounded change and its
 approved purpose. Identify the reviewed artifact and revision or local diff; use
@@ -22,8 +21,7 @@ its implementation. Then establish whether the reported path is real and choose 
 Do this before editing code or requesting another review.
 
 Follow repository instructions first. Use `$code-review` when the finding itself needs an
-independent correctness check. Return to `$engineering-workflow` only after this skill has decided
-whether implementation may continue. Use an issue-governance skill before creating or changing an
+independent correctness check. Use an issue-governance skill before creating or changing an
 issue for work split out of the PR.
 
 ## Validate the requirement and its authority
