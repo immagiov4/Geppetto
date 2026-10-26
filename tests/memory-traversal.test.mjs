@@ -66,6 +66,22 @@ test('large indexes split into requests below the actual serialized JSON byte bu
   for (const name of names) assert.ok(lines.some(line => line.includes(`/app/${name} —`)));
 });
 
+test('typed memory decisions recurse and split by their actual body while preserving an explicit model override', async t => {
+  const limit = 1500;
+  const { memory, run } = setup(t, { model: 'owner/decision-model', api: 'decisions', maxRequestBytes: limit });
+  const names = Array.from({ length: 6 }, (_, index) => `page-${index}.md`);
+  put(memory, 'buckets/app/index.md', names.map(name => `[${name}](${name}) — ${'Memory description '.repeat(6)}`).join('\n'));
+  for (const name of names) put(memory, `buckets/app/${name}`, 'BODY STAYS LOCAL');
+  let calls = 0;
+  const result = await run(request => openRouterClassify(request, { fetchImpl: async (url, options) => {
+    calls++; assert.equal(url, 'https://openrouter.ai/api/alpha/decisions'); assert.ok(Buffer.byteLength(options.body) <= limit);
+    assert.ok(!options.body.includes('BODY STAYS LOCAL'));
+    const body = JSON.parse(options.body); assert.equal(body.model, 'owner/decision-model'); assert.ok(body.state.message);
+    return { ok: true, json: async () => ({ answers: Object.fromEntries(Object.keys(body.questions).map(id => [id, { noul: 0.9 }])), usage: { cost: 0.001 } }) };
+  } }));
+  assert.ok(calls > 2); assert.equal(result.hookSpecificOutput.additionalContext.split('\n').length, names.length + 1);
+});
+
 test('an indivisible oversized request fails before calling the provider', async t => {
   const { cwd, memory, run, spending } = setup(t, { maxRequestBytes: 32 });
   put(memory, 'buckets/app/index.md', '[Fact](fact.md)'); put(memory, 'buckets/app/fact.md', 'x');

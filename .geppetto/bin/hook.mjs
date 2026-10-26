@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { cli, isMain, run, UsageError } from './common.mjs';
 import { redact } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
@@ -32,10 +33,20 @@ function sectionFeedback(body, cwd, runCommand) {
   return `Geppetto PR feedback: ${redact(result.stderr?.trim() || result.error?.message || 'Section check failed')}. Update the PR body before publishing; CI repeats this check.`;
 }
 
+function messageContext(event) {
+  if (process.env.GEPPETTO_LEARNING_CHILD === '1' || typeof event.prompt !== 'string' || !event.prompt.trim()) return {};
+  const modulePath = new URL(import.meta.url.endsWith('/scripts/hook.mjs')
+    ? '../../requirements-blast-radius/scripts/message-context.cjs'
+    : './message-context.cjs', import.meta.url);
+  const additionalContext = createRequire(import.meta.url)(fileURLToPath(modulePath));
+  return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } };
+}
+
 export async function handleEvent(event, { runCommand = run, now = Date.now } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   const learning = await learningEvent(event, now);
-  if (['UserPromptSubmit', 'PostToolUse', 'Stop'].includes(event.hook_event_name)) return learning;
+  if (event.hook_event_name === 'UserPromptSubmit') return messageContext(event);
+  if (['PostToolUse', 'Stop'].includes(event.hook_event_name)) return learning;
   if (typeof event.tool_name !== 'string' || !event.tool_input) throw new UsageError('Hook input needs tool_name and tool_input');
   const input = event.tool_input;
   const eventName = event.hook_event_name ?? 'PreToolUse';

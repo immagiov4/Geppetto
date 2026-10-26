@@ -15,6 +15,20 @@ def invoke(script, cwd, client, project=False):
     return json.loads(result.stdout) if result.stdout else None
 
 class ProjectChecks(unittest.TestCase):
+    def test_standalone_hook_yields_to_declared_integrated_geppetto_handler(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder); (root/'.git').mkdir()
+            for client,name in [('claude','.claude/settings.json'),('codex','.codex/hooks.json')]:
+                settings=root/name; settings.parent.mkdir(parents=True)
+                settings.write_text(json.dumps({'hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':'node .geppetto/bin/hook.mjs'}]}]}}))
+                self.assertTrue(invoke(HERE/'prompt-hook.cjs',root,client), 'an old Geppetto handler alone is not equivalent')
+                (root/'.geppetto/bin').mkdir(parents=True,exist_ok=True)
+                (root/'.geppetto/bin/hook.mjs').write_text('owned fixture')
+                (root/'.geppetto/bin/message-context.cjs').write_text('owned fixture')
+                self.assertIsNone(invoke(HERE/'prompt-hook.cjs',root,client))
+                self.assertIsNone(invoke(HERE/'prompt-hook.cjs',root,client,project=True))
+                (root/'.geppetto/bin/message-context.cjs').unlink()
+
     def test_prompt_routes_requirements_and_feedback_in_two_internal_lines(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)

@@ -12,7 +12,7 @@ For the memory classifier, run the existing hook entry point through the **same 
 node <adopt>/scripts/memory-hook.mjs --check-credential
 ```
 
-After installation, use the installed `.geppetto/bin/memory-hook.mjs` path. It reads no stdin, config, `.env` or memory content, makes no provider call, and writes no files. Exit 0 reports `credential: "present"`, `source: "process-environment"`; exit 1 reports missing. Both report `providerAuthentication: "not-verified"`. A present key is availability evidence only, not validity, budget, consent or hook trust. An unrelated interactive shell is not evidence about a desktop/daemon hook. If the actual launcher cannot run the probe, record availability as unverified and leave setup pending.
+After installation, use the installed `.geppetto/bin/memory-hook.mjs` path. For the skill selector, use `.geppetto/bin/skill-hook.mjs --check-credential` through its own launcher. Both probes read no stdin, config, `.env` or memory content, make no provider call, and write no files. Exit 0 reports `credential: "present"`, `source: "process-environment"`; exit 1 reports missing. Both report `providerAuthentication: "not-verified"`. A present key is availability evidence only, not validity, budget, consent or hook trust. An unrelated interactive shell is not evidence about a desktop/daemon hook. If the actual launcher cannot run the probe, record availability as unverified and leave setup pending.
 
 The memory classifier consumes `OPENROUTER_API_KEY` from its process environment. A `.env` file alone does not deliver it. If the existing host or secret manager injects this variable, reuse it. If the source exists but is absent from the child, repair only its authorized existing injection path and probe again. Do not read or copy its value into a command argument, report or committed config. Probe other selected hooks through their own provider/setup owner; this probe establishes nothing about a separate process.
 
@@ -35,7 +35,7 @@ Consult the provider's [quickstart](https://openrouter.ai/docs/quickstart) for c
 
 ## 3. Record consent and measurement
 
-Return to the [comparison owner](semantic-hooks.md#setup-and-comparison). Before real requests, record the accepted data-and-spending grant once. Select model, traversal settings and any optional cap through the existing owner; this setup flow supplies no thresholds or spending cap. The classifier operates when the key, settings and continuing grant are present. One-off benchmark consent covers only that comparison.
+Return to the [comparison owner](semantic-hooks.md#setup-and-comparison). Before real requests, record the accepted data-and-spending grant once. Memory classification starts with the shipped Perplexity Decider Flash profile and preserves explicit user/project overrides. Resolve any changed model, traversal settings or optional cap through the existing owner. The classifier operates when the key, effective settings and continuing grant are present. One-off benchmark consent covers only that comparison.
 
 Show and record benchmark results when available in `hooks.memoryClassifier.benchmark`. An absent result remains visible as `null` and does not block authorized operation. Record explicit refusals and preserve them on reruns. Give one actionable item for a missing key, model/settings or standing grant.
 

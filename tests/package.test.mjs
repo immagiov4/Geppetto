@@ -25,6 +25,23 @@ test('declared plugin hook launches its shipped script with a real event', t => 
   assert.equal(r.status, 0, r.stderr); assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
 });
 
+test('plugin UserPromptSubmit delivers both reminders without a standalone hook or project configuration', t => {
+  const cwd = fixture(t); const handler = read('hooks/hooks.json').hooks.UserPromptSubmit[0].hooks[0];
+  const command = handler.command.replace('${CLAUDE_PLUGIN_ROOT}', repo);
+  const match = command.match(/^node "([^"]+)"$/); assert.ok(match);
+  const event = { hook_event_name: 'UserPromptSubmit', session_id: 'plugin-only', cwd, prompt: 'Revise the result using this feedback' };
+  const result = invoke(match[1], [], { cwd, input: JSON.stringify(event) });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout); assert.deepEqual(Object.keys(output), ['hookSpecificOutput']);
+  assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  const lines = output.hookSpecificOutput.additionalContext.split('\n'); assert.equal(lines.length, 2);
+  assert.match(lines[0], /\$requirements-blast-radius/); assert.match(lines[1], /\$receive-work-feedback/);
+  const blank = invoke(match[1], [], { cwd, input: JSON.stringify({ ...event, prompt: ' ' }) });
+  assert.equal(blank.status, 0, blank.stderr); assert.deepEqual(JSON.parse(blank.stdout), {});
+  const child = invoke(match[1], [], { cwd, input: JSON.stringify(event), env: { GEPPETTO_LEARNING_CHILD: '1' } });
+  assert.equal(child.status, 0, child.stderr); assert.deepEqual(JSON.parse(child.stdout), {});
+});
+
 test('PR workflow reacts to body edits and runs the trusted base gate without interpolating PR prose', () => {
   const workflow = readFileSync(resolve(repo, '.github/workflows/pr-gate.yml'), 'utf8');
   assert.match(workflow, /types: \[opened, edited, synchronize, reopened\]/); assert.match(workflow, /workflow_call:/); assert.match(workflow, /ref: \$\{\{ github.event.pull_request.base.sha \}\}/); assert.match(workflow, /script=\.geppetto\/bin\/pr-event.mjs/); assert.doesNotMatch(workflow, /\$\{\{[^}]*\.body/);

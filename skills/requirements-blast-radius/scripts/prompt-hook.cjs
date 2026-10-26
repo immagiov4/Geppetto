@@ -17,15 +17,20 @@ while (true) {
     directory,
     client === 'claude' ? '.claude/settings.json' : '.codex/hooks.json'
   );
-  if (fs.existsSync(localHook) && fs.existsSync(settings)) {
+  if (fs.existsSync(settings)) {
     const groups = JSON.parse(fs.readFileSync(settings, 'utf8')).hooks?.UserPromptSubmit || [];
+    const geppettoContext = path.join(directory, '.geppetto/bin/message-context.cjs');
+    const geppettoHook = path.join(directory, '.geppetto/bin/hook.mjs');
+    if (fs.existsSync(geppettoContext) && fs.existsSync(geppettoHook) && groups.some(group =>
+      group.hooks?.some(handler => handler.type === 'command' && handler.command?.includes('.geppetto/bin/hook.mjs'))
+    )) process.exit(0);
     const projectMarker = ` --client ${client} --requirements-project-hook`;
     const declared = groups.some(group =>
       group.hooks?.some(
         handler => handler.type === 'command' && handler.command?.endsWith(projectMarker)
       )
     );
-    if (declared) {
+    if (fs.existsSync(localHook) && declared) {
       if (!process.argv.includes('--requirements-project-hook')) process.exit(0);
       break;
     }
@@ -35,9 +40,7 @@ while (true) {
   if (parent === directory) break;
   directory = parent;
 }
-const instruction =
-  'Does this message change the agreed task requirements? For substantial changes, use $requirements-blast-radius and create or update the Requirements map; reuse a supplied map and handle tiny local changes directly.\n' +
-  'Is this feedback on your work? Use $receive-work-feedback to check the requested outcome and supporting evidence before revising.';
+const instruction = require('./message-context.cjs');
 process.stdout.write(
   JSON.stringify({
     hookSpecificOutput: {

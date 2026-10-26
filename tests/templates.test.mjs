@@ -8,7 +8,9 @@ import { fixture, put, get, invoke, repo, scripts, git, config } from './helpers
 const templates = resolve(repo, 'skills/geppetto-adopt/assets/templates');
 test('both shipped hook fragments deliver internal context from nested directories and leave Stop for background learning', t => {
   for (const path of ['hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json']) {
-    const cwd = fixture(t); cpSync(scripts, resolve(cwd, '.geppetto/bin'), { recursive: true });
+    const cwd = fixture(t);
+    const installed = invoke('install.mjs', ['--target', path.includes('/claude/') ? 'claude' : 'codex', '--project', cwd], { cwd });
+    assert.equal(installed.status, 0, installed.stderr);
     mkdirSync(resolve(cwd, 'apps/backend'), { recursive: true });
     put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: true, benchmark: null, minToolCalls: 1, minDurationMs: 300000 } } });
     const hooks = JSON.parse(get(templates, path)).hooks;
@@ -19,6 +21,10 @@ test('both shipped hook fragments deliver internal context from nested directori
       assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
     };
     assert.deepEqual(event('UserPromptSubmit'), {});
+    const routing = event('UserPromptSubmit', { prompt: 'Change the required result and review this feedback' });
+    assert.match(routing.hookSpecificOutput.additionalContext, /\$requirements-blast-radius/);
+    assert.match(routing.hookSpecificOutput.additionalContext, /\$receive-work-feedback/);
+    assert.equal(routing.hookSpecificOutput.additionalContext.split('\n').length, 2);
     assert.equal(event('PreToolUse', { tool_name: 'Write', tool_input: { file_path: '.geppetto/authorizations' } }).hookSpecificOutput.permissionDecision, 'deny');
     assert.deepEqual(event('PreToolUse'), {});
     const learning = event('PostToolUse');
@@ -34,6 +40,10 @@ test('both shipped hook fragments deliver internal context from nested directori
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
     assert.match(event('SessionStart').hookSpecificOutput.additionalContext, /preferences — Working preferences/);
     assert.match(hooks.UserPromptSubmit[0].hooks[1].command, /memory-hook\.mjs/);
+    const selector = hooks.UserPromptSubmit.flatMap(group => group.hooks).find(handler => handler.command.includes('skill-hook.mjs'));
+    assert.ok(selector);
+    const selected = spawnSync(process.execPath, ['-e', selector.command.slice('node -e "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd, prompt: ' ' }), encoding: 'utf8', windowsHide: true });
+    assert.equal(selected.status, 0, selected.stderr); assert.deepEqual(JSON.parse(selected.stdout), {});
   }
 });
 

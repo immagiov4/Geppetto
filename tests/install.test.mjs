@@ -1,21 +1,55 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fixture, put, get, invoke, scripts } from './helpers.mjs';
+import { fixture, put, get, invoke, git, scripts, repo } from './helpers.mjs';
 
 function source(t) {
   const root = fixture(t); cpSync(scripts, resolve(root, 'skills/geppetto-adopt/scripts'), { recursive: true });
   put(root, 'package.json', { name: 'geppetto', version: '0.1.0' });
   put(root, 'skills/geppetto-adopt/SKILL.md', '---\nname: geppetto-adopt\ndescription: Adopt\n---\nAdopt');
   put(root, 'skills/geppetto-example/SKILL.md', '---\nname: geppetto-example\ndescription: Example\n---\nOriginal');
+  put(root, 'skills/requirements-blast-radius/scripts/message-context.cjs', get(repo, 'skills/requirements-blast-radius/scripts/message-context.cjs'));
   return { root, install: resolve(root, 'skills/geppetto-adopt/scripts/install.mjs') };
 }
+
+test('installation ignores local authorizations while preserving grants and existing ignore entries', t => {
+  const cwd = fixture(t); const { install } = source(t); const args = ['--target', 'claude', '--project', cwd];
+  assert.equal(git(cwd, ['init']).status, 0);
+  const grant = '[fixture] provider=local budget_usd=0 per=1d scope="fixture" expires=never\n';
+  const ignored = '/custom-local\n/authorizations\n!*\n';
+  put(cwd, '.geppetto/authorizations', grant); put(cwd, '.geppetto/.gitignore', ignored);
+  let r = invoke(install, [...args, '--dry-run'], { cwd }); assert.equal(r.status, 0, r.stderr);
+  assert.equal(get(cwd, '.geppetto/.gitignore'), ignored);
+  for (let i = 0; i < 2; i++) { r = invoke(install, args, { cwd }); assert.equal(r.status, 0, r.stderr); }
+  assert.equal(get(cwd, '.geppetto/authorizations'), grant);
+  assert.equal(get(cwd, '.geppetto/.gitignore'), `${ignored}/authorizations\n`);
+  assert.equal(git(cwd, ['check-ignore', '.geppetto/authorizations']).status, 0);
+  assert.equal(git(cwd, ['check-ignore', '.geppetto/config.json']).status, 1);
+});
+
+test('reinstallation tolerates an absent machine-local grant previously recorded by adoption', t => {
+  const cwd = fixture(t); const { install } = source(t); const args = ['--target', 'codex', '--project', cwd];
+  put(cwd, '.geppetto/authorizations', '');
+  let r = invoke(install, [...args, '--record-generated', '.geppetto/authorizations'], { cwd }); assert.equal(r.status, 0, r.stderr);
+  unlinkSync(resolve(cwd, '.geppetto/authorizations'));
+  for (const extra of [['--dry-run'], [], ['--dry-run']]) {
+    r = invoke(install, [...args, ...extra], { cwd }); assert.equal(r.status, 0, r.stderr);
+    assert.equal(existsSync(resolve(cwd, '.geppetto/authorizations')), false);
+  }
+  const state = JSON.parse(get(cwd, '.geppetto/install.json')).installations.codex;
+  assert.equal(state.files['.geppetto/authorizations'], undefined);
+  assert.equal(state.generated.includes('.geppetto/authorizations'), false);
+  r = invoke(install, [...args, '--record-generated', '.geppetto/authorizations'], { cwd }); assert.equal(r.status, 1);
+});
 
 test('dry run is read-only, installation ships standalone gates, update reconciles hashes, uninstall preserves foreign files', t => {
   const cwd = fixture(t); const { root, install } = source(t); const args = ['--target', 'codex', '--project', cwd];
   let r = invoke(install, [...args, '--dry-run'], { cwd }); assert.equal(r.status, 0, r.stderr); assert.equal(existsSync(resolve(cwd, '.geppetto')), false);
   r = invoke(install, args, { cwd }); assert.equal(r.status, 0, r.stderr); assert.match(get(cwd, '.agents/skills/geppetto-example/SKILL.md'), /Original$/);
+  assert.equal(get(cwd, '.geppetto/bin/message-context.cjs'), get(root, 'skills/requirements-blast-radius/scripts/message-context.cjs'));
+  const prompt = invoke(resolve(cwd, '.geppetto/bin/hook.mjs'), [], { cwd, input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'Review this feedback', cwd }) });
+  assert.equal(prompt.status, 0, prompt.stderr); assert.match(JSON.parse(prompt.stdout).hookSpecificOutput.additionalContext, /\$receive-work-feedback/);
   r = invoke(resolve(cwd, '.geppetto/bin/gate-sections.mjs'), ['--pr', '-'], { cwd, input: '## Observability\nLogs' }); assert.equal(r.status, 0, r.stderr);
   put(cwd, '.agents/skills/foreign/SKILL.md', 'Keep'); put(root, 'skills/geppetto-example/SKILL.md', 'Updated');
   assert.equal(invoke(install, args, { cwd }).status, 0); assert.equal(get(cwd, '.agents/skills/geppetto-example/SKILL.md'), 'Updated');

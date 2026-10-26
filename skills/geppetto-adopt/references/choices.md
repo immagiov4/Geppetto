@@ -22,8 +22,33 @@ Reuse current configuration and complete [existing-automation discovery](#verify
 | Periodic skill curation | Explain how the pass reviews skill overlap and stale instructions; ask whether to schedule it. |
 | Periodic memory maintenance | Explain that the pass deduplicates facts, reconciles contradictions, removes obsolete material and repairs indexes; ask: “Would you like periodic memory maintenance enabled?” After acceptance, use the [job procedure](../../geppetto-learn/references/jobs.md) to agree on cadence, buckets, permitted writes and publication, then test before activation. |
 | Semantic hooks | Explain the uncovered hooks through [semantic hooks](semantic-hooks.md), preserve refusals and record standing consent once. Measurements remain visible alongside configuration. |
-| Per-message memory classifier | Enabled when the OpenRouter key, selected model/settings and standing user/project grant exist. Ask for data and spending scope once; record the comparison when available. A benchmark is evidence, not an activation gate. Without a key, audit gives the one action to supply it; session-start bucket listing works independently. |
+| Per-message memory classifier | Uses `perplexity/pplx-decider-flash-v1.2` and the shipped retrieval settings by default, preserving user/project overrides. Enabled when the OpenRouter key and standing user/project grant exist. Ask for data and spending scope once; record the comparison when available. A benchmark is evidence, not an activation gate. Without a key, audit gives the one action to supply it; session-start bucket listing works independently. |
 | Internal learning reminder | Enabled by default under `hooks.learnNudge`; deterministic, with no handler model call or key. Inspect the shipped [thresholds, rationale and reflection cost](../assets/templates/hooks/README.md). This is separate from semantic hooks and periodic jobs. |
+
+## Approval and installation messages
+
+Make an actual consent request a distinct block headed **🔐 CONSENT REQUIRED — <action>**, translated into the maintainer's language. State the action, affected scope and data/provider when relevant, spending limit or unlimited authority, and duration/expiry. End with a visible **👉 Choose: Approve · Modify · Decline** line, using the host's decision controls when available. Group related pending choices in that block. Apply this format when consent is missing; reuse an approval already given.
+
+After installing or updating Geppetto, a single skill or an extra pack, close with a feature checklist. For Geppetto use **🪵 Geppetto installed**, translated into the maintainer's language; for another skill or pack name that installation explicitly. Mark `[x]` only for a verified outcome and `[ ]` for a disabled, declined, pending or unverified capability, with its concrete reason. Distinguish installed files from active hooks and identify the harness when their states differ. Put any remaining consent request in its own labelled block beneath the result.
+
+Adapt these examples to the observed state:
+
+```markdown
+🪵 **Geppetto installed**
+
+- [x] Skills and project router — installed and checked.
+- [x] Skill selector — a real hook request returned relevant procedures.
+- [ ] Memory classifier — pending: OpenRouter data/spending consent.
+- [ ] Periodic maintenance — disabled: declined by the owner.
+
+🔐 **CONSENT REQUIRED — Name of the feature**
+
+**Action:** what will happen.
+**Scope and data:** what is affected or sent, and to whom.
+**Spending:** proposed limit or unlimited authority, period and expiry.
+
+👉 **Choose: Approve · Modify · Decline**
+```
 
 ## Verify before asking
 

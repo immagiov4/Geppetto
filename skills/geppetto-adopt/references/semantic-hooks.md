@@ -4,8 +4,8 @@ Read [existing-automation discovery](choices.md#verify-before-asking) before off
 
 | Optional experiment | Explain to the maintainer |
 | --- | --- |
-| Skill selector, also called Bridge/System 1 | With many installed skills, the owner may choose explicit invocation to keep selection deliberate. A low-cost classifier offers a middle ground: contextual skill suggestions on each request, alongside the project router. Compare missed procedures, irrelevant suggestions, latency, cost and loaded context on the user's own tasks. Reuse an existing selector through [companion resolution](integrations.md). |
-| Memory-page classifier, `hooks.memoryClassifier` | Uses OpenRouter to suggest relevant indexed pages per message. The agent still opens and judges pages. Measure useful supported facts found, privacy boundaries, noise and added context. Deterministic session-start bucket listing and linked indexes work without a key or classifier. |
+| Skill selector, `hooks.skillSelector`, also called Bridge/System 1 | The bundled `skill-hook.mjs` suggests relevant skills on each request using the existing Mercury selector's decision questions. With many installed skills, the owner may choose explicit invocation and use these suggestions alongside the router. Compare missed procedures, irrelevant suggestions, latency, cost and loaded context on the user's tasks. Reuse an already active equivalent and avoid running both selectors. See [setup](../assets/templates/hooks/README.md#skill-suggestions). |
+| Memory-page classifier, `hooks.memoryClassifier` | Defaults to Perplexity `pplx-decider-flash-v1.2` through OpenRouter's typed Decisions API to suggest relevant indexed pages per message. The agent still opens and judges pages. Measure useful supported facts found, privacy boundaries, noise and added context. Deterministic session-start bucket listing and linked indexes work without a key or classifier. |
 | Requirements screen | Ranks candidate source files before discovery. Measure missed paths found; source reading and caller tracing still establish relevance. Use its existing [setup and evaluation owner](../../requirements-blast-radius/references/screen.md). |
 
 A feature is enabled when its prerequisites and recorded consent are present. Ask about each uncovered scope once in the adoption round and preserve explicit refusals. Memory classification needs the OpenRouter key, selected settings and standing user/project data-and-spending grant; it has no default USD cap. The selector and requirements screen follow their owning implementations. Existing equivalents retain their verified state and consent. Record measurements and show their results; a missing benchmark is not a memory-classifier activation gate.
@@ -34,6 +34,17 @@ For memory, compare direct injected-index retrieval with classifier-assisted ret
 ## Signal learning
 
 **Signal learning (`hooks.signalLearning`)** assesses project signals and investigates reusable workflows, verified fixes, user corrections or recurring causes through the [existing learning owner](../../geppetto-learn/references/ingestion.md). Adoption offers standing subscription consent once, default yes. Authenticated Codex uses `gpt-6.1-sol` and the default service tier; Claude is the alternative when Codex is absent. There is no default run or USD cap. `writeApproval` defaults false; true retains staged changes for review. Native acknowledgement, exclusive signal ownership, recursion protection and separate publication authority remain required.
+
+## Hook patterns to consider
+
+When adoption or learning identifies a gap, consider these patterns after inspecting the harness's native capabilities and existing hooks. For each candidate, identify the trigger, the feedback the agent receives and the comparison that would justify retaining it.
+
+For tool-call timings and error statistics, follow [agent tool observability](../../geppetto-x-ray/SKILL.md#agent-tool-observability) to inspect native records and existing archives before proposing telemetry integration.
+
+- **After an edit:** run the affected type check or tests and return actionable failures beside the tool result. [Hook events](https://code.claude.com/docs/en/hooks#posttooluse).
+- **Before a command:** reject a destructive operation or an edit to a protected file, with a reason the agent can act on. [Protected files](https://code.claude.com/docs/en/hooks-guide#block-edits-to-protected-files). In case of a state machine, you can reject forbidden state operations in a certain state, and so on. Be creative :D
+- **Before completion:** verify the result against the original request and return to unfinished work. [LangChain's verification example](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering).
+- **During repeated edits:** count changes to the same file and suggest reconsidering the approach when the agent keeps circling. [LangChain's loop detector](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering).
 
 ## Observability
 

@@ -1,6 +1,16 @@
 # Project hooks
 
-These hooks do three jobs. At session start they list memory. On each prompt they may suggest pages. During the turn they can remind the agent to record a lesson. Merge the harness files, below, before any of that runs in a project.
+At session start these hooks list memory. On each prompt they route requirements/feedback and can suggest memory pages and useful skills. During the turn they can remind the agent to record a lesson. Merge the harness files, below, before any of that runs in a project.
+
+## Skill suggestions
+
+`skill-hook.mjs` runs on every nonempty `UserPromptSubmit` through the plugin and both project hook fragments. `hooks.skillSelector` uses the existing Mercury selector's per-skill relevance questions through OpenRouter's decisions API. It shares the memory classifier's request queue, whole-call deadline, reservations and event accounting. It operates independently of configured memory and sends the current prompt plus skill names/descriptions; procedure bodies and transcripts stay local. The returned context points the agent to the selected local `SKILL.md` files, including explicit-only skills. Suggestions do not hide the catalog or restrict further discovery.
+
+Select `model`, `threshold` (inclusive `[0,1]`), positive `timeoutMs` below the enclosing 30-second timeout, and positive `batchSize` in `hooks.skillSelector`. Existing Mercury settings use `perplexity/pplx-decider-v1.2`, `0.75`, `8000` milliseconds and batches of `80`; these are starting settings from that implementation, not a general accuracy claim. Optional `skillDirs` adds skill roots; project `.agents/skills` and `.claude/skills` take precedence over user directories, `$CODEX_HOME/skills`, system skills and this pack's bundled skills. Add other plugin catalogs through `skillDirs` during adoption. Optional `maxSkills`, `maxConcurrentRequests`, `maxRequestBytes` and `maxCostUsd` follow the selected operation's needs; the default shared queue is serial and there is no implicit spending cap or result-count cap.
+
+Activation needs `OPENROUTER_API_KEY` in the actual hook process and personal/project `skill-selector` grants covering prompt/description transmission and spending. Without a per-run maximum, both standing grants must explicitly allow unlimited spending. `enabled: false` records a decline. Benchmark references may be retained in `benchmark`; their absence does not block an authorized selector. Use `skill-hook.mjs --check-credential` through the real launcher for a no-network availability probe. `audit.mjs` reports the selector separately; event records show requests, duration, cost and errors without retaining the prompt or skill bodies.
+
+Before activating Geppetto where Mercury already suggests skills, verify equivalent suggestions, then disable only Mercury's `skills_enabled` setting through its actual state directory. Preserve its independent memory retrieval. Do not register a second paid selector alongside an active equivalent.
 
 ## Session memory
 
@@ -8,16 +18,17 @@ These hooks do three jobs. At session start they list memory. On each prompt the
 
 ## Optional classifier
 
-The same memory hook runs on `UserPromptSubmit`. `hooks.memoryClassifier` defaults to `{ "enabled": true, "benchmark": null }` and operates when its key, selected settings and standing user/project `memory-classifier` grant exist. Obtain the OpenRouter key through the harness secret store and expose it as `OPENROUTER_API_KEY` in the hook environment. Credentials stay outside configuration. Project classifier settings override user settings. Record and show the semantic-hook comparison. Its absence does not block an authorized classifier.
+The same memory hook runs on `UserPromptSubmit`. `hooks.memoryClassifier` defaults to enabled with `perplexity/pplx-decider-flash-v1.2`, bucket/page thresholds of `0.65`, an `8000` ms traversal deadline and `benchmark: null`. These defaults also apply to existing configurations that declare only enabled/benchmark. It operates when its key and standing user/project `memory-classifier` grant exist. Obtain the OpenRouter key through the harness secret store and expose it as `OPENROUTER_API_KEY` in the hook environment. Credentials stay outside configuration. Project classifier settings override user settings, which override the defaults. Record and show the semantic-hook comparison. Its absence does not block an authorized classifier.
 
-An enabled classifier requires these owner-selected settings:
+Override these settings when needed:
 
-- `model`
+- `model`; the default Flash model uses the [typed Decisions API](https://openrouter.ai/perplexity/pplx-decider-flash-v1.2/), sharing the skill selector's transport
 - `bucketThreshold` and `pageThreshold`, inclusive scores in `[0, 1]`
 - `timeoutMs`, the deadline for the entire traversal
-- `maxOutputTokens`, per request
+- `api: "decisions"` for another typed decision model; other explicitly selected models retain the existing chat interface by default
+- `maxOutputTokens`, required per request for chat models; typed decisions do not generate a text response
 
-Optional `maxCostUsd` reserves an owner-selected maximum for the entire traversal. If it is absent, there is no spending cap, and the standing grant must be explicitly unlimited (`budget_usd=none`). Choose the deadline below the enclosing hook's `timeout` in seconds, and leave room for ledger operations and local reads. Increase that enclosing timeout when the traversal needs it. This package supplies no calibrated model or score threshold. Measure selection quality, injected bytes, elapsed time and cost, and retain the benchmark reference. [OpenRouter's API](https://openrouter.ai/docs/api_reference/overview) and [structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs) define the adapter contract.
+Optional `maxCostUsd` reserves an owner-selected maximum for the entire traversal. If it is absent, there is no spending cap, and the standing grant must be explicitly unlimited (`budget_usd=none`). Choose the deadline below the enclosing hook's `timeout` in seconds, and leave room for ledger operations and local reads. Increase that enclosing timeout when the traversal needs it. The initial threshold and deadline reuse the previous memory selector's settings; tune them on the project's retrieval cases. Measure selection quality, injected bytes, elapsed time and cost, and retain the benchmark reference. [OpenRouter's API](https://openrouter.ai/docs/api_reference/overview) and [structured outputs](https://openrouter.ai/docs/guides/features/structured-outputs) define the chat adapter contract.
 
 The first stage receives the current question and the descriptions of global buckets plus linked project buckets, excluding `private`. Each selected bucket's index is then classified on its own. A selected `index.md` or directory link expands to its child index. A selected ordinary Markdown link becomes a page suggestion. Relative links resolve against the containing index. Only selected indexes are read. Page bodies stay local. Canonical paths keep every document inside the selected bucket. An index already visited is not walked again, so a cycle stops. Shared page targets are deduplicated and sorted.
 
@@ -33,7 +44,9 @@ The additional async `PostToolUse`, `Stop` and `SessionStart` entries consume re
 
 ## Learning reminders
 
-For per-message routing, reuse the requirements companion's [existing prompt hook](../../../../requirements-blast-radius/references/screen.md#install-and-check). It supplies one question about changed requirements and one about feedback on the agent's work. Global and project precedence are handled by that hook. Adoption checks for this equivalent before adding another prompt handler.
+Geppetto's registered `UserPromptSubmit` handler supplies two internal routing questions on every nonempty prompt: changed requirements route to `requirements-blast-radius`, and feedback on the agent's work routes to `receive-work-feedback`. Plugin installation activates this through `hooks/hooks.json`; project installation uses the shipped hook fragments and copies the shared `message-context.cjs` into `.geppetto/bin`. The text has one owner, shared with the [standalone requirements hook](../../../../requirements-blast-radius/references/screen.md#install-and-check). Learning children skip this reminder.
+
+During adoption or update, reconcile an existing standalone requirements hook as an equivalent. Once the Geppetto handler is active and verified, retain its registration and remove the redundant standalone registration within the authorized configuration scope. The updated standalone hook yields to a declared project Geppetto handler with the shared context module installed; when using only the plugin, reconcile a separate global registration explicitly. Verify delivery through the selected handler before retiring the old one.
 
 `UserPromptSubmit` delimits turns. `PreToolUse` records tool starts and still preserves PR feedback and authorization checks. After a tool completes, the synchronous `PostToolUse` handler adds an internal learning reminder through `hookSpecificOutput.additionalContext`, which [Claude Code](https://code.claude.com/docs/en/hooks#posttooluse) and [Codex](https://learn.chatgpt.com/docs/hooks#posttooluse) both support. The active agent judges useful lessons before its final reply and records a signal when one is warranted. The reminder stays in the current conversation. It does not create a user request or a separate session that reads transcripts. `Stop` remains available for the independent asynchronous signal consumer.
 

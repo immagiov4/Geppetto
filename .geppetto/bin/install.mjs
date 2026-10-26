@@ -2,7 +2,7 @@ import { readFile, mkdir, lstat, unlink, open, writeFile, rename } from 'node:fs
 import { resolve, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { cli, isMain, parseArgs, UsageError, exists, filesUnder, contained, jsonFile, atomicJson, userHome } from './common.mjs';
+import { cli, isMain, parseArgs, UsageError, exists, filesUnder, contained, jsonFile, atomicJson, userHome, ignoreLocalFiles } from './common.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const portable = path => path.split(sep).join('/');
@@ -62,8 +62,10 @@ async function desiredFiles(target, uninstall, root, source, previous, generated
     for (const source of await filesUnder(scriptsRoot)) {
       if (source.endsWith('.mjs')) desired.set(`.geppetto/bin/${portable(relative(scriptsRoot, source))}`, await readFile(source));
     }
+    desired.set('.geppetto/bin/message-context.cjs', await readFile(resolve(skillsRoot, 'requirements-blast-radius/scripts/message-context.cjs')));
     for (const path of new Set([...(previous.generated ?? []), ...generated])) {
       await safePath(root, resolve(root, path));
+      if (path === '.geppetto/authorizations' && !generated.includes(path) && !await exists(resolve(root, path))) continue;
       desired.set(path, await readFile(resolve(root, path)));
     }
   }
@@ -116,6 +118,10 @@ async function applyInstallation({ root, manifest, statePath, target, uninstall,
       const current = await exists(destination) ? hash(await readFile(destination)) : null;
       if (before !== current) throw new Error(`${destination}:1: Local file changed during reconciliation; rerun installation`);
     }
+    if (!uninstall) {
+      await safePath(root, resolve(root, '.geppetto/.gitignore'));
+      await ignoreLocalFiles(root, ['/authorizations']);
+    }
     for (const change of changes) {
       const destination = resolve(root, change.path);
       await safePath(root, destination);
@@ -130,7 +136,7 @@ async function applyInstallation({ root, manifest, statePath, target, uninstall,
     if (uninstall) delete manifest.installations[target];
     else {
       manifest.source = source;
-      manifest.installations[target] = { files: nextFiles, generated };
+      manifest.installations[target] = { files: nextFiles, generated: generated.filter(path => nextFiles[path]) };
     }
     await atomicJson(statePath, manifest);
   } finally { await lock.close(); await unlink(lockPath); }

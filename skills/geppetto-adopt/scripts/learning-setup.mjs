@@ -1,7 +1,7 @@
 import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicJson, cli, defaultConfig, isMain, jsonFile, parseArgs, run, UsageError, userHome } from './common.mjs';
+import { atomicJson, cli, defaultConfig, ignoreLocalFiles, isMain, jsonFile, parseArgs, run, UsageError, userHome } from './common.mjs';
 import { learningPolicy, probeLearningHost } from './learning-config.mjs';
 
 /** Call --accept only for the owner's accepted adoption answer, never for inferred consent. */
@@ -16,6 +16,7 @@ export async function adoptLearning(root, { accepted = false, ...options } = {})
   let grants = '';
   try { grants = await readFile(path, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const prior = grants.split(/\r?\n/).find(line => /^\[signal-learning\]/.test(line));
+  await ignoreLocalFiles(root, ['/authorizations']);
   if (!prior) {
     await mkdir(resolve(root, '.geppetto'), { recursive: true });
     await appendFile(path, `${grants && !grants.endsWith('\n') ? '\n' : ''}[signal-learning] provider=${probe.host} budget_usd=0 per=1d scope="project signals; file tools; isolated local branches; stage or commit; no publication" expires=never\n`, { mode: 0o600 });

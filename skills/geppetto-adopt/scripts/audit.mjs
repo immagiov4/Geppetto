@@ -3,10 +3,12 @@ import { resolve, delimiter, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cli, isMain, parseArgs, UsageError, exists, jsonFile, validateConfig, validateMemory, userHome, run } from './common.mjs';
 import { hostLintReport } from './host-lint.mjs';
-import { memorySettings } from './memory-config.mjs';
+import { memorySettings, memoryClassifierSettings } from './memory-config.mjs';
 import { learningReadiness } from './learning-config.mjs';
 import { fileURLToPath } from 'node:url';
 import { validateClassifierSettings } from './memory-classifier.mjs';
+import { classificationApi } from './memory-provider.mjs';
+import { validateSkillSelectorSettings } from './skill-catalog.mjs';
 
 const status = value => value ? 'present' : 'absent';
 const repositoryIdentity = value => /^https?:\/\//.test(value) ? value.replace(/\.git$/, '') : value;
@@ -98,12 +100,18 @@ export async function main(args) {
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {});
   const report = { project, node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent', minimum: 22 }, tools: {}, harnesses: await harnesses(project), projectFiles: {}, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: await learningReadiness(project) };
   const user = await jsonFile(resolve(userHome(), '.geppetto/config.json'), {});
-  const classifier = { ...user.hooks?.memoryClassifier, ...config.hooks?.memoryClassifier };
+  const classifier = memoryClassifierSettings(user, config);
   const classifierGrant = run(process.execPath, [fileURLToPath(new URL('./authz.mjs', import.meta.url)), 'check', 'memory-classifier', '--provider', 'openrouter', '--cost', classifier.maxCostUsd == null ? 'none' : String(classifier.maxCostUsd)], { cwd: project });
   let settingsValid = true;
   try { validateClassifierSettings(classifier); } catch { settingsValid = false; }
   const classifierAction = classifier.enabled === false ? 'Memory classifier is declined in hooks.memoryClassifier.enabled.' : !process.env.OPENROUTER_API_KEY ? 'Add OPENROUTER_API_KEY to the hook launcher through its secret store, then rerun adoption.' : !settingsValid ? 'Select the classifier model and traversal settings in the adoption question round.' : classifierGrant.status !== 0 ? 'Record the accepted standing OpenRouter memory-classifier grant in user and project authorizations.' : null;
-  report.memoryClassifier = { enabled: classifierAction === null, benchmark: classifier.benchmark ?? null, action: classifierAction };
+  report.memoryClassifier = { enabled: classifierAction === null, model: classifier.model, api: classificationApi(classifier), benchmark: classifier.benchmark ?? null, action: classifierAction };
+  const selector = { ...user.hooks?.skillSelector, ...config.hooks?.skillSelector };
+  let selectorValid = true;
+  try { validateSkillSelectorSettings(selector); } catch { selectorValid = false; }
+  const selectorGrant = run(process.execPath, [fileURLToPath(new URL('./authz.mjs', import.meta.url)), 'check', 'skill-selector', '--provider', 'openrouter', '--cost', selector.maxCostUsd == null ? 'none' : String(selector.maxCostUsd)], { cwd: project });
+  const selectorAction = selector.enabled === false ? 'Skill selector is declined in hooks.skillSelector.enabled.' : !process.env.OPENROUTER_API_KEY ? 'Add OPENROUTER_API_KEY to the hook launcher through its secret store, then rerun adoption.' : !selectorValid ? 'Select the skill-selector model, threshold, batch size and deadline in the adoption question round.' : selectorGrant.status !== 0 ? 'Record the accepted standing OpenRouter skill-selector grant in user and project authorizations.' : null;
+  report.skillSelector = { enabled: selectorAction === null, benchmark: selector.benchmark ?? null, action: selectorAction };
   for (const command of ['git', 'gh']) { const probe = run(command, ['--version']); report.tools[command] = { status: probe.status === 0 ? 'present' : probe.error?.code === 'ENOENT' ? 'absent' : 'unverifiable', version: probe.status === 0 ? probe.stdout.trim().split(/\r?\n/)[0] : null }; }
   for (const name of ['AGENTS.md', 'CLAUDE.md', 'package.json', config.docs?.root ?? 'docs', 'tests', 'test', '.github/workflows', '.gitlab-ci.yml', 'azure-pipelines.yml', '.geppetto']) report.projectFiles[name] = status(await exists(resolve(project, name)));
   if (opts['--verify']) {
@@ -126,7 +134,7 @@ export async function main(args) {
     for (const [name, harness] of Object.entries(report.harnesses)) console.log(`${name}: ${harness.binary.status}; skill loading, hook trust and scheduled tasks: unverifiable in this process\n  skills: ${harness.skills.map(s => `${s.path} (${s.status})`).join(', ')}\n  instructions: ${harness.instructions.map(s => `${s.path} (${s.status})`).join(', ')}\n  hooks: ${harness.hooks.locations.map(s => `${s.path} (${s.status})`).join(', ')}\n  scheduling: ${harness.scheduling.guidance}`);
     for (const [name, state] of Object.entries(report.projectFiles)) console.log(`${name}: ${state}`);
     console.log(`Memory: ${JSON.stringify(report.memory)}`);
-    for (const [name, readiness] of [['Signal learning', report.learning], ['Memory classifier', report.memoryClassifier]]) console.log(`${name}: ${readiness.enabled ? 'enabled' : 'disabled'}${readiness.action ? `; ${readiness.action}` : ''}`);
+    for (const [name, readiness] of [['Signal learning', report.learning], ['Memory classifier', report.memoryClassifier], ['Skill selector', report.skillSelector]]) console.log(`${name}: ${readiness.enabled ? 'enabled' : 'disabled'}${readiness.action ? `; ${readiness.action}` : ''}`);
     for (const configuration of report.hostLint.configurations) console.log(`Host ${configuration.tool}: ${configuration.path}:1: ${configuration.registration}; owner consent required: ${configuration.patterns.join(', ')}`);
     for (const check of report.verification ?? []) console.log(`${check.pass ? 'PASS' : 'FAIL'} ${check.name}${check.reason ? `: ${check.reason}` : ''}`);
     for (const gap of report.verificationGaps ?? []) console.log(`NOT VERIFIED ${gap.name}: ${gap.reason}`);

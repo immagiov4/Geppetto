@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, put, get, git, config } from './helpers.mjs';
+import { fixture, put, get, git, config, invoke } from './helpers.mjs';
 import { handleMemoryEvent } from '../skills/geppetto-adopt/scripts/memory-hook.mjs';
+import { openRouterClassify } from '../skills/geppetto-adopt/scripts/memory-provider.mjs';
 
 const classifier = { enabled: true, benchmark: null, model: 'owner/model', bucketThreshold: 0.75, pageThreshold: 0.8, timeoutMs: 1000, maxOutputTokens: 256, maxCostUsd: 0.01 };
 function setup(t, overrides = {}) {
@@ -15,6 +16,31 @@ function setup(t, overrides = {}) {
   return { cwd, home, memory, event: { cwd, hook_event_name: 'UserPromptSubmit', prompt: 'How does playback behave on Windows?' } };
 }
 const auth = calls => ({ reserve: async (...args) => calls.push(['reserve', ...args]), settle: async (...args) => calls.push(['settle', ...args]) });
+
+test('a minimal existing memory-classifier config inherits Flash and the baseline retrieval settings', async t => {
+  const { cwd, home, event } = setup(t);
+  const config = JSON.parse(get(cwd, '.geppetto/config.json')); config.hooks.memoryClassifier = { enabled: true, benchmark: null };
+  put(cwd, '.geppetto/config.json', config); const requests = [];
+  const result = await handleMemoryEvent(event, { home, authorization: auth([]), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async request => {
+    requests.push(request);
+    const selected = request.stage === 'buckets' ? 'my-app' : 'buckets/my-app/playback.md';
+    return { selections: request.candidates.filter(candidate => candidate.id === selected).map(candidate => ({ id: candidate.id, score: 0.7, reason: 'Relevant' })), costUsd: 0 };
+  } });
+  assert.match(result.hookSpecificOutput.additionalContext, /playback.md/);
+  assert.equal(requests.length, 2); assert.ok(requests.every(request => request.model === 'perplexity/pplx-decider-flash-v1.2'));
+  const grant = '[memory-classifier] provider=openrouter budget_usd=none per=1d scope="synthetic indexed topics" expires=never\n';
+  put(home, '.geppetto/authorizations', grant); put(cwd, '.geppetto/authorizations', grant);
+  const audit = invoke('audit.mjs', ['--json'], { cwd, home, env: { OPENROUTER_API_KEY: 'fixture', PATH: '' } });
+  assert.equal(audit.status, 0, audit.stderr); const readiness = JSON.parse(audit.stdout).memoryClassifier;
+  assert.equal(readiness.enabled, true); assert.equal(readiness.model, 'perplexity/pplx-decider-flash-v1.2'); assert.equal(readiness.api, 'decisions');
+});
+
+test('a malformed billed memory response preserves its charge through the shared coordinator', async t => {
+  const { home, event } = setup(t); const spending = [];
+  const provider = request => openRouterClassify(request, { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: 'malformed' } }], usage: { cost: 0.002 } }) }) });
+  const result = await handleMemoryEvent(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture' } });
+  assert.deepEqual(result, {}); assert.equal(spending.at(-1)[0], 'settle'); assert.equal(spending.at(-1)[2], 0.002);
+});
 
 test('bucket selection explores global and linked project indexes without reading private/page content', async t => {
   const { cwd, home, event } = setup(t); const calls = []; const spending = [];

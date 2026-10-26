@@ -84,14 +84,22 @@ export async function filesUnder(root) {
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
 export const learningFileTools = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
 export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, host: 'codex', billing: 'subscription', provider: 'openai', boundary: 'project-file-tools', writeApproval: false, hosts: { codex: { model: 'gpt-6.1-sol', serviceTier: 'default', sandbox: 'workspace-write', tools: [...learningFileTools] }, claude: { sandbox: 'workspace-write', tools: [...learningFileTools] } } });
-export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults(), memoryClassifier: { enabled: true, benchmark: null } } });
+export const memoryClassifierDefaults = { enabled: true, benchmark: null, model: 'perplexity/pplx-decider-flash-v1.2', bucketThreshold: 0.65, pageThreshold: 0.65, timeoutMs: 8000 };
+export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults(), memoryClassifier: { enabled: true, benchmark: null }, skillSelector: { enabled: true, benchmark: null } } });
 
 export async function ignoreLocalFiles(project, paths) {
   const ignorePath = resolve(project, '.geppetto/.gitignore');
+  for (const path of [dirname(ignorePath), ignorePath]) {
+    try { if ((await lstat(path)).isSymbolicLink()) throw new Error(`${path}:1: Reconcile symbolic link before updating local ignore rules`); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
   await mkdir(dirname(ignorePath), { recursive: true });
   let ignored = '';
   try { ignored = await readFile(ignorePath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const missing = paths.filter(path => !ignored.split(/\r?\n/).includes(path));
+  const lines = ignored.split(/\r?\n/);
+  // A later negation can reinclude a local file; restore its exclusion after it.
+  const lastNegation = lines.findLastIndex(line => line.startsWith('!'));
+  const missing = paths.filter(path => lines.lastIndexOf(path) <= lastNegation);
   if (missing.length) await appendFile(ignorePath, `${ignored && !ignored.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
 }
 

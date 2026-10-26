@@ -11,6 +11,7 @@ import { learningFileTool } from '../skills/geppetto-adopt/scripts/learning-file
 import { symlinkSync } from 'node:fs';
 import { probeLearningHost, learningReadiness } from '../skills/geppetto-adopt/scripts/learning-config.mjs';
 import { learningWorktree, finishLearningWorktree } from '../skills/geppetto-adopt/scripts/learning-worktree.mjs';
+import { memoryClassifierSettings } from '../skills/geppetto-adopt/scripts/memory-config.mjs';
 
 function nativeFixture(root) {
   put(root, 'native.mjs', `import {readFileSync,writeFileSync,appendFileSync} from 'node:fs';
@@ -28,10 +29,13 @@ for(const e of [{type:'thread.started',thread_id:'native-'+Date.now()},{type:'it
 
 test('fresh accepted adoption records subscription consent once and next signal event launches exactly once', async t => {
   const root = fixture(t), home = fixture(t); nativeFixture(root);
+  put(root, '.geppetto/.gitignore', '/authorizations\n!*\n');
   const result = await adoptLearning(root, { accepted: true, home });
   assert.equal(result.enabled, true);
   await adoptLearning(root, { accepted: true, home });
   assert.equal(get(root, '.geppetto/authorizations').trim().split('\n').length, 1);
+  assert.equal(git(root, ['init']).status, 0);
+  assert.equal(git(root, ['check-ignore', '.geppetto/authorizations']).status, 0);
   const policy = JSON.parse(get(root, '.geppetto/config.json')).hooks.signalLearning;
   assert.equal(policy.enabled, true); assert.equal(policy.hosts.codex.model, 'gpt-6.1-sol'); assert.equal(policy.hosts.codex.serviceTier, 'default');
   assert.equal(policy.hosts.codex.sandbox, 'workspace-write'); assert.equal(policy.writeApproval, false);
@@ -46,6 +50,28 @@ test('fresh accepted adoption records subscription consent once and next signal 
   assert.ok(calls[0].args.includes('--model')); assert.ok(calls[0].args.includes('gpt-6.1-sol'));
   assert.ok(calls[0].args.includes('features.shell_tool=false'));
   assert.ok(calls[0].args.includes('features.multi_agent=false'));
+});
+
+test('initializing project learning preserves an explicit personal memory-classifier profile', async t => {
+  const root = fixture(t), home = fixture(t); const user = defaultConfig();
+  user.hooks.memoryClassifier = { enabled: true, benchmark: null, model: 'owner/chat-model', bucketThreshold: 0.8, pageThreshold: 0.9, timeoutMs: 3000, maxOutputTokens: 256 };
+  put(home, '.geppetto/config.json', user);
+  put(root, `fake-bin/${process.platform === 'win32' ? 'codex.exe' : 'codex'}`, 'Synthetic executable discovery entry');
+  const adoption = await adoptLearning(root, { accepted: true, home, env: { PATH: resolve(root, 'fake-bin') }, runCommand: () => ({ status: 0, stdout: 'Logged in using ChatGPT' }) });
+  assert.equal(adoption.enabled, true);
+  assert.deepEqual(memoryClassifierSettings(user, JSON.parse(get(root, '.geppetto/config.json'))), user.hooks.memoryClassifier);
+  const audit = invoke('audit.mjs', ['--json'], { cwd: root, home, env: { OPENROUTER_API_KEY: 'fixture', PATH: '' } });
+  assert.equal(audit.status, 0, audit.stderr); assert.equal(JSON.parse(audit.stdout).memoryClassifier.model, 'owner/chat-model');
+});
+
+test('accepted learning setup rejects an ignore-file symlink before writing outside the project', async t => {
+  const root = fixture(t), outside = fixture(t); nativeFixture(root);
+  put(outside, 'preserve.txt', 'Preserve external file\n');
+  try { symlinkSync(resolve(outside, 'preserve.txt'), resolve(root, '.geppetto/.gitignore')); }
+  catch (error) { t.skip(`Symlink unavailable: ${error.code}`); return; }
+  await assert.rejects(adoptLearning(root, { accepted: true, home: fixture(t) }), /symbolic link/i);
+  assert.equal(get(outside, 'preserve.txt'), 'Preserve external file\n');
+  assert.equal(JSON.parse(get(root, '.geppetto/config.json')).pillars.signalLearning, undefined);
 });
 
 test('missing CLI stays disabled with one actionable adoption item and no grant', async t => {

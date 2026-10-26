@@ -67,6 +67,14 @@
           ]
         }
       }
+    },
+    "skillSelector": {
+      "enabled": true,
+      "benchmark": null,
+      "model": "perplexity/pplx-decider-v1.2",
+      "threshold": 0.75,
+      "timeoutMs": 8000,
+      "batchSize": 80
     }
   },
   "memory": {
