@@ -11,11 +11,12 @@ export function redact(text) {
 }
 
 export async function main(args) {
-  const opts = parseArgs(args, { values: ['--metric', '--scope', '--kind'] });
+  const opts = parseArgs(args, { values: ['--metric', '--scope', '--kind', '--episode', '--source'] });
   const kind = opts['--kind'] ?? 'friction';
-  if (opts._.length !== 1 || !opts._[0].trim() || !opts['--metric']?.trim() || !['error', 'friction', 'preference', 'optimisation'].includes(kind)) throw new UsageError('Usage: signal.mjs "<text>" --metric <name> [--scope <s>] [--kind error|friction|preference|optimisation]');
+  if (opts._.length !== 1 || !opts._[0].trim() || !opts['--metric']?.trim() || !['error', 'friction', 'preference', 'optimisation'].includes(kind)) throw new UsageError('Usage: signal.mjs "<text>" --metric <name> [--scope <s>] [--kind error|friction|preference|optimisation] [--episode <id> --source <reference>]');
+  if ((opts['--episode'] === undefined) !== (opts['--source'] === undefined) || ['--episode', '--source'].some(k => opts[k] !== undefined && !opts[k].trim())) throw new UsageError('--episode and --source must identify the observed episode together; neither establishes independence alone');
   await ignoreLocalFiles('.', ['/signals.jsonl']);
-  const entry = { id: randomUUID(), ts: new Date().toISOString(), kind, scope: redact(opts['--scope'] ?? 'project'), metric: redact(opts['--metric']), text: redact(opts._[0]) };
+  const entry = { id: randomUUID(), ts: new Date().toISOString(), kind, scope: redact(opts['--scope'] ?? 'project'), metric: redact(opts['--metric']), text: redact(opts._[0]), ...(opts['--episode'] ? { episode: redact(opts['--episode']), source: redact(opts['--source']) } : {}) };
   await appendFile('.geppetto/signals.jsonl', `${JSON.stringify(entry)}\n`, { mode: 0o600 });
   console.log(`Signal recorded: ${entry.id}`); return 0;
 }

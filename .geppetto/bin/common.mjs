@@ -57,10 +57,10 @@ export async function jsonFile(path, fallback) {
   }
 }
 
-export async function atomicJson(path, value) {
+export async function atomicJson(path, value, { mode } = {}) {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
+  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', mode });
   await rename(temp, path);
 }
 
@@ -82,7 +82,7 @@ export async function filesUnder(root) {
 
 // Twenty calls catches tool-heavy work; five minutes also catches long single-command turns.
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
-export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, memoryClassifier: { enabled: false, benchmark: null } } });
+export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: { enabled: false, benchmark: null, provider: null, boundary: null, assessmentMaxUsd: null, investigationMaxUsd: null }, memoryClassifier: { enabled: false, benchmark: null } } });
 
 export async function ignoreLocalFiles(project, paths) {
   const ignorePath = resolve(project, '.geppetto/.gitignore');
