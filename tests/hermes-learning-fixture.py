@@ -86,7 +86,7 @@ def main():
     repo = Path(__file__).resolve().parents[1]
     source = repo / 'skills/geppetto-adopt/assets/templates/hooks/hermes'
     node = sys.argv[1]
-    with tempfile.TemporaryDirectory(prefix='geppetto-hermes-', dir=os.environ['TMPDIR']) as temporary:
+    with tempfile.TemporaryDirectory(prefix='geppetto-hermes-') as temporary:
         root = Path(temporary)
         home = root / 'home'
         home.mkdir()

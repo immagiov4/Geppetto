@@ -82,7 +82,9 @@ export async function filesUnder(root) {
 
 // Twenty calls catches tool-heavy work; five minutes also catches long single-command turns.
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
-export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: { enabled: false, benchmark: null, provider: null, boundary: null, assessmentMaxUsd: null, investigationMaxUsd: null }, memoryClassifier: { enabled: false, benchmark: null } } });
+export const learningFileTools = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
+export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, host: 'codex', billing: 'subscription', provider: 'openai', boundary: 'project-file-tools', writeApproval: false, hosts: { codex: { model: 'gpt-6.1-sol', serviceTier: 'default', sandbox: 'workspace-write', tools: [...learningFileTools] }, claude: { sandbox: 'workspace-write', tools: [...learningFileTools] } } });
+export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults(), memoryClassifier: { enabled: true, benchmark: null } } });
 
 export async function ignoreLocalFiles(project, paths) {
   const ignorePath = resolve(project, '.geppetto/.gitignore');
@@ -102,6 +104,9 @@ export function validateConfig(config, file) {
   if (!config.pillars || Array.isArray(config.pillars) || Object.values(config.pillars).some(s => !['installed', 'declined', 'n/a'].includes(s))) fail('pillars must use installed, declined or n/a');
   if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks) || Object.values(config.hooks).some(h => !h || typeof h.enabled !== 'boolean' || !('benchmark' in h))) fail('hooks need enabled and benchmark');
   for (const key of ['minToolCalls', 'minDurationMs']) if (config.hooks.learnNudge?.[key] !== undefined && (!Number.isSafeInteger(config.hooks.learnNudge[key]) || config.hooks.learnNudge[key] <= 0)) fail(`hooks.learnNudge.${key} must be a positive integer`);
+  const learning = config.hooks.signalLearning;
+  if (learning?.writeApproval !== undefined && typeof learning.writeApproval !== 'boolean') fail('hooks.signalLearning.writeApproval must be boolean');
+  for (const key of ['maxRunsPerDay', 'maxConcurrentRuns']) if (learning?.[key] != null && (!Number.isSafeInteger(learning[key]) || learning[key] <= 0)) fail(`hooks.signalLearning.${key} must be a positive integer`);
   validateMemory(config.memory, file);
   return config;
 }

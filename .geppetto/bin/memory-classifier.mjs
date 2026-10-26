@@ -9,11 +9,11 @@ import { logHookEvent } from './hook-events.mjs';
 import { openRouterClassify, classificationPayload } from './memory-provider.mjs';
 import { redact } from './signal.mjs';
 
-function validateSettings(settings) {
+export function validateClassifierSettings(settings) {
   if (typeof settings.model !== 'string' || !settings.model.trim()) throw new Error('memoryClassifier needs an owner-selected model');
   for (const field of ['bucketThreshold', 'pageThreshold']) if (!Number.isFinite(settings[field]) || settings[field] < 0 || settings[field] > 1) throw new Error(`memoryClassifier.${field} must be between 0 and 1`);
   for (const field of ['timeoutMs', 'maxOutputTokens']) if (!Number.isSafeInteger(settings[field]) || settings[field] <= 0) throw new Error(`memoryClassifier.${field} must be a positive integer`);
-  if (!Number.isFinite(settings.maxCostUsd) || settings.maxCostUsd < 0 || !/^\d+(?:\.\d{1,6})?$/.test(String(settings.maxCostUsd))) throw new Error('memoryClassifier.maxCostUsd must bound this run in USD (at most six decimals)');
+  if (settings.maxCostUsd != null && (!Number.isFinite(settings.maxCostUsd) || settings.maxCostUsd < 0 || !/^\d+(?:\.\d{1,6})?$/.test(String(settings.maxCostUsd)))) throw new Error('memoryClassifier.maxCostUsd must be nonnegative USD (at most six decimals)');
   for (const field of ['maxRequestBytes', 'maxConcurrentRequests']) if (settings[field] !== undefined && (!Number.isSafeInteger(settings[field]) || settings[field] <= 0)) throw new Error(`memoryClassifier.${field} must be a positive integer`);
   if (['key', 'apiKey', 'api_key', 'secret'].some(field => field in settings)) throw new Error('Memory classifier credentials belong in the environment or secret store, outside config');
 }
@@ -33,7 +33,7 @@ function ledgerAuthorization(project, home) {
     const result = run(process.execPath, [fileURLToPath(new URL('./authz.mjs', import.meta.url)), ...args], { cwd: project, env: { ...process.env, HOME: home, USERPROFILE: home } });
     if (result.status !== 0) throw new Error(`Memory classifier authorization: ${redact(result.stdout?.trim() || result.stderr?.trim() || result.error?.message || 'failed')}`);
   };
-  return { reserve: (id, maximum) => command(['reserve', 'memory-classifier', '--provider', 'openrouter', '--cost', String(maximum), '--id', id]), settle: (id, actual) => command(['settle', '--id', id, '--actual', String(Math.ceil(actual * 1_000_000) / 1_000_000)]) };
+  return { reserve: (id, maximum) => command(['reserve', 'memory-classifier', '--provider', 'openrouter', '--cost', maximum == null ? 'none' : String(maximum), '--id', id]), settle: (id, actual) => command(['settle', '--id', id, '--actual', String(Math.ceil(actual * 1_000_000) / 1_000_000)]) };
 }
 
 async function withDeadline(action, milliseconds) {
@@ -52,9 +52,9 @@ export async function classifyMemory(event, { project, home = userHome(), provid
   try {
     const user = await jsonFile(resolve(home, '.geppetto/config.json'), {}); const local = await jsonFile(resolve(project, '.geppetto/config.json'), {});
     const settings = { ...user.hooks?.memoryClassifier, ...local.hooks?.memoryClassifier };
-    if (settings.enabled !== true) return {};
+    if (settings.enabled === false) return {};
     if (!env.OPENROUTER_API_KEY) throw new Error('Memory classifier key is absent from the environment or secret store');
-    validateSettings(settings);
+    validateClassifierSettings(settings);
     if (typeof event.prompt !== 'string' || !event.prompt.trim()) throw new Error('Memory classifier prompt is missing');
     const memory = await memorySettings(project, home);
     if (!memory) throw new Error('Memory is not configured');

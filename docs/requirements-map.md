@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Adopt Geppetto in its own repository, then extend optional memory classification from bucket/page selection to recursive index traversal. Selected sibling branches can run in parallel, and request payloads are split against an explicitly configured request-size budget. The default remains disabled until the existing benchmark/keep decision.
+Adopt Geppetto in its own repository, then extend optional memory classification from bucket/page selection to recursive index traversal. Selected sibling branches can run in parallel, and request payloads are split against an explicitly configured request-size budget. Classification operates when its key, selected settings and standing grant exist; measurement is recorded without gating activation.
 
 ## Surfaces and lifecycle
 
@@ -16,7 +16,7 @@ Source baseline: 2c974963e1a6a0b02b3be6d1eb7ff83cb9af9533. This map is based on 
 | Same-bucket boundary, privacy, cycles and duplicate targets | scripts/memory-index.mjs:26 | Resolve each target canonically inside its allowed bucket; reject escapes, detect cycles and deduplicate canonical IDs. Verify symlink escape, parent links, shared descendants and deterministic output. |
 | Whole-run deadline and interrupted work | scripts/memory-classifier.mjs:52 | Preserve the existing deadline and signal across all queued/running requests; timeout stops scheduling new calls and produces a logged error. |
 | Shared cost reservation and unknown provider charges | scripts/memory-classifier.mjs:76 | Reserve once for the whole traversal, aggregate known costs, retain the reservation when any issued call has an unknown cost; exercise concurrent completion and failure. |
-| Session injection and persisted configuration | scripts/memory-hook.mjs:10; memory-config.mjs:5 | Preserve startup listing and manually navigable indexes, project/user precedence and existing disabled behaviour; document additional optional controls. |
+| Session injection and persisted configuration | scripts/memory-hook.mjs:10; memory-config.mjs:5 | Preserve startup listing and manually navigable indexes, project/user precedence and explicit declines; document additional optional controls. |
 | User-visible diagnosis | scripts/hook-events.mjs; hooks/README.md | Retain modelCalls, duration, injected bytes, actual/unknown cost and error evidence; document request-size and recursion semantics. |
 
 ## Technical implications
@@ -27,7 +27,7 @@ Request size is measured in bytes of the actual provider JSON, including schema 
 
 ## Decisions and discovery gaps
 
-Existing global monthly memory maintenance is reused. Existing requirements and skill suggestion hooks are inspected before installation; requested comparisons of all three classifiers are prepared using synthetic fixtures and existing integrations. Paid runs and permanent enablement remain separate decisions. No classifier performance improvement is claimed from mocked providers.
+Existing global monthly memory maintenance is reused. Existing requirements and skill suggestion hooks are inspected before installation; requested comparisons of all three classifiers are prepared using synthetic fixtures and existing integrations. Standing data-and-spending consent is recorded once; one-off comparison consent covers only that comparison. No classifier performance improvement is claimed from mocked providers.
 
 The baseline memory audit reported a false URL mismatch for the same repository with and without a .git suffix. A narrow correction and regression test cover that adoption blocker. A fresh Codex session has successfully read the router and installed specification skill using the permitted execution mode; initial read-only shell execution was blocked by host policy. Hook trust in an external harness and provider-account spend limits require their respective live evidence.
 

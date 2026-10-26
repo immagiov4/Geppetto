@@ -1,6 +1,6 @@
 # OpenRouter classifier setup
 
-Use this branch only after interest in an uncovered [semantic hook](semantic-hooks.md). Setup does not authorize a provider call or permanent activation.
+Use this branch for an uncovered [semantic hook](semantic-hooks.md). Record the accepted standing data-and-spending scope once; secure key delivery and selected settings complete readiness. Benchmark results are recorded evidence rather than a permanent-activation gate.
 
 ## 1. Verify the execution environment first
 
@@ -33,11 +33,11 @@ The missing-key human journey is:
 
 Consult the provider's [quickstart](https://openrouter.ai/docs/quickstart) for current account/key instructions. OAuth PKCE is a separate evaluation of authentication flow and credential storage, not a fallback introduced by this flow.
 
-## 3. Benchmark, then decide
+## 3. Record consent and measurement
 
-Return to the [comparison owner](semantic-hooks.md#setup-and-comparison). Before any real provider request, confirm data scope and paid-test authorization separately. Select model, limits and test cases through the existing classifier/benchmark owner; this setup flow supplies no new thresholds or budget defaults. Do not enable a permanent hook just to run the comparison. Use the authorized isolated benchmark path and keep automatic invocation disabled until the keep decision.
+Return to the [comparison owner](semantic-hooks.md#setup-and-comparison). Before real requests, record the accepted data-and-spending grant once. Select model, traversal settings and any optional cap through the existing owner; this setup flow supplies no thresholds or spending cap. The classifier operates when the key, settings and continuing grant are present. One-off benchmark consent covers only that comparison.
 
-After showing results, record the benchmark reference in the chosen implementation's existing configuration and the owner's explicit keep/decline decision through [project choices](choices.md). On keep, activate only the authorized hook, then verify its real enabled state and availability. On decline, keep it disabled and preserve the refusal on reruns. With no answer, leave it disabled and report pending, not declined or installed. Interrupted setup or benchmark remains pending; a usable credential never substitutes for any of these consents.
+Show and record benchmark results when available in `hooks.memoryClassifier.benchmark`. An absent result remains visible as `null` and does not block authorized operation. Record explicit refusals and preserve them on reruns. A missing key, model/settings or standing grant is a concrete pending prerequisite with one action; a usable credential alone is not consent.
 
 ## Observability
 

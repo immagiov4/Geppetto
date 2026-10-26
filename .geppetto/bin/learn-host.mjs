@@ -4,14 +4,26 @@ import { cli, isMain, parseArgs, projectRoot, jsonFile, UsageError, exists } fro
 import { learningStep, learningStatus } from './learn-dispatch.mjs';
 import { cliLearningHost, hermesLearningHost } from './learn-hosts.mjs';
 import { resolve } from 'node:path';
+import { learningPolicy, probeLearningHost } from './learning-config.mjs';
 
 export async function handleLearningHostEvent(event, name, options = {}) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1' || !['PostToolUse', 'Stop', 'SessionStart'].includes(event?.hook_event_name) || event.stop_hook_active) return {};
   const root = await projectRoot(event.cwd ?? '.');
   if (!await exists(resolve(root, '.geppetto/signals.jsonl'))) return {};
-  const policy = options.policy ?? (await jsonFile(resolve(root, '.geppetto/config.json'), {})).hooks?.signalLearning;
+  let policy = options.policy ?? await learningPolicy(root);
+  let command;
+  if (!options.host && policy.host) name = policy.host;
+  if (!options.host && policy.enabled && policy.billing === 'subscription') {
+    const probe = await probeLearningHost(policy, { cwd: root });
+    if (!probe.available) { await learningStep(root, { ...options, policy }); return {}; }
+    name = probe.host;
+    command = { executable: probe.executable, prefix: probe.prefix };
+    policy = { ...policy, provider: name === 'codex' ? 'openai' : 'anthropic' };
+  }
   const configured = policy?.hosts?.[name] ?? {};
-  const nativeOptions = Object.fromEntries(['executable', 'model', 'sandbox', 'tools', 'boundary', 'provider', 'budgetControl'].filter(key => configured[key] !== undefined).map(key => [key, configured[key]]));
+  const nativeOptions = Object.fromEntries(['executable', 'prefix', 'model', 'serviceTier', 'sandbox', 'tools', 'boundary', 'provider', 'budgetControl'].filter(key => configured[key] !== undefined).map(key => [key, configured[key]]));
+  if (policy.billing !== undefined) nativeOptions.billing = policy.billing;
+  if (policy.billing === 'subscription') Object.assign(nativeOptions, command, { billing: 'subscription', boundary: policy.boundary, provider: policy.provider });
   const host = options.host ?? (['codex', 'claude'].includes(name) && policy?.enabled ? cliLearningHost(name, nativeOptions) : undefined);
   await learningStep(root, { ...options, policy, host });
   // Async command-hook output is informational. It is never a native dispatch acknowledgement.

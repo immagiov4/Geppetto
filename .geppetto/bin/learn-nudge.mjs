@@ -46,5 +46,5 @@ export async function learningEvent(event, now) {
   const entry = { hook: 'learnNudge', session, turn: event.turn_id ?? null, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
   try { await appendFile(resolve(root, '.geppetto/hook-events.jsonl'), `${JSON.stringify(entry)}\n`, { mode: 0o600 }); }
   catch (error) { await unlink(fired); throw error; }
-  return { decision: 'block', reason: 'Judge whether this turn hit recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<friction>" --metric <affected-metric> from the project root, then finish. Include --episode <observed-episode-id> --source <project-evidence-reference> together when actually known; never invent independent provenance.' };
+  return { decision: 'block', reason: 'Judge whether this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<lesson>" --metric <affected-metric> from the project root, then finish. Include --episode <observed-episode-id> --source <project-evidence-reference> together when actually known; never invent independent provenance.' };
 }

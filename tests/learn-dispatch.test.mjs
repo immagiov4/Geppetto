@@ -19,13 +19,13 @@ function hostFor(records, extra = {}) {
 }
 const allow = async () => ({ decision: 'allow', reference: 'synthetic task grant' });
 
-test('recorder stays append-only and disabled learning remains inspectably pending', async t => {
+test('recorder stays append-only and learning without an available authorized host remains inspectably pending', async t => {
   const root = fixture(t);
   const r = invoke('signal.mjs', ['wrong cwd', '--metric', 'reliability', '--episode', 'build-a', '--source', 'test:a'], { cwd: root });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(get(root, '.geppetto/signals.jsonl')).episode, 'build-a');
   const status = await learningStatus(root);
-  assert.equal(status.status, 'pending'); assert.match(status.reason, /disabled/);
+  assert.equal(status.status, 'pending'); assert.match(status.reason, /authorized available learning host/);
 });
 
 test('source-linked semantic assessment reaches actual ack and verified owner outcome once', async t => {

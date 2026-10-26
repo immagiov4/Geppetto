@@ -1,0 +1,1 @@
+[signal-learning] provider=codex budget_usd=0 per=1d scope="project signals; file tools; isolated local branches; stage or commit; no publication" expires=never

@@ -86,3 +86,15 @@ test('no selected buckets stops after stage one and an authorization denial star
   assert.deepEqual(await handleMemoryEvent(denied.event, { home: denied.home, provider, authorization: { reserve: async () => { throw new Error('deny Project does not grant this capability'); } }, env: { OPENROUTER_API_KEY: 'fixture' } }), {}); assert.equal(calls, 0);
   assert.match(get(denied.cwd, '.geppetto/hook-events.jsonl'), /does not grant/);
 });
+
+test('key and standing unlimited grant activate the classifier without an enable flag, cost cap or benchmark', async t => {
+  const { cwd, home, event } = setup(t, { enabled: undefined, maxCostUsd: undefined });
+  const grant = '[memory-classifier] provider=openrouter budget_usd=none per=1d scope="fixture question and indexed candidates" expires=never\n';
+  put(home, '.geppetto/authorizations', grant); put(cwd, '.geppetto/authorizations', grant);
+  let calls = 0;
+  await handleMemoryEvent(event, { home, env: { OPENROUTER_API_KEY: 'fixture-only' }, provider: async () => { calls++; return { selections: [], costUsd: 0.02 }; } });
+  assert.equal(calls, 1);
+  const ledger = get(home, '.geppetto/ledger.jsonl').trim().split('\n').map(JSON.parse);
+  assert.equal(ledger[0].reserved, null); assert.equal(ledger[1].actual, 20000);
+  assert.equal(JSON.parse(get(cwd, '.geppetto/config.json')).hooks.memoryClassifier.benchmark, null);
+});

@@ -15,6 +15,7 @@ test('only a long turn nudges learning once per session and logs its triggering 
   assert.deepEqual(await send('Stop', 'first', 500), {}, 'short turns do not accumulate into a long turn');
   await send('PreToolUse', 'first', 600); const nudge = await send('Stop', 'first', 700);
   assert.equal(nudge.decision, 'block'); assert.match(nudge.reason, /recurring friction.*signal\.mjs/);
+  assert.match(nudge.reason, /reusable workflow.*verified fix.*user correction/);
   assert.deepEqual(await send('Stop', 'first', 800), {});
   await send('UserPromptSubmit', 'first', 900); await send('PreToolUse', 'first', 1000); await send('PreToolUse', 'first', 1100);
   assert.deepEqual(await send('Stop', 'first', 1200), {}, 'dedupe persists across later turns in the session');

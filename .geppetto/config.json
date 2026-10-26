@@ -23,7 +23,8 @@
   "packs": [],
   "pillars": {
     "review": "installed",
-    "gates": "installed"
+    "gates": "installed",
+    "signalLearning": "installed"
   },
   "hooks": {
     "learnNudge": {
@@ -31,8 +32,41 @@
       "benchmark": null
     },
     "memoryClassifier": {
-      "enabled": false,
+      "enabled": true,
       "benchmark": null
+    },
+    "signalLearning": {
+      "enabled": true,
+      "benchmark": null,
+      "host": "codex",
+      "billing": "subscription",
+      "provider": "openai",
+      "boundary": "project-file-tools",
+      "writeApproval": false,
+      "hosts": {
+        "codex": {
+          "model": "gpt-6.1-sol",
+          "serviceTier": "default",
+          "sandbox": "workspace-write",
+          "tools": [
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep"
+          ]
+        },
+        "claude": {
+          "sandbox": "workspace-write",
+          "tools": [
+            "Read",
+            "Edit",
+            "Write",
+            "Glob",
+            "Grep"
+          ]
+        }
+      }
     }
   },
   "memory": {

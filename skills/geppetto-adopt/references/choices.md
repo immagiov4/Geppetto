@@ -11,17 +11,18 @@ Reuse current configuration and complete [existing-automation discovery](#verify
 | Observability format | Per-feature declaration and PR/ticket `## Observability`; template fields are editable. |
 | Significant test documentation | Adjacent to tests; opt into per-feature `## Verification`. |
 | Unit coverage | `unitCoverage: "behaviour"`; `"full"` includes design-neutral unit coverage. |
-| Budgets and unattended scope | Empty grants; user decides capabilities, scope, period, cost and expiration. |
+| Budgets and unattended scope | Record accepted standing consent once. Run and USD caps are absent unless the owner sets them; publication and private/transcript access stay separately scoped. |
 | Memory | Recommended: one private Git repository of Markdown buckets, declared once in `~/.geppetto/config.json`; the project links its own bucket. Default: reuse the user-level repository when present, otherwise offer to create one. |
 | Linked memory buckets | Preserve existing `memory.buckets`; accept `projectBucket` as one legacy link. Otherwise propose the project's matching bucket. Ask which nonprivate buckets to link for full-index injection; Global buckets are always listed. Private retrieval stays manual under explicit access scope. |
 | Extra packs | Preserve installed packs and record resolved companions in `packs`. |
 | Optional retro | Ask once: “Enable retro for requested session analysis?” |
-| Event-driven signal learning | Disabled, with unknown budgets and activation pending. Explain the [assessment, native host and recovery contract](../../geppetto-learn/references/ingestion.md); development consent is not continuing authority. |
+| Event-driven signal learning | Enabled when a subscription CLI is authenticated. Ask once, default yes: “Allow signal learning with project file tools and local branch commits?” Record the accepted answer with `learning-setup.mjs --project <root> --accept`. Codex uses `gpt-6.1-sol`, default service tier; Claude is the alternative when Codex is absent. See the [native host and recovery contract](../../geppetto-learn/references/ingestion.md). |
+| Learning write review | `hooks.signalLearning.writeApproval: false`: commit improvements on an isolated local branch. Set true to retain staged changes for review. |
 | Periodic learning | Explain how recurring signals become measured procedure improvements; ask whether to schedule it. |
 | Periodic skill curation | Explain how the pass reviews skill overlap and stale instructions; ask whether to schedule it. |
 | Periodic memory maintenance | Explain that the pass deduplicates facts, reconciles contradictions, removes obsolete material and repairs indexes; ask: “Would you like periodic memory maintenance enabled?” After acceptance, use the [job procedure](../../geppetto-learn/references/jobs.md) to agree on cadence, buckets, permitted writes and publication, then test before activation. |
-| Semantic hooks | Disabled until the explanation, authorized benchmark and explicit keep decision in [semantic hooks](semantic-hooks.md). Offer once: “Compare this hook on your project's cases before deciding whether to enable it?” |
-| Per-message memory classifier | Disabled, with `hooks.memoryClassifier.enabled: false`. Offer the OpenRouter recursive page suggestions through the same explanation, benchmark and keep-decision flow; session-start bucket listing works without it. |
+| Semantic hooks | Explain the uncovered hooks through [semantic hooks](semantic-hooks.md), preserve refusals and record standing consent once. Measurements remain visible alongside configuration. |
+| Per-message memory classifier | Enabled when the OpenRouter key, selected model/settings and standing user/project grant exist. Ask for data and spending scope once; record the comparison when available. A benchmark is evidence, not an activation gate. Without a key, audit gives the one action to supply it; session-start bucket listing works independently. |
 | End-of-turn learning nudge | Enabled by default under `hooks.learnNudge`; deterministic, with no handler model call or key. Inspect the shipped [thresholds, rationale and continuation cost](../assets/templates/hooks/README.md). This is separate from semantic hooks and periodic jobs. |
 
 ## Verify before asking
@@ -45,9 +46,9 @@ Configuration follows this shared shape; retain unrelated keys. Paths and bucket
   "unitCoverage": "behaviour",
   "packs": [],
   "pillars": {},
-  "hooks": {"learnNudge": {"enabled": true, "benchmark": null}, "memoryClassifier": {"enabled": false, "benchmark": null}},
+  "hooks": {"learnNudge": {"enabled": true, "benchmark": null}, "signalLearning": {"enabled": true, "benchmark": null, "host": "codex", "billing": "subscription", "provider": "openai", "boundary": "project-file-tools", "writeApproval": false, "hosts": {"codex": {"model": "gpt-6.1-sol", "serviceTier": "default", "sandbox": "workspace-write", "tools": ["Read", "Edit", "Write", "Glob", "Grep"]}}}, "memoryClassifier": {"enabled": true, "benchmark": null}},
   "memory": {"buckets": ["my-app"]}
 }
 ```
 
-Populate `pillars` with `installed|declined|n/a` and reasons in the adoption report; retain each recorded refusal on reruns. Semantic hook entries start with `enabled: false` and `benchmark: null`; the deterministic `hooks.learnNudge` uses its own enabled default and thresholds. A project may make `Verification` required by adding it to `sections.featureDocs`. Resolve memory through `$geppetto-memory`, including explicit task paths and privacy/publication scope.
+Populate `pillars` with `installed|declined|n/a` and reasons in the adoption report; retain each recorded refusal on reruns. Learning and memory classification default enabled when prerequisites and accepted standing consent are present; audit names a missing prerequisite with one actionable line. `benchmark: null` records absent measurement without preventing authorized operation. A project may make `Verification` required by adding it to `sections.featureDocs`. Resolve memory through `$geppetto-memory`, including explicit task paths and privacy/publication scope.

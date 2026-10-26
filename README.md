@@ -69,6 +69,8 @@ Paid experiments use explicit authorization records. Personal permissions define
 
 At the end of a long turn, a deterministic hook asks the agent whether a difficulty kept recurring. When there is a useful signal, the agent records its scope and the metric it affects. The hook itself needs no model call or API key; the agent's response uses the session's normal model usage.
 
+Signal learning is enabled when an authenticated subscription CLI and the accepted adoption grant are present. Codex uses `gpt-6.1-sol` on the default service tier; Claude is the alternative when Codex is absent. The agent judges whether a workflow, verified fix, user correction or recurring cause merits learning. Run and spending caps apply only when you configure them. Improvements are committed on isolated local branches; set `hooks.signalLearning.writeApproval` to true to retain staged changes for review.
+
 `geppetto-learn` examines the signal, separates the observation from its possible cause, and chooses the first suitable place for a lasting correction: an enforceable rule goes into a script, hook, or test; a procedure goes into a skill; a description of the system goes into its documentation. Memory holds durable facts that have no better home. A proposed process change is measured before it is retained.
 
 ## How memory reaches a session
@@ -81,7 +83,7 @@ Memories live in one private Git repository of Markdown files, grouped into buck
 
 The repository is configured once at user level in `~/.geppetto/config.json`; a project selects its linked buckets in its own configuration. At session start, the hook supplies the repository location, a one-line description of every bucket, and the full indexes of the selected buckets. It excludes the private bucket's index. The agent then follows index links to read relevant pages as the task develops.
 
-This startup context works without an API key. An optional OpenRouter classifier can choose relevant buckets and follow selected subtopic indexes recursively to suggest pages for each request. Adoption explains the feature, obtains authorization for a benchmark on your cases, and shows the results before you decide whether to enable it. Private retrieval requires explicit access scope.
+This startup context works without an API key. An optional OpenRouter classifier can choose relevant buckets and follow selected subtopic indexes recursively to suggest pages for each request. It operates when its key, selected settings and standing data-and-spending grant are present. Adoption records consent once and shows comparison results as evidence for tuning. Private retrieval requires explicit access scope.
 
 ## Install
 

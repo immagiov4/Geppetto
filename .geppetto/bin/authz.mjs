@@ -31,9 +31,9 @@ async function grants(file) {
     }
     const required = ['provider', 'budget_usd', 'per', 'scope', 'expires'];
     if (match[2].slice(end).trim() || Object.keys(fields).length !== required.length || required.some(key => !fields[key])) throw new Error(`${file}:${i + 1}: Grant needs provider, budget_usd, per, scope and expires`);
-    if (!/^[a-z\d/_.:-]+$/i.test(fields.provider) || !/^[1-9]\d*d$/.test(fields.per) || !/^\d{4}-\d{2}-\d{2}$/.test(fields.expires) || !Number.isFinite(Date.parse(fields.expires)) || new Date(fields.expires).toISOString().slice(0, 10) !== fields.expires) throw new Error(`${file}:${i + 1}: Invalid provider, period or expiry`);
+    if (!/^[a-z\d/_.:-]+$/i.test(fields.provider) || !/^[1-9]\d*d$/.test(fields.per) || (fields.expires !== 'never' && (!/^\d{4}-\d{2}-\d{2}$/.test(fields.expires) || !Number.isFinite(Date.parse(fields.expires)) || new Date(fields.expires).toISOString().slice(0, 10) !== fields.expires))) throw new Error(`${file}:${i + 1}: Invalid provider, period or expiry`);
     let budget;
-    try { budget = dollars(fields.budget_usd); } catch { throw new Error(`${file}:${i + 1}: Invalid budget_usd`); }
+    try { budget = fields.budget_usd === 'none' ? null : dollars(fields.budget_usd); } catch { throw new Error(`${file}:${i + 1}: Invalid budget_usd`); }
     const periodMs = Number(fields.per.slice(0, -1)) * DAY_MS;
     if (!Number.isSafeInteger(periodMs)) throw new Error(`${file}:${i + 1}: Period is too large`);
     result.push({ capability: match[1], ...fields, budget, periodMs, file, line: i + 1 });
@@ -67,7 +67,7 @@ async function ledger(path) {
     const fail = () => { throw new Error(`${path}:${i + 1}: Invalid ledger event; reconcile before spending`); };
     if (!entry || typeof entry.id !== 'string' || !Number.isFinite(Date.parse(entry.ts))) fail();
     if (entry.type === 'reserve') {
-      if (runs.has(entry.id) || typeof entry.capability !== 'string' || typeof entry.project !== 'string' || !Number.isSafeInteger(entry.reserved) || entry.reserved < 0) fail();
+      if (runs.has(entry.id) || typeof entry.capability !== 'string' || typeof entry.project !== 'string' || (entry.reserved !== null && (!Number.isSafeInteger(entry.reserved) || entry.reserved < 0))) fail();
       runs.set(entry.id, entry);
     } else if (entry.type === 'settle') {
       const previous = runs.get(entry.id);
@@ -80,17 +80,21 @@ async function ledger(path) {
 
 function decide(capability, cost, user, project, runs, projectPath, taskGrant, requestedProvider) {
   const personal = user.filter(g => g.capability === capability);
-  if (!personal.length && !taskGrant) return ['ask', 'No personal grant; ask the owner for a standing authorization or use explicit task-scoped consent'];
+  const subscription = capability === 'signal-learning' && cost === 0 && ['codex', 'claude'].includes(requestedProvider);
+  if (!personal.length && !taskGrant && !subscription) return ['ask', 'No personal grant; ask the owner for a standing authorization or use explicit task-scoped consent'];
   const local = project.filter(g => g.capability === capability);
   if (!local.length && !taskGrant) return ['deny', 'Project does not grant this capability'];
   const now = Date.now();
   for (const grant of [...personal, ...local]) {
-    if (now >= Date.parse(grant.expires) + DAY_MS) return ['deny', `${grant.file}:${grant.line}: Grant expired`];
+    if (grant.expires !== 'never' && now >= Date.parse(grant.expires) + DAY_MS) return ['deny', `${grant.file}:${grant.line}: Grant expired`];
+    if (grant.budget === null) continue;
+    if (cost === null) return ['deny', `${grant.file}:${grant.line}: Budget needs a configured per-run maximum`];
     const cutoff = now - grant.periodMs;
     let spent = 0;
     for (const run of runs.values()) {
       if (run.capability !== capability || (local.includes(grant) && run.project !== projectPath)) continue;
       // Pending work keeps its maximum reserved even after the rolling period ends.
+      if (run.actual === undefined && run.reserved === null) return ['deny', 'Unbounded reservation has unknown actual cost; reconcile before using a bounded budget'];
       if (run.actual === undefined || Date.parse(run.ts) >= cutoff) spent += run.actual ?? run.reserved;
     }
     if (spent + cost > grant.budget) return ['deny', `${grant.file}:${grant.line}: Budget exhausted ($${spent / USD_SCALE} used or reserved; $${grant.budget / USD_SCALE} limit)`];
@@ -119,7 +123,7 @@ export async function main(args) {
   if (provider !== undefined && !/^[a-z\d/_.:-]+$/i.test(provider)) throw new UsageError('Provider must be a provider identifier');
   if (taskGrant !== undefined && (!taskGrant.trim() || /[\r\n]/.test(taskGrant))) throw new UsageError('Task grant must name the explicit current-request scope on one nonempty line');
   if (opts['--id'] !== undefined && !/^[a-z\d_.:-]{1,200}$/i.test(opts['--id'])) throw new UsageError('Run ID must contain 1-200 letters, digits, dots, colons, underscores or hyphens');
-  const cost = wantsCapability ? dollars(opts['--cost']) : command === 'settle' ? dollars(opts['--actual']) : 0;
+  const cost = wantsCapability ? opts['--cost'] === 'none' ? null : dollars(opts['--cost']) : command === 'settle' ? dollars(opts['--actual']) : 0;
   const projectPath = resolve('.'); const userDir = resolve(userHome(), '.geppetto'); const ledgerPath = resolve(userDir, 'ledger.jsonl');
   const action = async () => {
     const runs = await ledger(ledgerPath);
