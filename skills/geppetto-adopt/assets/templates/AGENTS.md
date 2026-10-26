@@ -19,6 +19,7 @@ Context is a budget: load the relevant owner through the map below. This file an
 - Substantial changes start with a Requirements map through `$geppetto-spec`.
 - Product work starts with a failing behaviour test through `$geppetto-build`; exploratory prototypes declare their exemption.
 - Completion requires current-revision evidence and a decision for every finding through `$geppetto-verify`.
+- At any time, record meaningful recurring friction or errors with `node .geppetto/bin/signal.mjs "<problem>" --metric <affected-metric>`; use `$geppetto-learn` for guidance. Do not log trivial one-offs.
 - Spending and unattended work first read `$geppetto-authorize`, user grants and project allowances. Consent comes from the owner.
 - Memory writes and publication follow recorded grants through `$geppetto-memory`; retrieval respects bucket privacy.
 - Update each fact's existing owner in the same change. Keep explanations and procedures at their owners.
