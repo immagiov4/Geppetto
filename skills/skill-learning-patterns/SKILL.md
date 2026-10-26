@@ -59,7 +59,7 @@ Run the skill validator available in the environment, check links and diffs, and
 
 When an operational decision changes, test a realistic request that reproduces the problem and one that should retain previous behavior, using isolated resources. For high-impact instructions, use an independent evaluation when tools and authorization permit it. Distinguish a constructed test from a result observed in actual use.
 
-Synchronize only authorized copies and compare their contents. For publication, follow the destination repository's rules: use a pull request when required, or the publication method already authorized by the owner. After uploading, reread remote files and verify the published revision.
+Synchronize only authorized copies and compare their contents. When installation or curation changes Codex hooks, use the shared [hook approval helper](../geppetto-adopt/references/installation.md#codex-hook-approval) within the owner's accepted scope, and verify its result. For publication, follow the destination repository's rules: use a pull request when required, or the publication method already authorized by the owner. After uploading, reread remote files and verify the published revision.
 
 Deliver the useful change, verification performed, and any decision still needed. If the evidence shows that existing instructions are adequate, conclude the analysis with that result.
 

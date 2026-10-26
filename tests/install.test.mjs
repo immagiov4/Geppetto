@@ -28,6 +28,16 @@ test('installation ignores local authorizations while preserving grants and exis
   assert.equal(git(cwd, ['check-ignore', '.geppetto/config.json']).status, 1);
 });
 
+test('installation ships the reusable Codex hook approval command and its resolver', t => {
+  const cwd = fixture(t); const { install } = source(t);
+  const r = invoke(install, ['--target', 'codex', '--project', cwd], { cwd });
+  assert.equal(r.status, 0, r.stderr);
+  for (const path of ['.geppetto/bin/codex-hook-trust.mjs', '.agents/skills/geppetto-adopt/scripts/codex-hook-trust.mjs']) {
+    const help = invoke(resolve(cwd, path), ['--help'], { cwd });
+    assert.equal(help.status, 0, help.stderr); assert.match(help.stdout, /--approve/);
+  }
+});
+
 test('reinstallation tolerates an absent machine-local grant previously recorded by adoption', t => {
   const cwd = fixture(t); const { install } = source(t); const args = ['--target', 'codex', '--project', cwd];
   put(cwd, '.geppetto/authorizations', '');

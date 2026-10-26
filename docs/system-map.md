@@ -19,6 +19,7 @@ Script sources under `skills/geppetto-adopt/scripts/` install into `.geppetto/bi
 | Concern | Owner |
 |---|---|
 | Project configuration and installation | `skills/geppetto-adopt/` |
+| Scoped persistent Codex hook approval for adoption and curation | `skills/geppetto-adopt/scripts/codex-hook-trust.mjs` |
 | Early feedback and learning reminders | `skills/geppetto-adopt/scripts/hook.mjs` |
 | Session memory listing and optional per-request classification | `skills/geppetto-adopt/scripts/memory-hook.mjs` |
 | Recursive classification, deadline and cost reservation | `skills/geppetto-adopt/scripts/memory-classifier.mjs` |

@@ -36,7 +36,7 @@ Optional `maxConcurrentRequests` is a positive integer that bounds every provide
 
 ## Merge into the harness
 
-Merge `claude/settings.json` into `.claude/settings.json` and `codex/.codex/hooks.json` into `.codex/hooks.json`, and keep the hook entries that are already there. Each command finds `.geppetto/bin/hook.mjs` from the working directory's ancestors and launches it with the current Node executable and hidden subprocess windows. Run each exact command from a nested project directory, then review and trust the resulting configuration in the harness. After the owner-approved migration, record the complete merged files with `install.mjs --record-generated`.
+Merge `claude/settings.json` into `.claude/settings.json` and `codex/.codex/hooks.json` into `.codex/hooks.json`, and keep the hook entries that are already there. Each command finds `.geppetto/bin/hook.mjs` from the working directory's ancestors and launches it with the current Node executable and hidden subprocess windows. Run each exact command from a nested project directory, then approve the resulting configuration through the harness; installation and curation share the [Codex approval helper](../../../references/installation.md#codex-hook-approval). After the owner-approved migration, record the complete merged files with `install.mjs --record-generated`.
 
 ## Signal learning
 

@@ -37,7 +37,22 @@ Preserve the snapshot outside the overwritten file. Map each emitted section id 
 
 Run `node <adopt>/scripts/host-lint.mjs --project <project> --json` to inspect host formatter/linter configuration and proposed ignore entries. Register vendored `.agents/skills/**` and `.geppetto/**` in the appropriate ignore lists, plus `.claude/skills/**` when installed there, after owner consent. Preserve source bytes and ownership hashes. Record the host's affected-file command as an argv array in `.geppetto/config.json` `hostChecks.changed`, then run `host-lint.mjs --project <project> --verify`. A missing dependency or failing baseline is a named acceptance gap. `audit --verify` includes this check and reports hook trust, real instruction/skill loading, remote CI and provider spend-limit gaps as `NOT VERIFIED`; structural PASS lines cover only their named checks.
 
-Claude Code uses its plugin/skill discovery and approved hooks. Codex discovers `.agents/skills`; use its hook review mechanism before enabling hooks. For Pi/OpenCode, report absent hook integration as “enforced by CI” only after CI is verified. Missing Node is an explicit local enforcement gap with CI as the checked alternative. Missing scheduling can use a supported harness scheduler or an OS scheduler plus the existing noninteractive CLI; Codex app automations depend on its running environment. Probe current capabilities rather than promising a native scheduler.
+Claude Code uses its plugin/skill discovery and approved hooks. Codex discovers `.agents/skills`; use [Codex hook approval](#codex-hook-approval) for installation and curation. For Pi/OpenCode, report absent hook integration as “enforced by CI” only after CI is verified. Missing Node is an explicit local enforcement gap with CI as the checked alternative. Missing scheduling can use a supported harness scheduler or an OS scheduler plus the existing noninteractive CLI; Codex app automations depend on its running environment. Probe current capabilities rather than promising a native scheduler.
+
+## Codex hook approval
+
+Use the same helper after installing, updating or curating Codex hooks. It works from this skill's `scripts/` or the project's generated `.geppetto/bin/`. List the actual loaded hooks first:
+
+```sh
+node <adopt>/scripts/codex-hook-trust.mjs --project <project> --json
+node <adopt>/scripts/codex-hook-trust.mjs --project <project> --plugin geppetto@geppetto --approve
+```
+
+The second command records approval only after the owner accepts that plugin's current definitions. Use the exact `pluginId` from the inventory. For project hooks, select `--source <absolute-hooks-file>` when consent covers the complete file; for a merged file containing other hooks, use `--key <exact-key>` for each accepted handler instead. These three scopes are alternatives. Without `--approve`, the helper only inspects; approval without a scope fails. Reuse existing consent for the same accepted scope, and include newly introduced or changed definitions in the [visible consent block](choices.md#approval-and-installation-messages) when that consent does not cover them. A curation job can approve within its recorded grant, or leave the concrete inventory for the owner.
+
+The helper uses Codex `hooks/list` and `config/batchWrite`, saves the current definition hashes in the user's Codex config, and verifies them through Codex afterward. Disabled hooks remain disabled, managed hooks retain their policy, and unrelated settings remain intact. It starts no model turn and executes no hook. A changed definition needs another approval. An absent selector match, incomplete discovery, timeout or verification failure exits unsuccessfully. Project-local hooks must also belong to a trusted Codex project layer; hook approval alone does not grant project trust. The installed CLI must expose these APIs; otherwise report the compatibility error and use `/hooks` manually.
+
+Hash approval covers what Codex hashes in the hook definition. Inspect the invoked scripts as part of installation or curation; a trusted definition is separate from evidence that its lifecycle event ran. See [Codex's hook trust contract](https://learn.chatgpt.com/docs/hooks#review-and-trust-hooks).
 
 Choose the review runtime from the machine's available tools: Claude Code, Codex, Pi, OpenCode, an application with agent delegation, or another program capable of launching independent verification sessions. Inspect its installed help, authentication and execution controls, then verify that it can read the review material, start fresh contexts, confirm findings separately and retain results. Record the working invocation in the project's verification commands and use it through `geppetto-verify` and `code-review`.
 
