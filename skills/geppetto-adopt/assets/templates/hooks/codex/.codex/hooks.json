@@ -37,6 +37,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/learn-host.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed learn-host.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/learn-host.mjs'),'--host','codex'],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "async": true
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -46,6 +55,26 @@
             "type": "command",
             "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/memory-hook.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed memory-hook.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/memory-hook.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
             "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/learn-host.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed learn-host.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/learn-host.mjs'),'--host','codex'],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/learn-host.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed learn-host.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/learn-host.mjs'),'--host','codex'],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "async": true
           }
         ]
       }

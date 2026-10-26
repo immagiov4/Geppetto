@@ -1,0 +1,9 @@
+{
+  "node": "<absolute path to Node executable>",
+  "scripts": "<Geppetto source>/skills/geppetto-adopt/scripts",
+  "projectRoot": "<authorized project>",
+  "learningToolsets": [],
+  "learningProvider": null,
+  "learningBoundary": null,
+  "learningBudgetControl": null
+}

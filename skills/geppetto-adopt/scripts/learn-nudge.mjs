@@ -12,6 +12,7 @@ async function projectRoot(cwd) {
 
 /** Record tool activity locally; Stop emits at most one learning instruction per session. */
 export async function learningEvent(event, now) {
+  if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const kind = event.hook_event_name ?? 'PreToolUse';
   if (!['UserPromptSubmit', 'PreToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active) return {};
   const root = await projectRoot(event.cwd ?? '.');
@@ -45,5 +46,5 @@ export async function learningEvent(event, now) {
   const entry = { hook: 'learnNudge', session, turn: event.turn_id ?? null, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
   try { await appendFile(resolve(root, '.geppetto/hook-events.jsonl'), `${JSON.stringify(entry)}\n`, { mode: 0o600 }); }
   catch (error) { await unlink(fired); throw error; }
-  return { decision: 'block', reason: 'Judge whether this turn hit recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<friction>" --metric <affected-metric> from the project root, then finish.' };
+  return { decision: 'block', reason: 'Judge whether this turn hit recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<friction>" --metric <affected-metric> from the project root, then finish. Include --episode <observed-episode-id> --source <project-evidence-reference> together when actually known; never invent independent provenance.' };
 }

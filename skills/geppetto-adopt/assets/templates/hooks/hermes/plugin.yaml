@@ -1,0 +1,11 @@
+name: geppetto-hooks
+version: 0.2.0
+description: "Geppetto memory indexes and deterministic learning reminders. Disabled-by-default scoped learning lifecycle."
+author: Hermes Agent
+manifest_version: 2
+api_version: 1
+platforms: [windows]
+provides_hooks:
+  - subagent_start
+  - pre_llm_call
+  - transform_tool_result

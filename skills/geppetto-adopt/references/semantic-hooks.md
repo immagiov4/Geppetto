@@ -1,15 +1,42 @@
 # Semantic hooks
 
-Offer each hook separately in two lines: what it does and why it may help. Keep a recorded decline across adoption reruns.
+Read [existing-automation discovery](choices.md#verify-before-asking) before offering anything. Reuse a verified equivalent and its recorded decision; discuss only an uncovered choice or concrete gap. Explain each uncovered hook separately, keeping recorded declines across reruns.
 
-- **Bridge/System 1:** Suggests relevant skills for each request. Measure whether it reduces missed procedures without excessive noise or context.
-- **Memory classifier (`hooks.memoryClassifier`):** With an OpenRouter key, a per-message recursive classifier suggests relevant pages as “You may want to check out: buckets/<b>/<page>.md — reason”. Measure retrieval value, privacy boundaries, noise and added context; the agent opens and judges pages itself.
-- **Requirements screen:** Ranks candidate source files before requirements discovery. Measure additional missed-path discovery; source reading and caller tracing still decide relevance.
+| Optional experiment | Explain to the maintainer |
+| --- | --- |
+| Skill selector, also called Bridge/System 1 | Suggests relevant skills on each request alongside the project router. Recommend an optional benchmark on the user's own tasks, especially when the harness cannot invoke skills implicitly. Measure missed procedures, noise and context rather than claiming general accuracy. Resolve an existing selector implementation through [companion resolution](integrations.md); a recommendation does not imply this pack ships or has activated it. |
+| Memory-page classifier, `hooks.memoryClassifier` | Uses OpenRouter to suggest relevant indexed pages per message. The agent still opens and judges pages. Measure useful supported facts found, privacy boundaries, noise and added context. Deterministic session-start bucket listing and linked indexes work without a key or classifier. |
+| Requirements screen | Ranks candidate source files before discovery. Measure missed paths found; source reading and caller tracing still establish relevance. Use its existing [setup and evaluation owner](../../requirements-blast-radius/references/screen.md). |
 
-All semantic hooks start disabled; record the owner’s decision according to [project choices](choices.md). The memory classifier starts with `hooks.memoryClassifier.enabled: false`; the deterministic session-start bucket listing and linked-index injection work without a key or classifier. After interest, request the OpenRouter key through the harness's private secret mechanism; use another provider only where the chosen hook supports it. Keep the key out of chat, configuration committed to Git, signals and reports. If private secret entry is unavailable, report that prerequisite and keep the hook disabled.
+All three are experimental and disabled by default. Offer each uncovered choice once: "Would you like to benchmark this on your tasks before deciding whether to keep it?" Interest in one is not interest in the others. An unanswered offer stays pending and disabled; an explicit refusal is declined. Existing enabled equivalents retain their verified state, not a second installation.
 
-Read `$geppetto-measure-it`; route paid calls through `$geppetto-authorize`. Build a project-specific comparison on authorized real cases with and without the hook, including omissions, noise, latency, reported cost and added tokens. Record cases, versions and limits so the result can be repeated. Show results and ask whether to keep it; benchmark authorization alone does not authorize permanent activation. Store the decision and benchmark reference in `.geppetto/config.json`.
+## Skills and routing
 
-For the memory classifier, compare direct injected-index retrieval with classifier-assisted retrieval on the same authorized questions and bucket indexes, including Global preferences and project links. Record suggested pages actually opened and useful supported facts found; suggestions remain hints. Obtain consent for sending the message/index context to OpenRouter separately from local memory reads. Retain the disabled default until results and an explicit keep decision justify activation.
+Adapt the existing [router template](../assets/templates/AGENTS.md) rather than replacing the project's instructions. Register personal skills and extra skill packs using the harness's existing discovery directories and `packs`. Add a conditional row in the project's `AGENTS.md` for each relevant owner, for example:
+
+```markdown
+| When | Where |
+| --- | --- |
+| Changing our deployment scripts | `$my-deployment-skill` |
+| Working in the billing service | [billing router](services/billing/AGENTS.md) |
+```
+
+Resolve real targets before adding these example links. A selector supplies hints; it must not restrict the agent from discovering other skills or override the router. Suggestions alone do not shrink the host's skill catalog. Compare actual loaded catalog/context tokens before and after any authorized catalog change; report no demonstrated savings when only suggestions were measured.
+
+## Setup and comparison
+
+After setup is accepted, follow [OpenRouter setup](classifier-setup.md). Detect an existing credential before asking for one, verify availability through the actual hook launch environment, and skip account/key stages when it is present. Reuse the host's private entry facility or resolve an installed Wizard for human-only steps. Keep credentials outside chat, committed configuration, signals and reports.
+
+Read `$geppetto-measure-it`; route paid calls through `$geppetto-authorize`. Obtain separate consent for the exact data sent to the provider, paid benchmark scope and cost, and permanent activation. Build a project-specific comparison on authorized real cases with and without the hook, including omissions, noise, latency, reported cost and added tokens. Record cases, versions and limits so the result can be repeated. Show results and ask "Keep this hook after the benchmark, decline it, or leave the decision pending?" Benchmark authorization alone never enables a hook. Record the benchmark reference and explicit decision through [project choices](choices.md); keep pending or declined experiments disabled.
+
+For memory, compare direct injected-index retrieval with classifier-assisted retrieval on the same authorized questions and bucket indexes, including Global preferences and project links. Record suggested pages actually opened and useful supported facts found. Consent to local memory reads does not authorize sending message/index context to OpenRouter. Preserve private-index exclusion and scoped access; hints grant no access.
+
+## Signal learning
+
+**Signal learning (`hooks.signalLearning`)** is a separate optional project-signal assessment and authorized scoped investigation through the [existing learning owner](../../geppetto-learn/references/ingestion.md). It stays disabled until separately approved host/privacy/budget controls and activation. A nudge or pending record is not a launch.
+
+## Observability
+
+Report discovered equivalents and gaps, per-hook pending/declined/kept state, credential source mechanism and hook-process availability without values, and benchmark reference/results or `not run` with its reason. Credential presence is not authenticated provider access. Keep failed or interrupted setup pending and disabled, retaining safe failure evidence and reconciling any spending through its existing ledger.
 
 Passive transcript reading and a reducer/state-machine process remain experiments requiring replay evidence. Calibrate any scoring threshold instead of shipping the diagram's `>0.75` example as policy. Transcript access needs a separate scoped grant. Introduce a reducer only after an ordinary skill fails to enforce a specific well-defined process.

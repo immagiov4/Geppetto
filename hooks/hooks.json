@@ -37,6 +37,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-host.mjs\" --host claude",
+            "async": true
+          }
+        ]
       }
     ],
     "SessionStart": [
@@ -46,6 +55,26 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/memory-hook.mjs\"",
             "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-host.mjs\" --host claude",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-host.mjs\" --host claude",
+            "async": true
           }
         ]
       }

@@ -20,6 +20,7 @@ async function sessionContext(memory) {
 }
 
 export async function handleMemoryEvent(event, options = {}) {
+  if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const { home } = options;
   if (!event || typeof event !== 'object' || Array.isArray(event)) throw new UsageError('Memory hook input must be an event object');
   const name = event.hook_event_name ?? 'SessionStart';
@@ -37,7 +38,12 @@ export async function handleMemoryEvent(event, options = {}) {
 }
 
 export async function main(args) {
-  if (args.length) throw new UsageError('Usage: memory-hook.mjs < hook-event.json');
+  if (args.length === 1 && args[0] === '--check-credential') {
+    const present = Boolean(process.env.OPENROUTER_API_KEY);
+    console.log(JSON.stringify({ credential: present ? 'present' : 'missing', source: present ? 'process-environment' : null, providerAuthentication: 'not-verified' }));
+    return present ? 0 : 1;
+  }
+  if (args.length) throw new UsageError('Usage: memory-hook.mjs [--check-credential] < hook-event.json');
   let event;
   try { event = JSON.parse(readFileSync(0, 'utf8')); } catch { throw new UsageError('Memory hook input must be JSON'); }
   console.log(JSON.stringify(await handleMemoryEvent(event))); return 0;
