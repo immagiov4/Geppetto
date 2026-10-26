@@ -36,7 +36,8 @@ while (true) {
   directory = parent;
 }
 const instruction =
-  'Before acting, judge this message against the agreed requirements. For a substantial new request or steering that changes the agreed outcome, run requirements-blast-radius and produce/update its Requirements map. Handle tiny edits and straightforward localized bug fixes directly. For an orchestrator brief already containing a Requirements map section, reuse that map and examine only uncovered changes. The model judges scope and provenance; this hook only injects this instruction.';
+  'Does this message change the agreed task requirements? For substantial changes, use $requirements-blast-radius and create or update the Requirements map; reuse a supplied map and handle tiny local changes directly.\n' +
+  'Is this feedback on your work? Use $receive-work-feedback to check the requested outcome and supporting evidence before revising.';
 process.stdout.write(
   JSON.stringify({
     hookSpecificOutput: {

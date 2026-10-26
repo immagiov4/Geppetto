@@ -83,6 +83,16 @@ Facts that outlive a chat live in a private Git repository of Markdown, grouped 
 </details>
 
 <details>
+<summary>Examples of useful hooks</summary>
+
+- **After an edit:** run the affected type check or tests and return the actionable failures beside the tool result. [Hook events](https://code.claude.com/docs/en/hooks#posttooluse).
+- **Before a command:** reject a destructive operation or an edit to a protected file, with a reason the agent can act on. [Protected files](https://code.claude.com/docs/en/hooks-guide#block-edits-to-protected-files).
+- **Before completion:** ask the agent to verify its result against the original request and return to unfinished work. [LangChain's verification example](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering).
+- **During repeated edits:** count changes to the same file and suggest reconsidering the approach when the agent keeps circling. [LangChain's loop detector](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering).
+
+</details>
+
+<details>
 <summary>Skill and script inventory</summary>
 
 | | |

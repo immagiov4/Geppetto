@@ -15,6 +15,24 @@ def invoke(script, cwd, client, project=False):
     return json.loads(result.stdout) if result.stdout else None
 
 class ProjectChecks(unittest.TestCase):
+    def test_prompt_routes_requirements_and_feedback_in_two_internal_lines(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            for client in ['claude','codex']:
+                for prompt in ['Change the required outcome','This part of your work is incorrect']:
+                    result=subprocess.run(['bun',str(HERE/'prompt-hook.cjs'),'--client',client],input=json.dumps({'hook_event_name':'UserPromptSubmit','prompt':prompt,'cwd':str(root)}),text=True,capture_output=True,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+                    output=json.loads(result.stdout)
+                    self.assertEqual(list(output),['hookSpecificOutput'])
+                    self.assertEqual(output['hookSpecificOutput']['hookEventName'],'UserPromptSubmit')
+                    lines=output['hookSpecificOutput']['additionalContext'].splitlines()
+                    self.assertEqual(len(lines),2)
+                    self.assertIn('$requirements-blast-radius',lines[0])
+                    self.assertIn('reuse a supplied map',lines[0])
+                    self.assertIn('$receive-work-feedback',lines[1])
+                for event,prompt in [('UserPromptSubmit',' '),('Stop','Feedback')]:
+                    skipped=subprocess.run(['bun',str(HERE/'prompt-hook.cjs'),'--client',client],input=json.dumps({'hook_event_name':event,'prompt':prompt,'cwd':str(root)}),text=True,capture_output=True,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+                    self.assertEqual(skipped.stdout,'')
+
     def test_install_update_and_combined_hooks(self):
         with tempfile.TemporaryDirectory(prefix='requirements project ') as folder:
             root=Path(folder); repo=root/'repo'; repo.mkdir(); (repo/'.git').mkdir()

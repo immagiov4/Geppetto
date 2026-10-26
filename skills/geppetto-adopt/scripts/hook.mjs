@@ -35,7 +35,7 @@ function sectionFeedback(body, cwd, runCommand) {
 export async function handleEvent(event, { runCommand = run, now = Date.now } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   const learning = await learningEvent(event, now);
-  if (['UserPromptSubmit', 'Stop'].includes(event.hook_event_name)) return learning;
+  if (['UserPromptSubmit', 'PostToolUse', 'Stop'].includes(event.hook_event_name)) return learning;
   if (typeof event.tool_name !== 'string' || !event.tool_input) throw new UsageError('Hook input needs tool_name and tool_input');
   const input = event.tool_input;
   const eventName = event.hook_event_name ?? 'PreToolUse';

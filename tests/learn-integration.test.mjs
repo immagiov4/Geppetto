@@ -110,7 +110,7 @@ test('shipped native async hook commands run from nested projects without activa
   for (const path of ['hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json']) {
     const root = fixture(t), home = fixture(t); setup(root); put(root, '.geppetto/config.json', { hooks: { signalLearning: { enabled: false } } });
     cpSync(scripts, resolve(root, '.geppetto/bin'), { recursive: true }); mkdirSync(resolve(root, 'apps/backend'), { recursive: true });
-    const hook = JSON.parse(get(resolve(repo, 'skills/geppetto-adopt/assets/templates'), path)).hooks.PostToolUse[0].hooks[0];
+    const hook = JSON.parse(get(resolve(repo, 'skills/geppetto-adopt/assets/templates'), path)).hooks.PostToolUse.flatMap(group => group.hooks).find(handler => handler.command.includes('learn-host.mjs'));
     assert.equal(hook.async, true);
     const result = spawnSync(process.execPath, ['-e', hook.command.slice('node -e "'.length, -1)], { cwd: resolve(root, 'apps/backend'), input: JSON.stringify({ hook_event_name: 'PostToolUse', cwd: resolve(root, 'apps/backend') }), encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home } });
     assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), {}); assert.match(JSON.parse(get(root, '.geppetto/learning/state.json')).reason, /disabled/);

@@ -95,7 +95,7 @@ def main():
         project = root / 'project'
         (project / '.geppetto').mkdir(parents=True)
         policy = {'enabled': True, 'benchmark': None, 'provider': 'synthetic', 'boundary': 'fixture-only', 'assessmentMaxUsd': '0', 'investigationMaxUsd': '0'}
-        (project / '.geppetto/config.json').write_text(json.dumps({'hooks': {'signalLearning': policy}}))
+        (project / '.geppetto/config.json').write_text(json.dumps({'hooks': {'signalLearning': policy, 'learnNudge': {'minToolCalls': 1}}}))
         records = [{'id': x, 'ts': '2026-10-26', 'kind': 'friction', 'scope': 'project', 'metric': 'reliability', 'text': 'Child cwd omitted' if x == 'a' else 'Inputs resolved in home', 'episode': f'run-{x}', 'source': f'fixture:{x}'} for x in ('a', 'b')]
         for record in records:
             subprocess.run([node, str(repo / 'skills/geppetto-adopt/scripts/signal.mjs'), record['text'], '--metric', record['metric'], '--episode', record['episode'], '--source', record['source']], cwd=project, check=True, capture_output=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
@@ -120,13 +120,32 @@ def main():
         module.register(ctx)
         module._LEARNING.account = lambda _handle, _result: '0'  # Known provider-free test execution, not a production cost inference.
         callbacks['pre_llm_call'](session_id='parent-fixture', turn_id='turn-a')
-        callbacks['transform_tool_result'](session_id='parent-fixture', turn_id='turn-a', tool_call_id='call-a', result='{}')
-        callbacks['pre_llm_call'](session_id='parent-fixture', turn_id='turn-b')
+        transformed = callbacks['transform_tool_result'](session_id='parent-fixture', turn_id='turn-a', tool_call_id='call-a', result='{}')
+        assert '_geppetto_learning_reminder' in json.loads(transformed)
+        next_context = callbacks['pre_llm_call'](session_id='parent-fixture', turn_id='turn-b')
+        assert next_context is None or 'Geppetto learning reminder:' not in next_context['context'], 'an already delivered native turn must not be recovered again'
         state = json.loads((project / '.geppetto/learning/state.json').read_text())
         assert state['status'] == 'keep', state
         assert len(service.requests) == 2
         assert state['attempts'][1]['runId'] == 'fixture-child-2'
         assert json.loads((project / 'measurement.json').read_text()) == {'baseline': False, 'treatment': True, 'verified': True}
+        later = callbacks['transform_tool_result'](session_id='parent-fixture', turn_id='turn-b', tool_call_id='call-b', result='{}')
+        assert '_geppetto_learning_reminder' in json.loads(later)
+        assert callbacks['transform_tool_result'](session_id='parent-fixture', turn_id='turn-b', tool_call_id='call-b-duplicate', result='{}') is None
+        # Tool-result representations that cannot carry a reminder defer it to internal context.
+        quiet_config = {'hooks': {'signalLearning': {'enabled': False}, 'learnNudge': {'minToolCalls': 1}}}
+        (project / '.geppetto/config.json').write_text(json.dumps(quiet_config))
+        plain = callbacks['transform_tool_result'](session_id='plain-fixture', turn_id='plain', tool_call_id='plain-call', result='tool output')
+        assert plain.startswith('tool output\n\nGeppetto learning reminder:')
+        assert callbacks['transform_tool_result'](session_id='deferred-fixture', turn_id='first', tool_call_id='array-call', result='[]') is None
+        deferred = callbacks['pre_llm_call'](session_id='deferred-fixture', turn_id='second')
+        assert 'Geppetto learning reminder:' in deferred['context']
+        repeated = callbacks['pre_llm_call'](session_id='deferred-fixture', turn_id='third')
+        assert repeated is None or 'Geppetto learning reminder:' not in repeated['context']
+        for call_id in ('missing-turn-first', 'missing-turn-second'):
+            callbacks['pre_llm_call'](session_id='missing-turn-fixture')
+            without_turn = callbacks['transform_tool_result'](session_id='missing-turn-fixture', tool_call_id=call_id, result='{}')
+            assert '_geppetto_learning_reminder' in json.loads(without_turn), 'missing native turn IDs must use each prompt boundary'
         # Native child callbacks do not recursively assess their own work.
         original_bridge = module._run
         module._run = lambda _payload: (_ for _ in ()).throw(AssertionError('Learning child must not read memory or fire a nudge'))

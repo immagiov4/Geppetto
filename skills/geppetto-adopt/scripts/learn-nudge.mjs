@@ -10,11 +10,11 @@ async function projectRoot(cwd) {
   }
 }
 
-/** Record tool activity locally; Stop emits at most one learning instruction per session. */
+/** Record tool starts; completion adds learning context once per qualifying turn. */
 export async function learningEvent(event, now) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const kind = event.hook_event_name ?? 'PreToolUse';
-  if (!['UserPromptSubmit', 'PreToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active) return {};
+  if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active) return {};
   const root = await projectRoot(event.cwd ?? '.');
   if (!root) return {};
   const configPath = resolve(root, '.geppetto/config.json');
@@ -24,9 +24,7 @@ export async function learningEvent(event, now) {
   const session = createHash('sha256').update(event.session_id).digest('hex');
   const state = resolve(root, '.geppetto/hook-state', session);
   const activity = resolve(state, 'activity.jsonl');
-  const fired = resolve(state, 'fired');
-  if (await exists(fired)) return {};
-  if (kind !== 'Stop') {
+  if (kind !== 'PostToolUse') {
     await mkdir(state, { recursive: true });
     await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);
     await appendFile(activity, `${JSON.stringify({ kind, at: now(), id: event.tool_use_id ?? randomUUID(), turn: event.turn_id ?? null })}\n`, { mode: 0o600 });
@@ -40,11 +38,14 @@ export async function learningEvent(event, now) {
   if (!unique.length) return {};
   const elapsedMs = now() - Math.min(...unique.map(call => call.at));
   if (unique.length < config.minToolCalls && elapsedMs < config.minDurationMs) return {};
+  const turn = event.turn_id || unique[0].turn || records[lastPrompt]?.id || unique[0].id;
+  const turnHash = createHash('sha256').update(turn).digest('hex');
+  const fired = resolve(state, `fired-${turnHash}`);
   let marker;
   try { marker = await open(fired, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return {}; throw error; }
   await marker.close();
-  const entry = { hook: 'learnNudge', session, turn: event.turn_id ?? null, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
+  const entry = { hook: 'learnNudge', event: kind, session, turn, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
   try { await appendFile(resolve(root, '.geppetto/hook-events.jsonl'), `${JSON.stringify(entry)}\n`, { mode: 0o600 }); }
   catch (error) { await unlink(fired); throw error; }
-  return { decision: 'block', reason: 'Judge whether this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<lesson>" --metric <affected-metric> from the project root, then finish. Include --episode <observed-episode-id> --source <project-evidence-reference> together when actually known; never invent independent provenance.' };
+  return { hookSpecificOutput: { hookEventName: kind, additionalContext: 'Before your final reply, use $geppetto-learn to judge whether this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<lesson>" --metric <affected-metric> from the project root. Keep this routine check internal and continue the requested task. Include --episode <observed-episode-id> --source <project-evidence-reference> together when actually known; never invent independent provenance.' } };
 }

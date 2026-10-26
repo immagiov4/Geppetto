@@ -17,6 +17,7 @@ function fixture(t) {
   cpSync(resolve(source, 'skills'), resolve(root, 'skills'), { recursive: true });
   for (const name of ['README.md', 'THIRD_PARTY_NOTICES.md']) cpSync(resolve(source, name), resolve(root, name));
   cpSync(resolve(source, 'assets'), resolve(root, 'assets'), { recursive: true });
+  cpSync(resolve(source, 'docs'), resolve(root, 'docs'), { recursive: true });
   return root;
 }
 

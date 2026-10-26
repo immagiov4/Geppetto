@@ -6,27 +6,49 @@ import { spawnSync } from 'node:child_process';
 import { fixture, put, get, invoke, repo, scripts, git, config } from './helpers.mjs';
 
 const templates = resolve(repo, 'skills/geppetto-adopt/assets/templates');
-test('both shipped hook fragments execute from nested directories, preserve feedback and deliver one Stop reminder', t => {
+test('both shipped hook fragments deliver internal context from nested directories and leave Stop for background learning', t => {
   for (const path of ['hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json']) {
     const cwd = fixture(t); cpSync(scripts, resolve(cwd, '.geppetto/bin'), { recursive: true });
     mkdirSync(resolve(cwd, 'apps/backend'), { recursive: true });
     put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: true, benchmark: null, minToolCalls: 1, minDurationMs: 300000 } } });
     const hooks = JSON.parse(get(templates, path)).hooks;
-    const event = name => {
+    const event = (name, extra = {}) => {
       const command = hooks[name][0].hooks[0].command;
       assert.match(command, /^node -e ".*"$/);
-      const result = spawnSync(process.execPath, ['-e', command.slice('node -e "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: name, session_id: 'template', cwd: resolve(cwd, 'apps/backend'), tool_name: 'Write', tool_input: { file_path: '.geppetto/authorizations' } }), encoding: 'utf8', windowsHide: true });
+      const result = spawnSync(process.execPath, ['-e', command.slice('node -e "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: name, session_id: 'template', cwd: resolve(cwd, 'apps/backend'), tool_name: 'Read', tool_input: {}, ...extra }), encoding: 'utf8', windowsHide: true });
       assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
     };
     assert.deepEqual(event('UserPromptSubmit'), {});
-    assert.equal(event('PreToolUse').hookSpecificOutput.permissionDecision, 'deny');
-    assert.equal(event('Stop').decision, 'block'); assert.deepEqual(event('Stop'), {});
+    assert.equal(event('PreToolUse', { tool_name: 'Write', tool_input: { file_path: '.geppetto/authorizations' } }).hookSpecificOutput.permissionDecision, 'deny');
+    assert.deepEqual(event('PreToolUse'), {});
+    const learning = event('PostToolUse');
+    assert.deepEqual(Object.keys(learning), ['hookSpecificOutput']);
+    assert.equal(learning.hookSpecificOutput.hookEventName, 'PostToolUse');
+    assert.match(learning.hookSpecificOutput.additionalContext, /signal\.mjs/);
+    assert.deepEqual(event('PostToolUse'), {});
+    assert.equal(hooks.PostToolUse[0].hooks[0].async, undefined, 'context must arrive before the next model request');
+    assert.ok(hooks.Stop.flatMap(group => group.hooks).every(handler => handler.async && handler.command.includes('learn-host.mjs')));
+    assert.ok(hooks.PostToolUse.flatMap(group => group.hooks).some(handler => handler.async && handler.command.includes('learn-host.mjs')));
     assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).hook, 'learnNudge');
     const memory = fixture(t); git(memory, ['init', '-q']); put(memory, 'index.md', '| Bucket | Scope | Holds |\n|---|---|---|\n| preferences | global | Working preferences. |\n');
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
     assert.match(event('SessionStart').hookSpecificOutput.additionalContext, /preferences — Working preferences/);
     assert.match(hooks.UserPromptSubmit[0].hooks[1].command, /memory-hook\.mjs/);
   }
+});
+
+test('the plugin hook entrypoint requests learning internally while preserving async ingestion', t => {
+  const hooks = JSON.parse(get(repo, 'hooks/hooks.json')).hooks;
+  const handler = hooks.PostToolUse[0].hooks[0];
+  assert.equal(handler.async, undefined);
+  assert.equal(handler.command, 'node "${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/hook.mjs"');
+  assert.ok(hooks.Stop.flatMap(group => group.hooks).every(hook => hook.async && hook.command.includes('learn-host.mjs')));
+  const cwd = fixture(t); put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 1 } } });
+  const send = name => invoke('hook.mjs', [], { cwd, input: JSON.stringify({ hook_event_name: name, session_id: 'plugin', cwd, tool_name: 'Read', tool_input: {} }) });
+  assert.equal(send('PreToolUse').status, 0);
+  const post = send('PostToolUse'); assert.equal(post.status, 0, post.stderr);
+  assert.match(JSON.parse(post.stdout).hookSpecificOutput.additionalContext, /signal\.mjs/);
+  assert.deepEqual(JSON.parse(send('Stop').stdout), {});
 });
 
 test('first-adoption CI selects only base scripts or a valid owner-pinned package and runs its gate', t => {

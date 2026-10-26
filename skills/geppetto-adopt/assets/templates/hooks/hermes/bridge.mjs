@@ -11,7 +11,7 @@ let learning = {};
 let memory = {};
 if (input.phase === 'begin') {
   // Recover an unfired reminder from a previous turn before resetting its counters.
-  learning = await learningEvent({ ...event, turn_id: undefined, hook_event_name: 'Stop' }, Date.now);
+  learning = await learningEvent({ ...event, turn_id: undefined, hook_event_name: 'PostToolUse' }, Date.now);
   await learningEvent({ ...event, hook_event_name: 'UserPromptSubmit' }, Date.now);
   const { handleMemoryEvent } = await import(pathToFileURL(resolve(settings.scripts, 'memory-hook.mjs')));
   // SessionStart is read-only index retrieval. Never invoke the optional classifier.
@@ -20,8 +20,8 @@ if (input.phase === 'begin') {
   const now = Date.now();
   const duration = Number.isFinite(input.duration_ms) ? Math.max(0, input.duration_ms) : 0;
   await learningEvent({ ...event, hook_event_name: 'PreToolUse', tool_use_id: input.tool_call_id }, () => now - duration);
-  if (input.can_remind) learning = await learningEvent({ ...event, hook_event_name: 'Stop' }, () => now);
+  if (input.can_remind) learning = await learningEvent({ ...event, hook_event_name: 'PostToolUse' }, () => now);
 } else {
   throw new Error('Unsupported bridge phase');
 }
-console.log(JSON.stringify({ memory: memory.hookSpecificOutput?.additionalContext ?? '', learning: learning.reason ?? '' }));
+console.log(JSON.stringify({ memory: memory.hookSpecificOutput?.additionalContext ?? '', learning: learning.hookSpecificOutput?.additionalContext ?? '' }));

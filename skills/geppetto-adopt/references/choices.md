@@ -23,7 +23,7 @@ Reuse current configuration and complete [existing-automation discovery](#verify
 | Periodic memory maintenance | Explain that the pass deduplicates facts, reconciles contradictions, removes obsolete material and repairs indexes; ask: “Would you like periodic memory maintenance enabled?” After acceptance, use the [job procedure](../../geppetto-learn/references/jobs.md) to agree on cadence, buckets, permitted writes and publication, then test before activation. |
 | Semantic hooks | Explain the uncovered hooks through [semantic hooks](semantic-hooks.md), preserve refusals and record standing consent once. Measurements remain visible alongside configuration. |
 | Per-message memory classifier | Enabled when the OpenRouter key, selected model/settings and standing user/project grant exist. Ask for data and spending scope once; record the comparison when available. A benchmark is evidence, not an activation gate. Without a key, audit gives the one action to supply it; session-start bucket listing works independently. |
-| End-of-turn learning nudge | Enabled by default under `hooks.learnNudge`; deterministic, with no handler model call or key. Inspect the shipped [thresholds, rationale and continuation cost](../assets/templates/hooks/README.md). This is separate from semantic hooks and periodic jobs. |
+| Internal learning reminder | Enabled by default under `hooks.learnNudge`; deterministic, with no handler model call or key. Inspect the shipped [thresholds, rationale and reflection cost](../assets/templates/hooks/README.md). This is separate from semantic hooks and periodic jobs. |
 
 ## Verify before asking
 
