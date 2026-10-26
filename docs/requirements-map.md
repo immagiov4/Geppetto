@@ -1,5 +1,17 @@
 # Requirements map
 
+## Steering: review runtime and skill selection
+
+The maintainer requests capability-based verification runtime selection during adoption: reuse an installed CLI, application or harness that can launch fresh review contexts, confirm findings independently and retain results. The generic workflow is owned by `skills/code-review/SKILL.md`, routed by `skills/geppetto-verify/SKILL.md` and the adoption procedure, choices and installation references. The existing Python/Codex runner remains one concrete implementation. Verify consistent routing, runtime-specific dependency guidance and retained independent review stages.
+
+For a large skill catalog, explicit invocation is an owner choice; contextual classifier suggestions provide a middle ground with automatic invocation and manual selection. `skills/geppetto-adopt/references/semantic-hooks.md` owns this explanation and measurement of omissions, noise, latency, cost and actual context. Remove redundant warnings from the affected setup and evaluation prose while keeping concrete credential probes and authorization steps. No product questions remain; current source inspection establishes this bounded instruction/documentation change.
+
+The maintainer also requests discoverable informal decision rationale in memory. `skills/geppetto-memory/SKILL.md` and its layout reference own retention, source/scope and topic indexing; `geppetto-learn` routes these notes and `geppetto-living-docs` distinguishes them from implementation history and formal ADRs. Verify the retrieval path and consistent ownership, including preservation during maintenance.
+
+Review of the pending learning update adds focused acceptance checks: finalization rechecks current authority with zero additional spend and preserves an accounting hold before committing; adoption reports readiness only after the existing authorization owner accepts the standing grant. Regression fixtures exercise a fully spent period budget, an investigation overrun and an expired grant.
+
+Security and retention checks cover native Codex writes remaining read-only while scoped MCP writes are enabled, explicitly unlimited personal and project grants for unbounded paid reservations, ignored worktree outputs blocking retention, and shared provider/boundary/budget preflight checks in readiness and launch. These close the existing file-scope, consent and retained-outcome contracts.
+
 ## Outcome
 
 Adopt Geppetto in its own repository, then extend optional memory classification from bucket/page selection to recursive index traversal. Selected sibling branches can run in parallel, and request payloads are split against an explicitly configured request-size budget. Classification operates when its key, selected settings and standing grant exist; measurement is recorded without gating activation.

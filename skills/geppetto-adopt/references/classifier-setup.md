@@ -29,7 +29,7 @@ The missing-key human journey is:
 1. Open [OpenRouter](https://openrouter.ai/) and sign up or log in. The human completes authentication privately.
 2. Open [API keys](https://openrouter.ai/settings/keys) and create a key. Confirm the current dashboard labels before generating click instructions; do not invent them. Key creation is not permission to fund an account or make calls.
 3. Enter the key through the host's private facility, or the installed Wizard's hidden secret prompt. Agree the storage destination outside committed configuration. It must feed `OPENROUTER_API_KEY` to the hook's actual launcher through its existing environment/secret mechanism. Do not silently fall back to a `.env` upsert when no existing loader connects it to that process.
-4. Rerun the no-network probe through that same launcher. A file-write confirmation is not delivery proof. Resume comparison only after availability is verified and the independent data/spending grants below exist.
+4. Rerun the no-network probe through that same launcher to verify key availability. Resume comparison after availability and the data/spending grants below are established.
 
 Consult the provider's [quickstart](https://openrouter.ai/docs/quickstart) for current account/key instructions. OAuth PKCE is a separate evaluation of authentication flow and credential storage, not a fallback introduced by this flow.
 
@@ -37,7 +37,7 @@ Consult the provider's [quickstart](https://openrouter.ai/docs/quickstart) for c
 
 Return to the [comparison owner](semantic-hooks.md#setup-and-comparison). Before real requests, record the accepted data-and-spending grant once. Select model, traversal settings and any optional cap through the existing owner; this setup flow supplies no thresholds or spending cap. The classifier operates when the key, settings and continuing grant are present. One-off benchmark consent covers only that comparison.
 
-Show and record benchmark results when available in `hooks.memoryClassifier.benchmark`. An absent result remains visible as `null` and does not block authorized operation. Record explicit refusals and preserve them on reruns. A missing key, model/settings or standing grant is a concrete pending prerequisite with one action; a usable credential alone is not consent.
+Show and record benchmark results when available in `hooks.memoryClassifier.benchmark`. An absent result remains visible as `null` and does not block authorized operation. Record explicit refusals and preserve them on reruns. Give one actionable item for a missing key, model/settings or standing grant.
 
 ## Observability
 

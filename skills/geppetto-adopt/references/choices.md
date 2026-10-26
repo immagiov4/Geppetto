@@ -6,7 +6,7 @@ Reuse current configuration and complete [existing-automation discovery](#verify
 | --- | --- |
 | Documentation location/style | Existing owner and style; when absent, `docs/` with concise feature pages. Offer a reference repository if the maintainer wants examples. Infer structure, tone and update rules from authorized material. |
 | Existing development system | Preserve it and map equivalent pillars. |
-| Review engine | Bundled `code-review` plus `receive-work-feedback`; retain both unless the user chooses a replacement. |
+| Review engine | Bundled `code-review` plus `receive-work-feedback`, using an available CLI, application or harness verified during adoption. Preserve a working project choice. |
 | CI provider / ticket gate transition | Existing provider. With no ticket engine, record the transition `n/a`; PR merge remains the enforcement boundary. With an engine, agree its blocking step. |
 | Observability format | Per-feature declaration and PR/ticket `## Observability`; template fields are editable. |
 | Significant test documentation | Adjacent to tests; opt into per-feature `## Verification`. |

@@ -1,4 +1,4 @@
 interface:
   display_name: "Code review"
-  short_description: "Review with Sol, evidence and measured usage"
-  default_prompt: "Use $code-review to review this change locally with GPT-6.1 Sol."
+  short_description: "Review with independent checks and evidence"
+  default_prompt: "Use $code-review to review this change with an available verification runtime."

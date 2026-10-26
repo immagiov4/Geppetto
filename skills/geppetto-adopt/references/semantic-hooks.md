@@ -4,7 +4,7 @@ Read [existing-automation discovery](choices.md#verify-before-asking) before off
 
 | Optional experiment | Explain to the maintainer |
 | --- | --- |
-| Skill selector, also called Bridge/System 1 | Suggests relevant skills on each request alongside the project router. Recommend an optional benchmark on the user's own tasks, especially when the harness cannot invoke skills implicitly. Measure missed procedures, noise and context rather than claiming general accuracy. Resolve an existing selector implementation through [companion resolution](integrations.md); a recommendation does not imply this pack ships or has activated it. |
+| Skill selector, also called Bridge/System 1 | With many installed skills, the owner may choose explicit invocation to keep selection deliberate. A low-cost classifier offers a middle ground: contextual skill suggestions on each request, alongside the project router. Compare missed procedures, irrelevant suggestions, latency, cost and loaded context on the user's own tasks. Reuse an existing selector through [companion resolution](integrations.md). |
 | Memory-page classifier, `hooks.memoryClassifier` | Uses OpenRouter to suggest relevant indexed pages per message. The agent still opens and judges pages. Measure useful supported facts found, privacy boundaries, noise and added context. Deterministic session-start bucket listing and linked indexes work without a key or classifier. |
 | Requirements screen | Ranks candidate source files before discovery. Measure missed paths found; source reading and caller tracing still establish relevance. Use its existing [setup and evaluation owner](../../requirements-blast-radius/references/screen.md). |
 
@@ -21,7 +21,7 @@ Adapt the existing [router template](../assets/templates/AGENTS.md) rather than 
 | Working in the billing service | [billing router](services/billing/AGENTS.md) |
 ```
 
-Resolve real targets before adding these example links. A selector supplies hints; it must not restrict the agent from discovering other skills or override the router. Suggestions alone do not shrink the host's skill catalog. Compare actual loaded catalog/context tokens before and after any authorized catalog change; report no demonstrated savings when only suggestions were measured.
+Resolve the routing targets and keep the agent free to discover additional skills beyond the suggested set. For a large catalog, offer explicit invocation with classifier suggestions alongside automatic invocation and manual selection. Compare the catalog descriptions, suggestions and skill bodies actually loaded in each configuration to measure their context cost.
 
 ## Setup and comparison
 
