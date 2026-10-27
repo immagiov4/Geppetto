@@ -73,3 +73,14 @@ test('CI fails closed on API errors and unsafe changed paths', async t => {
   put(check.cwd, 'event.json', event);
   await assert.rejects(main(['--docs', '--event', resolve(check.cwd, 'event.json')], { cwd: check.cwd, request: async () => assert.fail('truncated lists must fail before fetching') }), /file list is truncated/);
 });
+
+test('a PR that changes the docs contract is checked against base and incoming config, read as data', async t => {
+  const incoming = config(); incoming.docs.root = 'pages'; incoming.sections.featureDocs = ['Observability', 'Rollback'];
+  const files = [{ filename: '.geppetto/config.json', status: 'modified' }, { filename: 'pages/new.md', status: 'added' }, { filename: 'features/old.md', status: 'modified' }];
+  const check = setup(t, files, { '.geppetto/config.json': JSON.stringify(incoming), 'pages/new.md': '# New\n## Observability\nLogs\n## Verification\nCLI', 'features/old.md': '# Old\n## Observability\nLogs\n## Verification\nCLI\n## Rollback\nRevert' });
+  assert.equal(await check.check(), 1);
+  const stderr = check.results[0].result.stderr;
+  assert.match(stderr, /pages\/new\.md:1: Missing section: Rollback/);
+  assert.doesNotMatch(stderr, /features\/old\.md/);
+  assert.equal(check.results[0].args.filter(arg => arg.endsWith('.md')).length, 2);
+});

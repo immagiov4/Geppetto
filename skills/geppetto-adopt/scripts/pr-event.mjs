@@ -22,18 +22,27 @@ function safeDocumentPath(path) {
   return path;
 }
 
-async function changedDocPaths(event, root, request) {
+async function changedPaths(event, request) {
   const files = [];
   for (let page = 1; ; page++) {
     const batch = await request(`/repos/${event.repository.full_name}/pulls/${event.number}/files?per_page=${filesPerPage}&page=${page}`);
     if (!Array.isArray(batch)) throw new Error('Invalid GitHub changed-file response');
-    for (const file of batch) {
-      const path = safeDocumentPath(file.filename);
-      if (file.status !== 'removed' && path.toLowerCase().endsWith('.md') && (root === '.' || path.startsWith(`${root}/`))) files.push(path);
-    }
+    for (const file of batch) if (file.status !== 'removed') files.push(safeDocumentPath(file.filename));
     if (batch.length < filesPerPage) break;
   }
   return files.sort();
+}
+
+const docsRoot = config => safeDocumentPath(posix.normalize(config.docs?.root ?? 'docs').replace(/\/$/, ''));
+
+// A PR that edits the contract is checked against base and incoming contracts; head config is read as data.
+async function contract(base, changed, head, request) {
+  if (!changed.includes('.geppetto/config.json')) return { config: base, roots: [docsRoot(base)] };
+  let incoming;
+  try { incoming = JSON.parse(await request(`/repos/${head.repo.full_name}/contents/.geppetto/config.json?ref=${head.sha}`, { raw: true })); }
+  catch (error) { throw new Error(`PR .geppetto/config.json is unreadable: ${error.message}`); }
+  const featureDocs = [...new Set([...(base.sections?.featureDocs ?? ['Observability']), ...(incoming.sections?.featureDocs ?? [])])];
+  return { config: { ...base, sections: { ...base.sections, featureDocs } }, roots: [...new Set([docsRoot(base), docsRoot(incoming)])] };
 }
 
 async function changedDocs(event, { cwd, request, execute }) {
@@ -41,9 +50,9 @@ async function changedDocs(event, { cwd, request, execute }) {
   const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
   if (!repoPattern.test(repository ?? '') || !repoPattern.test(head?.repo?.full_name ?? '') || !/^[a-f\d]{40}$/i.test(head?.sha ?? '') || !Number.isSafeInteger(event.number) || event.number < 1) throw new Error('GitHub document event needs repository, PR number and immutable head');
   if (event.pull_request.changed_files > maxChangedFiles) throw new Error('GitHub PR file list is truncated; split the PR before checking documents');
-  const config = await jsonFile(resolve(cwd, '.geppetto/config.json'), {});
-  const root = safeDocumentPath(posix.normalize(config.docs?.root ?? 'docs').replace(/\/$/, ''));
-  const files = await changedDocPaths(event, root, request);
+  const changed = await changedPaths(event, request);
+  const { config, roots } = await contract(await jsonFile(resolve(cwd, '.geppetto/config.json'), {}), changed, head, request);
+  const files = changed.filter(path => path.toLowerCase().endsWith('.md') && roots.some(root => root === '.' || path.startsWith(`${root}/`)));
   if (!files.length) { console.log('Sections OK (0 changed feature documents)'); return 0; }
   const directory = await mkdtemp(resolve(tmpdir(), 'geppetto-pr-docs-'));
   try {
