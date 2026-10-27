@@ -33,6 +33,6 @@ Record generated files with `--record-generated <project-relative-path>`; write 
 
 ## Verify
 
-Run `<adopt>/scripts/audit.mjs --project <project> --verify`, a synthetic prompt hook and memory listing. For Codex, use `<adopt>/scripts/codex-hook-trust.mjs --project <project> --plugin <actual-plugin-id> --approve` (or `--source <hooks-file>` for shared hooks). Then run the installer with `--target <target> --project <project> --commit`: it commits only owned installation paths on `geppetto-install`, preserving unrelated staged work. Include the commit and recap table in the response.
+Run `<adopt>/scripts/audit.mjs --project <project> --verify`, a synthetic prompt hook and memory listing. Complete [hook activation](../assets/templates/hooks/README.md#activation) for the target harness and project. Then run the installer with `--target <target> --project <project> --commit`: it commits only owned installation paths on `geppetto-install`, preserving unrelated staged work. Include the commit and recap table in the response.
 
 [Process execution](processes.md) governs child processes. Runtime and provider limitations are listed once in the README's Limits section.
