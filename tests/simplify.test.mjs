@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, symlinkSync } from 'node:fs';
 import { fixture, put, get, invoke, git } from './helpers.mjs';
 import { runLearning, executeLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
 import { learningFileTool } from '../skills/geppetto-adopt/scripts/learner-tools.mjs';
@@ -103,6 +103,22 @@ test('learner file boundary preserves edits while excluding private, secret and 
   assert.equal(result.status, 0, result.stderr); const replies = result.stdout.trim().split('\n').map(JSON.parse);
   assert.deepEqual(replies[0].result.tools.map(tool => tool.name), ['Read']); assert.equal(replies[1].result.isError, true);
   assert.equal(get(root, 'docs/lesson.md'), 'Use the existing owner.');
+});
+
+test('learning can read bundled procedures without writing them or reading outside either scope', async t => {
+  const root = fixture(t), references = fixture(t), outside = fixture(t);
+  const procedure = resolve(references, 'geppetto-learn/SKILL.md');
+  put(references, 'geppetto-learn/SKILL.md', 'Read the actual procedure.');
+  put(outside, 'fact.md', 'Outside scope');
+  assert.equal(await learningFileTool(root, 'Read', { path: procedure }, false, references), 'Read the actual procedure.');
+  for (const name of ['Write', 'Edit']) await assert.rejects(learningFileTool(root, name, { path: procedure, content: 'Changed', oldText: 'Read', newText: 'Write' }, false, references), /scope/);
+  await assert.rejects(learningFileTool(root, 'Read', { path: resolve(outside, 'fact.md') }, false, references), /scope/);
+  symlinkSync(outside, resolve(references, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(learningFileTool(root, 'Read', { path: resolve(references, 'linked/fact.md') }, false, references), /symbolic/);
+  const messages = [{ id: 1, method: 'tools/call', params: { name: 'Read', arguments: { path: procedure } } }, { id: 2, method: 'tools/call', params: { name: 'Write', arguments: { path: procedure, content: 'Forbidden' } } }];
+  const r = invoke('learner-tools.mjs', [root, 'workspace-write', '["Read","Write"]', references], { cwd: root, input: messages.map(m => JSON.stringify({ jsonrpc: '2.0', ...m })).join('\n') + '\n' });
+  assert.equal(r.status, 0, r.stderr); const replies = r.stdout.trim().split('\n').map(JSON.parse);
+  assert.equal(replies[0].result.content[0].text, 'Read the actual procedure.'); assert.equal(replies[1].result.isError, true);
 });
 
 test('write approval retains a staged result and a signal appended during a run stays eligible', async t => {

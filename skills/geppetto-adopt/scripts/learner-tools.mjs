@@ -27,8 +27,13 @@ async function listFiles(root, directory = root) {
 }
 
 /** File-only MCP boundary; neither shell, delegation nor publication is exposed. */
-export async function learningFileTool(root, name, args, readOnly = false) {
+export async function learningFileTool(root, name, args, readOnly = false, referenceRoot = null) {
   root = await realpath(root);
+  if (name === 'Read' && referenceRoot) {
+    referenceRoot = await realpath(referenceRoot);
+    const path = resolve(root, args.path);
+    if (contained(referenceRoot, path)) return redact(await readFile(await learningFilePath(referenceRoot, path), 'utf8'));
+  }
   if (name === 'Glob' || name === 'Grep') {
     const files = (await listFiles(root)).filter(file => matchesGlob(file, args.glob ?? '**/*'));
     if (name === 'Glob') return files.join('\n');
@@ -67,6 +72,7 @@ const schemas = {
 if (isMain(import.meta.url)) {
   const root = resolve(process.argv[2]); const readOnly = process.argv[3] === 'read-only';
   const allowed = JSON.parse(process.argv[4] ?? '[]');
+  const referenceRoot = process.argv[5] ?? null;
   for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     const request = JSON.parse(line); if (request.id === undefined) continue;
     let result;
@@ -75,7 +81,7 @@ if (isMain(import.meta.url)) {
     else if (request.method === 'tools/call') {
       try {
         if (!allowed.includes(request.params.name)) throw new Error('Tool outside the configured selection');
-        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly) }] };
+        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly, referenceRoot) }] };
       }
       catch { result = { isError: true, content: [{ type: 'text', text: 'File operation rejected; verify the project path, tool and exact edit match.' }] }; }
     } else if (request.method === 'ping') result = {};
