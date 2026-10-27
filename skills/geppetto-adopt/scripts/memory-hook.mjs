@@ -7,7 +7,6 @@ import { memorySettings } from './memory-config.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { redact } from './signal.mjs';
 import { memoryCatalog, memoryIndex } from './memory-index.mjs';
-import { classifyMemory } from './memory-classifier.mjs';
 
 function writtenPaths(event) {
   const tool = typeof event.tool_name === 'string' ? event.tool_name.split(/[.:/]/).at(-1).toLowerCase() : '';
@@ -75,9 +74,8 @@ export async function handleMemoryEvent(event, options = {}) {
   const { home } = options;
   if (!event || typeof event !== 'object' || Array.isArray(event)) throw new UsageError('Memory hook input must be an event object');
   const name = event.hook_event_name ?? 'SessionStart';
-  const project = await projectRoot(event.cwd ?? '.');
-  if (name === 'UserPromptSubmit') return classifyMemory(event, { ...options, project });
   if (name !== 'SessionStart') return {};
+  const project = await projectRoot(event.cwd ?? '.');
   let text; let status = 'ok';
   try {
     const memory = await memorySettings(project, home);

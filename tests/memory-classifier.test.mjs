@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, put, get, git, config, invoke } from './helpers.mjs';
-import { handleMemoryEvent } from '../skills/geppetto-adopt/scripts/memory-hook.mjs';
+import { classifyMemory } from '../skills/geppetto-adopt/scripts/memory-classifier.mjs';
+const runClassifier = (event, options) => classifyMemory(event, { project: event.cwd, ...options });
 import { openRouterClassify } from '../skills/geppetto-adopt/scripts/memory-provider.mjs';
 
 const classifier = { enabled: true, benchmark: null, model: 'owner/model', bucketThreshold: 0.75, pageThreshold: 0.8, timeoutMs: 1000, maxOutputTokens: 256, maxCostUsd: 0.01 };
@@ -21,7 +22,7 @@ test('a minimal existing memory-classifier config inherits Flash and the baselin
   const { cwd, home, event } = setup(t);
   const config = JSON.parse(get(cwd, '.geppetto/config.json')); config.hooks.memoryClassifier = { enabled: true, benchmark: null };
   put(cwd, '.geppetto/config.json', config); const requests = [];
-  const result = await handleMemoryEvent(event, { home, authorization: auth([]), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async request => {
+  const result = await runClassifier(event, { home, authorization: auth([]), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async request => {
     requests.push(request);
     const selected = request.stage === 'buckets' ? 'my-app' : 'buckets/my-app/playback.md';
     return { selections: request.candidates.filter(candidate => candidate.id === selected).map(candidate => ({ id: candidate.id, score: 0.7, reason: 'Relevant' })), costUsd: 0 };
@@ -30,13 +31,13 @@ test('a minimal existing memory-classifier config inherits Flash and the baselin
   assert.equal(requests.length, 2); assert.ok(requests.every(request => request.model === 'perplexity/pplx-decider-flash-v1.2'));
   const audit = invoke('audit.mjs', ['--json'], { cwd, home, env: { OPENROUTER_API_KEY: 'fixture', PATH: '' } });
   assert.equal(audit.status, 0, audit.stderr); const readiness = JSON.parse(audit.stdout).memoryClassifier;
-  assert.equal(readiness.enabled, true); assert.equal(readiness.model, 'perplexity/pplx-decider-flash-v1.2'); assert.equal(readiness.api, 'decisions');
+  assert.deepEqual(readiness, { enabled: false, action: null });
 });
 
 test('a malformed billed memory response preserves its charge through the shared coordinator', async t => {
   const { home, event } = setup(t); const spending = [];
   const provider = request => openRouterClassify(request, { fetchImpl: async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: 'malformed' } }], usage: { cost: 0.002 } }) }) });
-  const result = await handleMemoryEvent(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture' } });
+  const result = await runClassifier(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture' } });
   assert.deepEqual(result, {}); assert.equal(spending.at(-1)[0], 'settle'); assert.equal(spending.at(-1)[2], 0.002);
 });
 
@@ -47,7 +48,7 @@ test('bucket selection explores global and linked project indexes without readin
     const selections = request.stage === 'buckets' ? [{ id: 'preferences', score: 0.75, reason: 'Windows preferences' }, { id: 'my-app', score: 0.9, reason: 'Playback' }] : [{ id: 'buckets/my-app/playback.md', score: 0.8, reason: 'Explains\nplayback.' }, { id: 'buckets/preferences/windows.md', score: 0.79, reason: 'Below threshold.' }];
     return { selections: selections.filter(entry => request.candidates.some(candidate => candidate.id === entry.id)), costUsd: request.stage === 'buckets' ? 0.001 : 0.002 };
   };
-  const result = await handleMemoryEvent(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture-key' } });
+  const result = await runClassifier(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture-key' } });
   assert.equal(result.hookSpecificOutput.additionalContext, 'You may want to check out:\n- buckets/my-app/playback.md — Explains playback.');
   assert.equal(calls.length, 3); assert.deepEqual(calls[0].candidates.map(c => c.id), ['preferences', 'my-app']);
   assert.deepEqual(calls.slice(1).flatMap(call => call.candidates.map(c => c.id)).sort(), ['buckets/my-app/playback.md', 'buckets/preferences/windows.md']);
@@ -60,15 +61,15 @@ test('bucket selection explores global and linked project indexes without readin
 test('disabled and missing-key classifiers make no provider call; config credentials are never used', async t => {
   const disabled = setup(t, { enabled: false }); const missing = setup(t, { apiKey: 'config-is-not-a-key-source' }); let calls = 0;
   const provider = async () => { calls++; return { selections: [], costUsd: 0 }; };
-  assert.deepEqual(await handleMemoryEvent(disabled.event, { home: disabled.home, provider, env: { OPENROUTER_API_KEY: 'fixture' } }), {});
-  assert.deepEqual(await handleMemoryEvent(missing.event, { home: missing.home, provider, env: {} }), {});
+  assert.deepEqual(await runClassifier(disabled.event, { home: disabled.home, provider, env: { OPENROUTER_API_KEY: 'fixture' } }), {});
+  assert.deepEqual(await runClassifier(missing.event, { home: missing.home, provider, env: {} }), {});
   assert.equal(calls, 0); assert.match(get(missing.cwd, '.geppetto/hook-events.jsonl'), /key.*environment|credentials.*config/i);
 });
 
 test('timeout, provider failure and out-of-candidate selections inject nothing and leave a measurable error', async t => {
   for (const [mode, provider] of [['timeout', async () => new Promise(() => {})], ['failure', async () => { throw new Error('provider token=secret-value failed'); }], ['unknown-id', async () => ({ selections: [{ id: 'private', score: 1, reason: 'Outside candidates' }], costUsd: 0 })]]) {
     const { cwd, home, event } = setup(t, { timeoutMs: 10 });
-    const result = await handleMemoryEvent(event, { home, provider, authorization: auth([]), env: { OPENROUTER_API_KEY: 'fixture' } });
+    const result = await runClassifier(event, { home, provider, authorization: auth([]), env: { OPENROUTER_API_KEY: 'fixture' } });
     assert.deepEqual(result, {}, mode); const log = JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')); assert.equal(log.status, 'error'); assert.equal(log.injectedBytes, 0); assert.ok(log.error); assert.doesNotMatch(JSON.stringify(log), /secret-value/);
     if (mode === 'timeout') { assert.match(log.error, /timed out/); assert.equal(log.costUsd, null); }
   }
@@ -76,43 +77,43 @@ test('timeout, provider failure and out-of-candidate selections inject nothing a
 
 test('known charges settle even for rejected provider selections; unknown charges keep their reservation', async t => {
   const known = setup(t); const spending = [];
-  await handleMemoryEvent(known.event, { home: known.home, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => ({ selections: [{ id: 'private', score: 1, reason: 'Rejected' }], costUsd: 0.002 }) });
+  await runClassifier(known.event, { home: known.home, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => ({ selections: [{ id: 'private', score: 1, reason: 'Rejected' }], costUsd: 0.002 }) });
   assert.equal(spending[1][0], 'settle'); assert.equal(spending[1][2], 0.002);
   const unknown = setup(t); const pending = [];
-  assert.deepEqual(await handleMemoryEvent(unknown.event, { home: unknown.home, authorization: auth(pending), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => ({ selections: [], costUsd: null }) }), {});
+  assert.deepEqual(await runClassifier(unknown.event, { home: unknown.home, authorization: auth(pending), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => ({ selections: [], costUsd: null }) }), {});
   assert.equal(pending.length, 1); assert.equal(JSON.parse(get(unknown.cwd, '.geppetto/hook-events.jsonl')).costUsd, null);
 });
 
-test('the automatic hook accounts paid API usage using the machine key', async t => {
+test('explicit classifier experiments account paid API usage using the machine key', async t => {
   const { cwd, home, event } = setup(t);
-  const result = await handleMemoryEvent(event, { home, env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => ({ selections: [], costUsd: 0.001 }) });
+  const result = await runClassifier(event, { home, env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => ({ selections: [], costUsd: 0.001 }) });
   assert.deepEqual(result, {}); const events = get(home, '.geppetto/api-usage.jsonl').trim().split('\n').map(JSON.parse);
   assert.equal(events.length, 2); assert.equal(events[0].capability, 'memory-classifier'); assert.equal(events[0].reserved, 10000); assert.equal(events[1].actual, 1000);
 });
 
 test('bucket scores below the configured threshold skip stage two and invalid configuration stays local', async t => {
   const { cwd, home, event } = setup(t); let calls = 0;
-  const result = await handleMemoryEvent(event, { home, env: { OPENROUTER_API_KEY: 'fixture' }, authorization: auth([]), provider: async () => { calls++; return { selections: [{ id: 'my-app', score: 0.74, reason: 'Too weak' }], costUsd: 0 }; } });
+  const result = await runClassifier(event, { home, env: { OPENROUTER_API_KEY: 'fixture' }, authorization: auth([]), provider: async () => { calls++; return { selections: [{ id: 'my-app', score: 0.74, reason: 'Too weak' }], costUsd: 0 }; } });
   assert.deepEqual(result, {}); assert.equal(calls, 1); assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).modelCalls, 1);
   const invalid = setup(t, { pageThreshold: 2 }); calls = 0;
-  assert.deepEqual(await handleMemoryEvent(invalid.event, { home: invalid.home, env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => { calls++; } }), {});
+  assert.deepEqual(await runClassifier(invalid.event, { home: invalid.home, env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => { calls++; } }), {});
   assert.equal(calls, 0); assert.match(get(invalid.cwd, '.geppetto/hook-events.jsonl'), /pageThreshold/);
 });
 
 test('no selected buckets stops after stage one and an authorization denial starts no provider request', async t => {
   const { cwd, home, event } = setup(t); let calls = 0; const spending = [];
   const provider = async () => { calls++; return { selections: [], costUsd: 0.001 }; };
-  assert.deepEqual(await handleMemoryEvent(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture' } }), {});
+  assert.deepEqual(await runClassifier(event, { home, provider, authorization: auth(spending), env: { OPENROUTER_API_KEY: 'fixture' } }), {});
   assert.equal(calls, 1); assert.equal(spending[1][2], 0.001); assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).status, 'ok');
   const denied = setup(t); calls = 0;
-  assert.deepEqual(await handleMemoryEvent(denied.event, { home: denied.home, provider, authorization: { reserve: async () => { throw new Error('deny Project does not grant this capability'); } }, env: { OPENROUTER_API_KEY: 'fixture' } }), {}); assert.equal(calls, 0);
+  assert.deepEqual(await runClassifier(denied.event, { home: denied.home, provider, authorization: { reserve: async () => { throw new Error('deny Project does not grant this capability'); } }, env: { OPENROUTER_API_KEY: 'fixture' } }), {}); assert.equal(calls, 0);
   assert.match(get(denied.cwd, '.geppetto/hook-events.jsonl'), /does not grant/);
 });
 
-test('a key activates the classifier without an enable flag, cost cap or benchmark', async t => {
-  const { cwd, home, event } = setup(t, { enabled: undefined, maxCostUsd: undefined });
+test('an explicitly enabled experiment needs no cost cap or benchmark', async t => {
+  const { cwd, home, event } = setup(t, { enabled: true, maxCostUsd: undefined });
   let calls = 0;
-  await handleMemoryEvent(event, { home, env: { OPENROUTER_API_KEY: 'fixture-only' }, provider: async () => { calls++; return { selections: [], costUsd: 0.02 }; } });
+  await runClassifier(event, { home, env: { OPENROUTER_API_KEY: 'fixture-only' }, provider: async () => { calls++; return { selections: [], costUsd: 0.02 }; } });
   assert.equal(calls, 1);
   const ledger = get(home, '.geppetto/api-usage.jsonl').trim().split('\n').map(JSON.parse);
   assert.equal(ledger[0].reserved, null); assert.equal(ledger[1].actual, 20000);

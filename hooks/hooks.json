@@ -10,11 +10,6 @@
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/memory-hook.mjs\"",
-            "timeout": 30
-          },
-          {
-            "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/skill-hook.mjs\"",
             "timeout": 30
           }
@@ -76,5 +71,5 @@
       }
     ]
   },
-  "description": "PR feedback, memory and skill suggestions, and learning."
+  "description": "PR feedback, memory indexes, skill suggestions, and learning."
 }

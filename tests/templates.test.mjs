@@ -38,7 +38,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     const memory = fixture(t); git(memory, ['init', '-q']); put(memory, 'index.md', '| Bucket | Scope | Holds |\n|---|---|---|\n| preferences | global | Working preferences. |\n');
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
     assert.match(event('SessionStart').hookSpecificOutput.additionalContext, /preferences — Working preferences/);
-    assert.match(hooks.UserPromptSubmit[0].hooks[1].command, /memory-hook\.mjs/);
+    assert.equal(hooks.UserPromptSubmit.flatMap(group => group.hooks).some(handler => handler.command.includes('memory-hook.mjs')), false);
     const selector = hooks.UserPromptSubmit.flatMap(group => group.hooks).find(handler => handler.command.includes('skill-hook.mjs'));
     assert.ok(selector);
     const selected = spawnSync(process.execPath, ['-e', selector.command.slice('node -e "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd, prompt: ' ' }), encoding: 'utf8', windowsHide: true });

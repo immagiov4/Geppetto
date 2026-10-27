@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { symlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, get, git, config } from './helpers.mjs';
-import { handleMemoryEvent } from '../skills/geppetto-adopt/scripts/memory-hook.mjs';
+import { classifyMemory } from '../skills/geppetto-adopt/scripts/memory-classifier.mjs';
+const runClassifier = (event, options) => classifyMemory(event, { project: event.cwd, ...options });
 import { openRouterClassify } from '../skills/geppetto-adopt/scripts/memory-provider.mjs';
 import { candidateClassifier } from '../skills/geppetto-adopt/scripts/memory-traversal.mjs';
 
@@ -13,7 +14,7 @@ function setup(t, options = {}) {
   const settings = { enabled: true, benchmark: null, model: 'owner/model', bucketThreshold: 0.5, pageThreshold: 0.5, timeoutMs: 2000, maxOutputTokens: 256, maxCostUsd: 0.1, maxConcurrentRequests: 2, ...options };
   put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: ['app'] }, hooks: { memoryClassifier: settings } });
   const spending = [];
-  const run = provider => handleMemoryEvent({ cwd, hook_event_name: 'UserPromptSubmit', prompt: 'Find the application facts.' }, { home, provider, authorization: { reserve: async (...args) => spending.push(['reserve', ...args]), settle: async (...args) => spending.push(['settle', ...args]) }, env: { OPENROUTER_API_KEY: 'fixture' } });
+  const run = provider => runClassifier({ cwd, hook_event_name: 'UserPromptSubmit', prompt: 'Find the application facts.' }, { home, provider, authorization: { reserve: async (...args) => spending.push(['reserve', ...args]), settle: async (...args) => spending.push(['settle', ...args]) }, env: { OPENROUTER_API_KEY: 'fixture' } });
   return { cwd, memory, spending, run };
 }
 const selected = candidates => ({ selections: candidates.map(c => ({ id: c.id, score: 1, reason: 'Relevant fact.' })), costUsd: 0.001 });

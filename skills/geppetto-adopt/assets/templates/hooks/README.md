@@ -1,12 +1,12 @@
 # Hook operation
 
-The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit adds requirements/feedback routing and OpenRouter suggestions; PreToolUse checks PR text; PostToolUse and Stop supply internal learning reminders; async Stop runs background signal learning.
+The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit adds requirements/feedback routing and OpenRouter skill suggestions; PreToolUse checks PR text; PostToolUse and Stop supply internal learning reminders; async Stop runs background signal learning.
 
 ## Suggestions
 
-`memory-classifier.mjs` coordinates both selectors, validates returned candidate IDs and scores, and logs duration, model calls, injected bytes, errors and API cost. `memory-provider.mjs` and `skill-provider.mjs` implement the OpenRouter transports. The key enables requests; `authz.mjs` accounts for paid calls and an optional machine spend cap.
+`memory-classifier.mjs` coordinates skill selection, validates returned candidate IDs and scores, and logs duration, model calls, injected bytes, errors and API cost. `skill-provider.mjs` reuses the typed decision transport in `memory-provider.mjs`. The key enables requests; `authz.mjs` accounts for paid calls and an optional machine spend cap.
 
-Memory traversal classifies global and linked project bucket descriptions, then follows selected indexes recursively. Candidate path validation and cycle detection live in `memory-index.mjs` and `memory-traversal.mjs`. Private buckets are excluded. Skill selection independently reads discovered names and descriptions from `skill-catalog.mjs` and points to selected local procedures.
+SessionStart supplies memory listings and linked project indexes for the agent to navigate through `$geppetto-memory`. Skill selection reads discovered names and descriptions from `skill-catalog.mjs` and points to selected local procedures. The memory hook ignores prompt events, including legacy registrations with classifier settings enabled.
 
 Settings come from `common.mjs`, then user and project overrides. Optional `maxRequestBytes` splits candidate batches against the serialized request size. Optional `maxConcurrentRequests` controls concurrent provider calls; the default is serial. The configured deadline covers the whole traversal and aborts outstanding requests. `maxCostUsd` supplies a per-traversal maximum for paid accounting. Keep the deadline inside the enclosing hook timeout.
 

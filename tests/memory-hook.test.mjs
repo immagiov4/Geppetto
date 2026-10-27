@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { symlinkSync, existsSync } from 'node:fs';
 import { fixture, put, get, invoke, git, config } from './helpers.mjs';
+import { handleMemoryEvent } from '../skills/geppetto-adopt/scripts/memory-hook.mjs';
 
 const rootIndex = '# Buckets\n\n| Bucket | Scope | Holds |\n|---|---|---|\n| [private](buckets/private/index.md) | global | Personal facts. |\n| [preferences](buckets/preferences/index.md) | global | Working preferences. |\n| [my-app](buckets/my-app/index.md) | project | My app facts. |\n| [geppetto](buckets/geppetto/index.md) | project | Geppetto facts. |\n';
 function setup(t) {
@@ -14,6 +15,21 @@ function setup(t) {
   return { cwd, home, memory };
 }
 const session = (cwd, home) => invoke('memory-hook.mjs', [], { cwd, home, input: JSON.stringify({ hook_event_name: 'SessionStart', cwd }) });
+
+test('prompt memory hooks stay silent without paid calls even with legacy classifier settings enabled', async t => {
+  const { cwd, home } = setup(t);
+  put(cwd, '.geppetto/config.json', { ...config(), hooks: { memoryClassifier: { enabled: true } } });
+  const unexpected = () => { assert.fail('Prompt memory retrieval must not call a provider or reserve spending'); };
+  const result = await handleMemoryEvent({ cwd, hook_event_name: 'UserPromptSubmit', prompt: 'Find playback facts' }, {
+    home, env: { OPENROUTER_API_KEY: 'fixture' }, provider: unexpected,
+    authorization: { reserve: unexpected, settle: unexpected },
+  });
+  assert.deepEqual(result, {});
+  assert.equal(existsSync(resolve(cwd, '.geppetto/hook-events.jsonl')), false);
+  const listing = session(cwd, home);
+  assert.equal(listing.status, 0, listing.stderr);
+  assert.match(JSON.parse(listing.stdout).hookSpecificOutput.additionalContext, /Memories live here:/);
+});
 
 test('session memory context lists every bucket and injects only linked nonprivate indexes, with exact byte accounting', t => {
   const { cwd, home, memory } = setup(t);

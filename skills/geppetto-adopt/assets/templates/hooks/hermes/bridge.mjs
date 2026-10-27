@@ -14,7 +14,7 @@ if (input.phase === 'begin') {
   learning = await learningEvent({ ...event, turn_id: undefined, hook_event_name: 'PostToolUse' }, Date.now);
   await learningEvent({ ...event, hook_event_name: 'UserPromptSubmit' }, Date.now);
   const { handleMemoryEvent } = await import(pathToFileURL(resolve(settings.scripts, 'memory-hook.mjs')));
-  // SessionStart is read-only index retrieval. Never invoke the optional classifier.
+  // SessionStart supplies read-only memory indexes.
   memory = await handleMemoryEvent({ ...event, hook_event_name: 'SessionStart' });
 } else if (input.phase === 'tool') {
   const now = Date.now();

@@ -3,10 +3,8 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cli, isMain, parseArgs, UsageError, exists, jsonFile, validateConfig, userHome, run, skillSelectorDefaults } from './common.mjs';
 import { hostLintReport } from './host-lint.mjs';
-import { memorySettings, memoryConfiguration, memoryClassifierSettings } from './memory-config.mjs';
+import { memorySettings, memoryConfiguration } from './memory-config.mjs';
 import { learningCommand } from './learn-runner.mjs';
-import { classificationApi } from './memory-provider.mjs';
-import { validateClassifierSettings } from './memory-classifier.mjs';
 import { validateSkillSelectorSettings } from './skill-catalog.mjs';
 
 const status = value => value ? 'present' : 'absent';
@@ -69,13 +67,12 @@ export async function main(args) {
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {});
   const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
   const user = await jsonFile(resolve(userHome(), '.geppetto/config.json'), {});
-  const classifier = memoryClassifierSettings(user, config);
   const ready = (settings, validate) => {
     if (settings.enabled === false) return { enabled: false, action: null };
     try { validate(settings); } catch { return { enabled: false, action: 'Repair the hook settings in .geppetto/config.json.' }; }
-    return { enabled: Boolean(process.env.OPENROUTER_API_KEY), action: process.env.OPENROUTER_API_KEY ? null : 'Add OPENROUTER_API_KEY for skill and memory suggestions.' };
+    return { enabled: Boolean(process.env.OPENROUTER_API_KEY), action: process.env.OPENROUTER_API_KEY ? null : 'Add OPENROUTER_API_KEY for skill suggestions.' };
   };
-  const report = { project, node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: { enabled: config.hooks?.signalLearning?.enabled !== false && Boolean(learningCommand('codex') || learningCommand('claude')), action: config.hooks?.signalLearning?.enabled === false || learningCommand('codex') || learningCommand('claude') ? null : 'Install a subscription CLI and sign in.' }, memoryClassifier: { ...ready(classifier, validateClassifierSettings), model: classifier.model, api: classificationApi(classifier) }, skillSelector: ready({ ...skillSelectorDefaults, ...user.hooks?.skillSelector, ...config.hooks?.skillSelector }, validateSkillSelectorSettings) };
+  const report = { project, node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: { enabled: config.hooks?.signalLearning?.enabled !== false && Boolean(learningCommand('codex') || learningCommand('claude')), action: config.hooks?.signalLearning?.enabled === false || learningCommand('codex') || learningCommand('claude') ? null : 'Install a subscription CLI and sign in.' }, memoryClassifier: { enabled: false, action: null }, skillSelector: ready({ ...skillSelectorDefaults, ...user.hooks?.skillSelector, ...config.hooks?.skillSelector }, validateSkillSelectorSettings) };
   if (opts['--verify']) {
     report.verification = await verify(project);
     if (report.memory.status === 'configured') report.verification.push({ name: 'memory-remote-url', pass: report.memory.remote.matchesConfigured, reason: report.memory.remote.matchesConfigured ? undefined : 'Memory fetch/push remote URL does not equal configured memory.repo' });

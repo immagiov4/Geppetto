@@ -84,8 +84,8 @@ export async function filesUnder(root) {
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
 export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, writeApproval: false });
 export const skillSelectorDefaults = { enabled: true, model: 'perplexity/pplx-decider-v1.2', threshold: 0.75, timeoutMs: 8000, batchSize: 80 };
-export const memoryClassifierDefaults = { enabled: true, benchmark: null, model: 'perplexity/pplx-decider-flash-v1.2', bucketThreshold: 0.65, pageThreshold: 0.65, timeoutMs: 8000 };
-export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults(), memoryClassifier: { enabled: true, benchmark: null }, skillSelector: { enabled: true, benchmark: null } } });
+export const memoryClassifierDefaults = { enabled: false, benchmark: null, model: 'perplexity/pplx-decider-flash-v1.2', bucketThreshold: 0.65, pageThreshold: 0.65, timeoutMs: 8000 };
+export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults(), skillSelector: { enabled: true, benchmark: null } } });
 
 export async function ignoreLocalFiles(project, paths) {
   const ignorePath = resolve(project, '.geppetto/.gitignore');

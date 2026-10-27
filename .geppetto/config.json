@@ -31,10 +31,6 @@
       "enabled": true,
       "benchmark": null
     },
-    "memoryClassifier": {
-      "enabled": true,
-      "benchmark": null
-    },
     "signalLearning": {
       "enabled": true,
       "benchmark": null,

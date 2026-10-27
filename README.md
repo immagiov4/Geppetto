@@ -79,7 +79,7 @@ When the same friction keeps returning, a signal can be recorded, and `geppetto-
   <img src="assets/readme/memory-flow.png" width="880" alt="Memory repository, project index loaded at startup, and relevant pages read when needed.">
 </p>
 
-Generalizable lessons and decision rationale live in a Git repository of Markdown, grouped into buckets. Installation offers a local folder, a private GitHub repository, each tool's own memory or no memory. With bucket memory, Claude can write natively into the project bucket; the session hook supplies linked indexes. An optional classifier suggests pages when its OpenRouter key is present. [Memory retrieval](docs/memory-retrieval.md).
+Generalizable lessons and decision rationale live in a Git repository of Markdown, grouped into buckets. Installation offers a local folder, a private GitHub repository, each tool's own memory or no memory. With bucket memory, Claude can write natively into the project bucket; the session hook supplies linked indexes. The agent follows these indexes to retrieve relevant pages. [Memory retrieval](docs/memory-retrieval.md).
 
 </details>
 
