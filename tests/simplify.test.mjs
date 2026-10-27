@@ -9,7 +9,8 @@ import { memorySettings } from '../skills/geppetto-adopt/scripts/memory-config.m
 
 test('two repositories reuse one machine hook set, key location, memory and maintenance jobs', t => {
   const home = fixture(t), a = fixture(t), b = fixture(t);
-  put(home, '.geppetto/config.json', { memory: { repo: 'https://example.invalid/memory', localPath: resolve(home, 'memory') } });
+  const memory = resolve(home, 'memory'); put(memory, 'index.md', '# Memory'); git(memory, ['init', '-q']);
+  put(home, '.geppetto/config.json', { memory: { repo: memory, localPath: memory } });
   for (const cwd of [a, b, a]) {
     const r = invoke('install.mjs', ['--target', 'codex', '--project', cwd], { cwd, home, env: { OPENROUTER_API_KEY: 'synthetic' } });
     assert.equal(r.status, 0, r.stderr);
@@ -19,7 +20,7 @@ test('two repositories reuse one machine hook set, key location, memory and main
   assert.equal(Object.keys(machine.projects).length, 2);
   assert.equal(Object.keys(machine.jobs).length, 3);
   assert.equal(machine.keys.openrouter, 'OPENROUTER_API_KEY');
-  assert.equal(machine.memory.repo, 'https://example.invalid/memory');
+  assert.equal(machine.memory.repo, memory);
   const hooks = JSON.parse(get(home, '.codex/hooks.json')).hooks;
   for (const groups of Object.values(hooks)) {
     const commands = groups.flatMap(g => g.hooks.map(h => h.command));
@@ -101,7 +102,8 @@ test('write approval retains a staged result and a signal appended during a run 
 
 test('machine memory reuse resolves project-relative paths and keeps project bucket links local', async t => {
   const home = fixture(t), a = fixture(t), b = fixture(t);
-  put(a, '.geppetto/config.json', { memory: { repo: 'https://example.invalid/memory', localPath: 'memory', buckets: ['only-a'] } });
+  const checkout = resolve(a, 'memory'); put(checkout, 'index.md', '# Memory'); git(checkout, ['init', '-q']);
+  put(a, '.geppetto/config.json', { memory: { repo: checkout, localPath: 'memory', buckets: ['only-a'] } });
   for (const cwd of [a, b]) {
     const result = invoke('install.mjs', ['--target', 'codex', '--project', cwd], { cwd, home });
     assert.equal(result.status, 0, result.stderr);

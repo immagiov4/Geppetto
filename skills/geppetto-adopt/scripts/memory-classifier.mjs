@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { jsonFile, userHome, run, skillSelectorDefaults } from './common.mjs';
-import { memorySettings, memoryClassifierSettings } from './memory-config.mjs';
+import { memorySettings, memoryConfiguration, memoryClassifierSettings } from './memory-config.mjs';
 import { memoryCatalog } from './memory-index.mjs';
 import { candidateClassifier, traverseMemory } from './memory-traversal.mjs';
 import { logHookEvent } from './hook-events.mjs';
@@ -69,6 +69,7 @@ async function classifyContext(event, { project, home = userHome(), provider, au
     const user = await jsonFile(resolve(home, '.geppetto/config.json'), {}); const local = await jsonFile(resolve(project, '.geppetto/config.json'), {});
     const settings = skills ? { ...skillSelectorDefaults, ...user.hooks?.[hook], ...local.hooks?.[hook] } : memoryClassifierSettings(user, local);
     if (settings.enabled === false) return {};
+    if (!skills && ['native', 'none'].includes((await memoryConfiguration(project, home))?.choice)) return {};
     if (!env.OPENROUTER_API_KEY) throw new Error('Classifier key is absent from the environment or secret store');
     (skills ? validateSkillSelectorSettings : validateClassifierSettings)(settings);
     if (typeof event.prompt !== 'string' || !event.prompt.trim()) throw new Error('Memory classifier prompt is missing');

@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { cli, isMain, parseArgs, UsageError, exists, filesUnder, contained, jsonFile, atomicJson, userHome, ignoreLocalFiles, defaultConfig, run } from './common.mjs';
 import { reconcileMachine } from './machine.mjs';
+import { memoryConfiguration } from './memory-config.mjs';
+import { memoryQuestion, memoryDescription } from './memory-setup.mjs';
+import { maintenanceJobs } from './maintenance.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const portable = path => path.split(sep).join('/');
@@ -156,7 +159,7 @@ async function applyInstallation({ root, manifest, statePath, target, uninstall,
 }
 
 export async function main(args) {
-  const opts = parseArgs(args, { values: ['--target', '--project', '--scheduler-jobs'], repeat: ['--record-generated'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks', '--begin', '--commit'] });
+  const opts = parseArgs(args, { values: ['--target', '--project', '--scheduler-jobs', '--memory'], repeat: ['--record-generated', '--add-job'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks', '--begin', '--commit'] });
   const target = opts['--target'];
   if (opts._.length || !['claude', 'codex', 'agents'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents> (--project <dir> | --user) [--dry-run] [--uninstall]');
   const root = resolve(opts['--user'] ? userHome() : opts['--project']);
@@ -168,6 +171,10 @@ export async function main(args) {
     if (opts['--user'] || opts['--uninstall'] || (opts['--begin'] && opts['--commit'])) throw new UsageError('--begin and --commit are separate project adoption steps');
     return installationGit(root, manifest, opts);
   }
+  if (opts['--memory'] !== undefined && !['local', 'github', 'native', 'none'].includes(opts['--memory'])) throw new UsageError('--memory must be local, github, native or none');
+  if ((opts['--add-job'] ?? []).some(name => !maintenanceJobs.includes(name))) throw new UsageError('--add-job must name curate-skills or maintain-memory');
+  const memory = await memoryConfiguration(root);
+  if (!opts['--uninstall'] && !opts['--memory'] && !memory?.choice && !memory?.repo && !memory?.localPath) throw new Error(memoryQuestion);
   const recorded = opts['--record-generated'] ?? [];
   if (recorded.some(path => !generatedPaths.has(path)) || (opts['--uninstall'] && recorded.length)) throw new UsageError('--record-generated accepts adoption files only and requires installation');
   const generated = [...new Set([...(manifest.installations[target]?.generated ?? []), ...recorded])].sort();
@@ -177,17 +184,31 @@ export async function main(args) {
   const plan = await planInstallation({ root, manifest, target, desired, acceptedGenerated: recorded });
   console.log(`${opts['--dry-run'] ? 'Dry run: ' : ''}${opts['--uninstall'] ? 'Uninstall' : 'Install'} ${target}: ${plan.changes.length} file changes`);
   if (opts['--dry-run']) for (const change of plan.changes) console.log(`${change.action} ${change.path}`);
+  if (opts['--dry-run']) {
+    const choice = opts['--memory'];
+    const preview = choice && choice !== memory?.choice ? { choice, localPath: resolve(userHome(), 'geppetto-memory'), repo: choice === 'github' ? 'private GitHub repository' : resolve(userHome(), 'geppetto-memory') } : memory;
+    console.log(`Memory: ${memoryDescription(preview)}; change with --memory <local|github|native|none>.`);
+  }
   if (opts['--dry-run'] || (opts['--uninstall'] && !manifest.installations[target])) return 0;
   await applyInstallation({ root, manifest, statePath, target, uninstall: opts['--uninstall'], source, generated, plan, plugin });
   let machine;
-  try { machine = await reconcileMachine(root, target, source, { pluginHooks: plugin, uninstall: opts['--uninstall'], jobs: opts['--scheduler-jobs'] ? await jsonFile(opts['--scheduler-jobs']) : {} }); }
+  try { machine = await reconcileMachine(root, target, source, { pluginHooks: plugin, uninstall: opts['--uninstall'], uninstallMemory: ['native', 'none'].includes(memory?.choice) ? null : memory, memoryChoice: opts['--memory'], addJobs: opts['--add-job'], jobs: opts['--scheduler-jobs'] ? await jsonFile(opts['--scheduler-jobs']) : {} }); }
   catch (error) {
     if (!['EACCES', 'EPERM'].includes(error.code ?? error.cause?.code)) throw error;
     const retry = [process.execPath, fileURLToPath(import.meta.url), ...args.map((arg, index) => args[index - 1] === '--project' ? root : arg)].map(arg => `'${arg.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`).join(' ');
     console.error(`Machine registration blocked by permissions; run outside the sandbox: ${process.platform === 'win32' ? '& ' : ''}${retry}`);
     return 1;
+  } finally {
+    if (!opts['--uninstall']) {
+      const path = '.geppetto/config.json';
+      const currentManifest = await jsonFile(statePath);
+      for (const entry of Object.values(currentManifest.installations)) if (entry.files[path]) entry.files[path] = hash(await readFile(resolve(root, path)));
+      await atomicJson(statePath, currentManifest);
+    }
   }
   console.log(`Machine resources: ${Object.keys(machine.hooks).join(', ')} hooks; ${Object.keys(machine.jobs).join(', ')} jobs; OpenRouter ${process.env.OPENROUTER_API_KEY ? 'available' : 'key missing'}`);
+  console.log(`Memory: ${memoryDescription(await memoryConfiguration(root))}; change with --memory <local|github|native|none>.`);
+  for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
   return 0;
 }
 

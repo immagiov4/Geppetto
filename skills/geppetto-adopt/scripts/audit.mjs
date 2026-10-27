@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cli, isMain, parseArgs, UsageError, exists, jsonFile, validateConfig, userHome, run, skillSelectorDefaults } from './common.mjs';
 import { hostLintReport } from './host-lint.mjs';
-import { memorySettings, memoryClassifierSettings } from './memory-config.mjs';
+import { memorySettings, memoryConfiguration, memoryClassifierSettings } from './memory-config.mjs';
 import { learningCommand } from './learn-runner.mjs';
 import { classificationApi } from './memory-provider.mjs';
 import { validateClassifierSettings } from './memory-classifier.mjs';
@@ -15,7 +15,7 @@ async function directory(path) { try { return (await stat(path)).isDirectory(); 
 async function file(path) { try { return (await stat(path)).isFile(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 async function memoryReport(project) {
   const merged = await memorySettings(project);
-  if (!merged) return { status: 'absent', reason: 'No memory repository configured' };
+  if (!merged) return { status: 'absent', ...(await memoryConfiguration(project)), reason: 'No bucket memory configured' };
   const localPath = merged.localPath;
   const rootIndex = localPath ? resolve(localPath, 'index.md') : null;
   const bucketIndex = localPath && merged.buckets.length === 1 ? resolve(localPath, 'buckets', merged.buckets[0], 'index.md') : null;
@@ -29,7 +29,7 @@ async function memoryReport(project) {
   const push = selected ? run('git', ['remote', 'get-url', '--push', '--all', selected], { cwd: localPath }) : null;
   const urls = url?.status === 0 ? url.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
   const pushUrls = push?.status === 0 ? push.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
-  const matchesConfigured = Boolean(merged.repo && urls.length && pushUrls.length && [...urls, ...pushUrls].every(value => repositoryIdentity(value) === repositoryIdentity(merged.repo)));
+  const matchesConfigured = Boolean(merged.repo && (urls.length && pushUrls.length ? [...urls, ...pushUrls].every(value => repositoryIdentity(value) === repositoryIdentity(merged.repo)) : cloneExists && !names.length && resolve(merged.repo) === resolve(localPath)));
   return { status: 'configured', ...merged, localPath, clone: status(cloneExists), rootIndex: { path: rootIndex, status: status(rootIndex && await file(rootIndex)) }, projectBucketIndex: { path: bucketIndex, status: status(bucketIndex && await file(bucketIndex)) }, bucketIndexes, remote: { status: remote ? remote.status === 0 ? status(Boolean(remote.stdout.trim())) : 'unverifiable' : 'absent', names, selected, urls, pushUrls, matchesConfigured } };
 }
 

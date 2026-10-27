@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { cli, isMain, run, UsageError } from './common.mjs';
 import { redact } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
+import { nativeMemoryEvent } from './memory-hook.mjs';
 
 function words(command) {
   return [...command.matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s]+)/g)].map(m => m[1] !== undefined ? m[1].replace(/\\(["\\])/g, '$1') : m[2] ?? m[3]);
@@ -31,10 +32,15 @@ function messageContext(event) {
   return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } };
 }
 
-export async function handleEvent(event, { runCommand = run, now = Date.now } = {}) {
+export async function handleEvent(event, { runCommand = run, now = Date.now, home } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   const learning = await learningEvent(event, now);
+  const native = await nativeMemoryEvent(event, { home });
   if (event.hook_event_name === 'UserPromptSubmit') return messageContext(event);
+  if (native.hookSpecificOutput) {
+    if (learning.hookSpecificOutput) native.hookSpecificOutput.additionalContext += `\n${learning.hookSpecificOutput.additionalContext}`;
+    return native;
+  }
   if (['PostToolUse', 'Stop'].includes(event.hook_event_name)) return learning;
   if (typeof event.tool_name !== 'string' || !event.tool_input) throw new UsageError('Hook input needs tool_name and tool_input');
   const input = event.tool_input;

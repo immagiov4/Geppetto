@@ -105,15 +105,23 @@ test('linked index symlinks cannot cross a bucket boundary', async t => {
 });
 
 test('timeout cancels queued branches and retains unknown in-flight charges', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const { cwd, memory, run, spending } = setup(t, { timeoutMs: 50 });
   put(memory, 'buckets/app/index.md', Array.from({ length: 5 }, (_, i) => `[Branch ${i}](b${i}/index.md)`).join('\n'));
   for (let i = 0; i < 5; i++) { put(memory, `buckets/app/b${i}/index.md`, '[Fact](fact.md)'); put(memory, `buckets/app/b${i}/fact.md`, 'x'); }
-  let calls = 0;
-  const result = await run(async request => {
+  let calls = 0, ready;
+  const started = new Promise(done => { ready = done; });
+  const pending = run(async request => {
     calls++;
     if (calls <= 2) return selected(request.candidates);
-    return new Promise((_resolve, reject) => request.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
+    return new Promise((_resolve, reject) => {
+      request.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      if (calls === 4) ready();
+    });
   });
+  await started;
+  t.mock.timers.tick(50);
+  const result = await pending;
   assert.deepEqual(result, {}); assert.equal(calls, 4);
   assert.equal(spending.length, 1);
   const log = JSON.parse(get(cwd, '.geppetto/hook-events.jsonl'));

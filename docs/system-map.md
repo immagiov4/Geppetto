@@ -12,6 +12,8 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Background subscription run and machine lock | `learn-runner.mjs` |
 | Bounded learner file tools | `learner-tools.mjs` |
 | Memory listing and configuration | `memory-hook.mjs`, `memory-config.mjs` |
+| Memory installation and Claude native directory ownership | `memory-setup.mjs` |
+| Cross-machine maintenance registrations | `memory-jobs.mjs` |
 | Suggestion coordination and telemetry | `memory-classifier.mjs`, `hook-events.mjs` |
 | Memory indexes and traversal | `memory-index.mjs`, `memory-traversal.mjs` |
 | OpenRouter adapters | `memory-provider.mjs`, `skill-provider.mjs` |

@@ -121,6 +121,7 @@ export function validateConfig(config, file) {
 export function validateMemory(memory, file) {
   if (memory === undefined) return;
   if (!memory || typeof memory !== 'object' || Array.isArray(memory)) throw new Error(`${file}:1: memory must be an object`);
+  if (memory.choice !== undefined && !['local', 'github', 'native', 'none'].includes(memory.choice)) throw new Error(`${file}:1: memory.choice must be local, github, native or none`);
   for (const key of ['repo', 'localPath', 'projectBucket']) if (key in memory && (typeof memory[key] !== 'string' || !memory[key].trim())) throw new Error(`${file}:1: memory.${key} must be a nonempty string`);
   if (memory.projectBucket && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(memory.projectBucket)) throw new Error(`${file}:1: memory.projectBucket must be a single directory name`);
   if (memory.buckets !== undefined && (!Array.isArray(memory.buckets) || memory.buckets.some(bucket => typeof bucket !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(bucket)))) throw new Error(`${file}:1: memory.buckets must be an array of single directory names`);

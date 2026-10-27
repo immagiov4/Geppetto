@@ -22,6 +22,7 @@ test('every long turn receives internal learning context after a tool and Stop s
   assert.match(nudge.hookSpecificOutput.additionalContext, /recurring friction.*signal\.mjs/);
   assert.match(nudge.hookSpecificOutput.additionalContext, /reusable workflow.*verified fix.*user correction/);
   assert.match(nudge.hookSpecificOutput.additionalContext, /before.*final reply/i);
+  assert.match(nudge.hookSpecificOutput.additionalContext, /lesson or decision rationale with no other owner.*bucket memory/);
   assert.deepEqual(await send('PostToolUse', 'first', 750), {}, 'only duplicate reminders in this turn are suppressed');
   assert.deepEqual(await send('Stop', 'first', 800), {});
   await send('UserPromptSubmit', 'first', 900); await send('PreToolUse', 'first', 1000); await send('PreToolUse', 'first', 1100);

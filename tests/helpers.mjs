@@ -13,10 +13,20 @@ export function fixture(t) {
 }
 export function put(dir, path, text) { mkdirSync(dirname(resolve(dir, path)), { recursive: true }); writeFileSync(resolve(dir, path), typeof text === 'string' ? text : JSON.stringify(text)); }
 export const get = (dir, path) => readFileSync(resolve(dir, path), 'utf8');
-export function invoke(script, args = [], { cwd = repo, home = cwd, input = '', env = {} } = {}) {
+export function invoke(script, args = [], { cwd = repo, home = cwd, input = '', env = {}, memoryChoice } = {}) {
   // Installation fixtures use a fake native scheduler, never the host's real jobs.
   const temporary = basename(script) === 'install.mjs' && !args.includes('--scheduler-jobs') ? mkdtempSync(resolve(tmpdir(), 'geppetto-scheduler-')) : null;
   try {
+    if (basename(script) === 'install.mjs' && !args.includes('--memory')) {
+      if (memoryChoice === undefined) {
+        const configured = [home, cwd].some(root => {
+          try { const memory = JSON.parse(get(root, '.geppetto/config.json')).memory; return memory?.choice || memory?.repo || memory?.localPath; }
+          catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+        });
+        if (!configured) memoryChoice = 'none';
+      }
+      if (memoryChoice) args = [...args, '--memory', memoryChoice];
+    }
     if (temporary) {
       const jobs = Object.fromEntries(['curate-skills', 'maintain-memory'].map(name => [name, { scheduler: 'fixture', id: name, cadence: 'weekly', nextRun: '2026-11-02T09:00:00', disable: `fixture disable ${name}` }]));
       put(temporary, 'jobs.json', jobs); args = [...args, '--scheduler-jobs', resolve(temporary, 'jobs.json')];

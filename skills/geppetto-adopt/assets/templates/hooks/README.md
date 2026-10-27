@@ -16,4 +16,6 @@ Settings come from `common.mjs`, then user and project overrides. Optional `maxR
 
 The [background runner](../../../../geppetto-learn/references/ingestion.md) consumes selected signals through the subscription CLI and one machine lock. [Maintenance jobs](../../../../geppetto-learn/references/jobs.md) reuse the existing scheduler.
 
+PostToolUse also recognizes Write/Edit/MultiEdit and apply_patch paths in Claude's native memory, configured `autoMemoryDirectory` and Codex's `<CODEX_HOME>/memories/`. With bucket memory configured it reminds once per turn to save durable lessons through `$geppetto-memory`; a native directory inside a bucket instead prompts index upkeep. This uses the existing dispatch, an exclusive turn marker and a zero-model-call `nativeMemory` event in the same hook log. Native-only and no-memory choices keep bucket hooks silent. The end-of-turn nudge includes lessons and decision rationale without another owner.
+
 Hermes uses its [plugin template](hermes/plugin.yaml) for read-only memory listings and learning reminders. Copy `settings.example.json` to the profile's `settings.json` and resolve its paths.

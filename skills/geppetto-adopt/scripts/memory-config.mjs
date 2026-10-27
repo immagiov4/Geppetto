@@ -7,11 +7,16 @@ export function memoryClassifierSettings(user, local) {
 }
 
 /** Project settings override user settings, including a legacy single-bucket selection. */
-export async function memorySettings(project, home = userHome()) {
+export async function memoryConfiguration(project, home = userHome()) {
   const userFile = resolve(home, '.geppetto/config.json'); const projectFile = resolve(project, '.geppetto/config.json');
   const user = await jsonFile(userFile, {}); const local = await jsonFile(projectFile, {});
-  validateMemory(user.memory, userFile); validateMemory(local.memory, projectFile);
-  const memory = { ...user.memory, ...local.memory };
+  const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {});
+  validateMemory(machine.memory, 'machine.json'); validateMemory(user.memory, userFile); validateMemory(local.memory, projectFile);
+  const memory = { ...machine.memory, ...user.memory, ...local.memory };
+  for (const higher of [user.memory, local.memory]) {
+    if ((higher?.repo || higher?.localPath) && !higher.choice) delete memory.choice;
+    else if (higher?.choice) memory.choice = higher.choice;
+  }
   if (!Object.keys(memory).length) return null;
   const selection = local.memory && ('buckets' in local.memory || 'projectBucket' in local.memory) ? local.memory : user.memory;
   const buckets = [...new Set(selection?.buckets ?? (selection?.projectBucket ? [selection.projectBucket] : []))];
@@ -22,4 +27,9 @@ export async function memorySettings(project, home = userHome()) {
     else localPath = resolve(localPath);
   }
   return { ...memory, localPath, buckets };
+}
+
+export async function memorySettings(project, home = userHome()) {
+  const memory = await memoryConfiguration(project, home);
+  return ['native', 'none'].includes(memory?.choice) ? null : memory;
 }
