@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from unittest.mock import patch
 
 MODEL = "gpt-6.1-sol"
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,7 +93,7 @@ def validate_search(case, response, changed, schema):
         require(bool(entry["aspects"]), "Coverage without examined aspects")
 
 
-def effective_context(thread_id, effort):
+def effective_context(thread_id, model, effort):
     require(isinstance(thread_id, str) and thread_id and
             all(c.isalnum() or c == "-" for c in thread_id), "Invalid session identifier")
     sessions = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "sessions"
@@ -109,15 +110,15 @@ def effective_context(thread_id, effort):
                                      "sandbox": payload.get("sandbox_policy")})
     require(bool(contexts), "Missing effective session context")
     for context in contexts:
-        check_model(context, effort)
+        check_model(context, model, effort)
         require(isinstance(context["sandbox"], dict) and
                 context["sandbox"].get("type") == "read-only", "Effective protection differs from read-only")
     # The record retains only the protection type, never the full session contents.
-    return {"model": MODEL, "effort": effort, "sandbox": "read-only"}
+    return {"model": model, "effort": effort, "sandbox": "read-only"}
 
 
-def check_model(context, effort):
-    require(context["model"] == MODEL and context["effort"] == effort,
+def check_model(context, model, effort):
+    require(context["model"] == model and context["effort"] == effort,
             "Effective model or effort differs from requested settings")
 
 
@@ -135,12 +136,12 @@ def run_call(args, frozen, label, prompt, schema_path, metrics):
     unchanged(args.case, frozen)
     response_path = args.output / f"{label}.json"
     command = [args.codex, "--no-daemon", "-a", "never",
-               "-c", 'windows.sandbox="unelevated"', "-c", f'review_model="{MODEL}"',
-               "-c", f'model_reasoning_effort="{args.effort}"', "exec", "--ignore-user-config", "-m", MODEL,
+               "-c", 'windows.sandbox="unelevated"', "-c", f"review_model={json.dumps(args.model)}",
+               "-c", f"model_reasoning_effort={json.dumps(args.effort)}", "exec", "--ignore-user-config", "-m", args.model,
                "--sandbox", "read-only", "--skip-git-repo-check", "--json",
                "--output-schema", str(schema_path), "-o", str(response_path), "-"]
     started = time.monotonic()
-    record = {"stage": label, "requested_model": MODEL, "requested_effort": args.effort,
+    record = {"stage": label, "requested_model": args.model, "requested_effort": args.effort,
               "exit_code": None, "elapsed_seconds": None, "usage": None, "effective": None}
     metrics["calls"].append(record)
     process = subprocess.Popen(command, cwd=args.case, stdin=subprocess.PIPE,
@@ -171,7 +172,7 @@ def run_call(args, frozen, label, prompt, schema_path, metrics):
     require(len(threads) == 1, "Independent session not identified")
     require(threads[0] not in metrics["thread_ids"], "Session context reused")
     metrics["thread_ids"].append(threads[0])
-    record["effective"] = effective_context(threads[0], args.effort)
+    record["effective"] = effective_context(threads[0], args.model, args.effort)
     return json.loads(response_path.read_text(encoding="utf-8"))
 
 
@@ -330,7 +331,7 @@ def selfcheck():
                                         {"id": "B", "decision": "accept", "evidence": "evidence", "canonical_id": "A"}],
                          "accepted_findings": [first], "limitations": []}
         checks = [lambda: check_completion(1, events), lambda: unchanged(case, frozen),
-                  lambda: check_model({"model": "other", "effort": "medium"}, "medium"),
+                  lambda: check_model({"model": "other", "effort": "medium"}, MODEL, "medium"),
                   lambda: verify_response(case, contradictory, [first, second], ["a.py"], schema),
                   lambda: verify_response(case, verification, [invalid], ["a.py"], schema)]
         for check in checks:
@@ -352,7 +353,53 @@ def selfcheck():
             pass
         else:
             raise AssertionError("Invalid deleted-file range accepted")
-    print("Self-check passed: safety, canonical integrity, valid deduplication and deleted-file locations.")
+    # Exercise each stage with a chosen model and recorded session contexts.
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        case, output = root / "case", root / "output"
+        case.mkdir()
+        output.mkdir()
+        sessions = root / "sessions"
+        sessions.mkdir()
+        model = 'chosen"model'
+        args = argparse.Namespace(case=case, output=output, codex="codex", model=model,
+                                  effort="medium", timeout_seconds=1)
+        metrics = {"calls": [], "thread_ids": []}
+        commands = []
+
+        class FakeProcess:
+            returncode = 0
+
+            def __init__(self, command, **kwargs):
+                commands.append(command)
+                thread = f"session-{len(commands)}"
+                context = {"type": "turn_context", "payload": {"model": model, "effort": "medium",
+                           "approval_policy": "never", "sandbox_policy": {"type": "read-only"}}}
+                (sessions / f"{thread}.jsonl").write_text(json.dumps(context) + "\n", encoding="utf-8")
+                Path(command[command.index("-o") + 1]).write_text("{}", encoding="utf-8")
+                self.thread = thread
+
+            def communicate(self, prompt, timeout):
+                return "\n".join(json.dumps(event) for event in (
+                    {"type": "thread.started", "thread_id": self.thread},
+                    {"type": "turn.completed", "usage": {"input_tokens": 1}})), ""
+
+        with patch.dict(os.environ, {"CODEX_HOME": str(root)}), patch.object(subprocess, "Popen", FakeProcess):
+            for stage in ("search-1", "search-2", "verify"):
+                run_call(args, fingerprint(case), stage, "prompt", root / "schema.json", metrics)
+        for command, record in zip(commands, metrics["calls"]):
+            require(command[command.index("-m") + 1] == model, "Chosen model not passed to CLI")
+            require(f"review_model={json.dumps(model)}" in command, "Chosen model not safely configured")
+            require(record["requested_model"] == model and record["effective"]["model"] == model,
+                    "Chosen model not recorded")
+        for context in ({"model": "other", "effort": "medium"},
+                        {"model": model, "effort": "xhigh"}):
+            try:
+                check_model(context, model, "medium")
+            except ValueError:
+                continue
+            raise AssertionError("Model or effort mismatch accepted")
+    print("Self-check passed: model selection, safety, canonical integrity, deduplication and deleted-file locations.")
 
 
 if __name__ == "__main__":
@@ -364,6 +411,7 @@ if __name__ == "__main__":
         parser.add_argument("--output", type=Path, required=True)
         parser.add_argument("--codex", required=True)
         parser.add_argument("--timeout-seconds", type=float, required=True)
+        parser.add_argument("--model", default=MODEL, help=f"Codex model (default: {MODEL})")
         parser.add_argument("--effort", choices=("medium", "xhigh"), default="medium")
         parser.add_argument("--effort-reason")
         try:

@@ -41,7 +41,7 @@ python "$reviewSkill/scripts/run_review.py" `
 
 If applicable instructions request another model, record the authorized decision resolving the conflict in the contract before starting the CLI. A prohibition on delegation or a fixed model/effort remains binding; report incompatibility rather than overriding it.
 
-The script selects `gpt-6.1-sol` with `-m`, sets `review_model` in the same process and uses `model_reasoning_effort=medium`. It verifies model and effort in session `turn_context` data. A different model, missing context or failed request stops the procedure. `--effort xhigh` requires `--effort-reason` and complexity justifying the authorized level.
+The script selects `gpt-6.1-sol` by default; use `--model <model>` to select the authorized model. It passes the selected model with `-m`, sets `review_model` in the same process and uses `model_reasoning_effort=medium`. It verifies model and effort in session `turn_context` data. A different model, missing context or failed request stops the procedure. `--effort xhigh` requires `--effort-reason` and complexity justifying the authorized level.
 
 `--ignore-user-config` keeps overrides within the run and reuses existing authentication. `--sandbox read-only` and `-a never` regulate reviewer tools. Instructions restrict reads to the case; read-only protection prevents writes but permits external reads. The coordinator checks transcripts for actual scope.
 

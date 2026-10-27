@@ -5,13 +5,14 @@ import { contained, isMain } from './common.mjs';
 import { redact } from './signal.mjs';
 
 const blocked = part => /^(?:\.git|\.geppetto|\.codex|\.claude|\.agents|node_modules|private|\.env(?:\..*)?|.*\.(?:pem|key))$/i.test(part);
+export class LearningScopeError extends Error {}
 export async function learningFilePath(root, name) {
-  if (typeof name !== 'string' || !name || name.includes('\0')) throw new Error('A project-relative file path is required');
+  if (typeof name !== 'string' || !name || name.includes('\0')) throw new LearningScopeError('A project-relative file path is required');
   const path = resolve(root, name);
-  if (!contained(root, path) || path === root || relative(root, path).split(sep).some(blocked)) throw new Error('File is outside the learning scope');
+  if (!contained(root, path) || path === root || relative(root, path).split(sep).some(blocked)) throw new LearningScopeError('File is outside the learning scope');
   for (let current = path; current !== root; current = dirname(current)) {
-    try { if ((await lstat(current)).isSymbolicLink()) throw new Error('Learning file paths must not use symbolic links'); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    try { if ((await lstat(current)).isSymbolicLink()) throw new LearningScopeError('Learning file paths must not use symbolic links'); }
+    catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
   }
   return path;
 }
