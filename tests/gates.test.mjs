@@ -55,3 +55,10 @@ test('agent gate fails on missing imports, cycles and excess lines, ignores remo
   put(cwd, 'CLAUDE.md', '@cycle.md'); put(cwd, 'cycle.md', '@CLAUDE.md'); assert.match(invoke('gate-agents.mjs', [], { cwd }).stderr, /Import cycle/);
   assert.equal(invoke('gate-agents.mjs', ['--max-lines', 'zero'], { cwd }).status, 2);
 });
+
+test('the required section must be a level-two heading', t => {
+  for (const text of ['# Observability\nLogs', '### Observability\nLogs', 'Observability\n=============\nLogs']) {
+    const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd: fixture(t), input: text });
+    assert.equal(result.status, 1, text); assert.match(result.stderr, /level-two heading/);
+  }
+});
