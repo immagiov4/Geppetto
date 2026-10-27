@@ -11,6 +11,7 @@ test('both catalogs locate the same plugin and Codex component paths resolve fro
   assert.equal(claude.name, codex.name); assert.equal(claude.version, codex.version); assert.equal(read('package.json').version, claude.version);
   assert.equal(ccatalog.plugins[0].name, claude.name); assert.equal(resolve(repo, ccatalog.plugins[0].source), repo);
   assert.equal(catalog.plugins[0].name, codex.name); assert.equal(catalog.plugins[0].source.source, 'local'); assert.equal(resolve(repo, catalog.plugins[0].source.path), repo);
+  assert.equal(ccatalog.plugins[0].version, claude.version); assert.equal(catalog.plugins[0].version, codex.version);
   assert.deepEqual(catalog.plugins[0].policy, { installation: 'AVAILABLE', authentication: 'ON_INSTALL' });
   for (const path of [codex.skills, codex.hooks]) { assert.match(path, /^\.\//); assert.equal(existsSync(resolve(repo, path)), true); }
   assert.equal(codex.interface.category, 'Productivity');

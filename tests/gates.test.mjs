@@ -2,6 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, put, invoke, config } from './helpers.mjs';
 
+for (const answer of ['**Not applicable**', '*Not applicable*', '`Not applicable`', 'N/A', 'n/a', '-', '.', 'TBD', 'none', '**N/A**', 'Not applicable because …']) {
+  test(`required sections reject unexplained answer ${JSON.stringify(answer)}`, t => {
+    const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd: fixture(t), input: `## Observability\n${answer}` });
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /<stdin>:1:.*(?:Empty section|needs a reason)/);
+  });
+}
+
+test('formatted non-applicability with a concrete reason passes', t => {
+  const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd: fixture(t), input: '## Observability\n**Not applicable** because this changes spelling only.' });
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test('PR sections accept content and reject a fenced heading, an empty section, and unexplained non-applicability', t => {
   const cwd = fixture(t);
   for (const text of ['## Observability\nErrors are recorded.', 'Observability\n-------------\nNot applicable: this changes spelling only.', '## Observability\n```json\n{"event":"failure"}\n```', '<!--\n```\n-->\n## Observability\nLogs']) {

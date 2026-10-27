@@ -2,7 +2,7 @@ import { readFile, mkdir, open, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { jsonFile, atomicJson, userHome, defaultConfig, exists } from './common.mjs';
 import { memorySettings } from './memory-config.mjs';
-import { scheduleMaintenance, maintenanceJobs } from './maintenance.mjs';
+import { scheduleMaintenance, maintenanceJobs, refreshMaintenanceLauncher } from './maintenance.mjs';
 
 /** Reuse machine resources; hook commands point to the recorded package source. */
 export async function reconcileMachine(project, target, source, { pluginHooks = false, uninstall = false, home = userHome(), jobs = {}, scheduler = scheduleMaintenance } = {}) {
@@ -61,10 +61,12 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
       machine.hooks[harness] = { source: hooksPath, commands: Object.values(template.hooks).flatMap(groups => groups.flatMap(group => group.hooks.map(hook => hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/'))))) };
     }
     machine.jobs.learn = { source: resolve(source.path, 'skills/geppetto-adopt/assets/templates/jobs/learn.md'), trigger: 'Stop', status: 'installed' };
+    await refreshMaintenanceLauncher(home, source);
     for (const name of maintenanceJobs) {
-      if (machine.jobs[name]?.status === 'scheduled') continue;
-      const attached = jobs[name] ?? await scheduler(name, { home, host: harness, source });
-      machine.jobs[name] = { source: resolve(source.path, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`), ...attached, status: attached ? 'scheduled' : 'needs-scheduler' };
+      const previous = machine.jobs[name];
+      const osJob = ['windows-task-scheduler', 'cron'].includes(previous?.scheduler);
+      const attached = previous?.status === 'scheduled' && !osJob ? previous : jobs[name] ?? await scheduler(name, { home, host: previous?.host ?? harness, source });
+      machine.jobs[name] = { ...attached, source: resolve(source.path, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`), status: attached ? 'scheduled' : 'needs-scheduler' };
       await atomicJson(path, machine);
     }
     await atomicJson(path, machine);

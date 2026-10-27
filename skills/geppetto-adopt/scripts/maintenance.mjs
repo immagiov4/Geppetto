@@ -1,5 +1,6 @@
 import { readFile, writeFile, open, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { cli, isMain, userHome, jsonFile, run } from './common.mjs';
 import { learningCommand, executeLearning } from './learn-runner.mjs';
 import { memorySettings } from './memory-config.mjs';
@@ -9,6 +10,15 @@ const cadence = 'weekly Monday 09:00 (local time)';
 const cronCadence = '0 9 * * 1';
 const psQuote = text => `'${text.replaceAll("'", "''")}'`;
 const shQuote = text => `'${text.replaceAll("'", "'\\''")}'`;
+
+/** Refresh the fixed OS entrypoint while the installer holds the machine lock. */
+export async function refreshMaintenanceLauncher(home, source) {
+  const script = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
+  const scripts = resolve(source.path, 'skills/geppetto-adopt/scripts');
+  await mkdir(resolve(home, '.geppetto/bin'), { recursive: true });
+  await writeFile(script, `import { main } from ${JSON.stringify(pathToFileURL(resolve(scripts, 'maintenance.mjs')).href)};\nimport { cli } from ${JSON.stringify(pathToFileURL(resolve(scripts, 'common.mjs')).href)};\nawait cli(main);\n`);
+  return script;
+}
 
 function nextWeeklyRun(expression) {
   const match = /^(\d+) (\d+) \* \* ([0-6])$/.exec(expression);
@@ -23,7 +33,7 @@ function nextWeeklyRun(expression) {
 /** Inspect or attach one OS job; native harness jobs are supplied by adoption first. */
 export async function scheduleMaintenance(name, { home = userHome(), host, source, platform = process.platform, execute = run, command = learningCommand(host) }) {
   if (!maintenanceJobs.includes(name)) throw new Error('Unknown maintenance job');
-  const script = resolve(source.path, 'skills/geppetto-adopt/scripts/maintenance.mjs');
+  const script = await refreshMaintenanceLauncher(home, source);
   const id = `Geppetto-${name}`;
   if (platform === 'win32') {
     const available = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Command Register-ScheduledTask -ErrorAction Stop | Out-Null']);
@@ -48,11 +58,14 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
   const marker = `# ${id}`;
   const existing = (listed.stdout ?? '').split('\n').find(line => line.endsWith(marker));
   const invocation = `${shQuote(process.execPath)} ${shQuote(script)} --run ${name}`;
-  if (existing && !existing.includes(invocation)) throw new Error(`${id}: existing cron action needs reconciliation`);
-  const expression = existing?.slice(0, existing.indexOf(invocation)).trim() || cronCadence;
+  const expression = existing?.trim().split(/\s+/).slice(0, 5).join(' ') || cronCadence;
   const nextRun = nextWeeklyRun(expression);
-  if (!existing) {
-    const result = execute('crontab', ['-'], { input: `${listed.stdout ?? ''}\n${cronCadence} ${invocation} ${marker}\n` });
+  const entry = `${expression} ${invocation} ${marker}`;
+  const lines = (listed.stdout ?? '').split('\n');
+  const owned = lines.filter(line => line.endsWith(marker));
+  if (owned.length !== 1 || existing !== entry) {
+    const kept = lines.filter(line => !line.endsWith(marker)).join('\n');
+    const result = execute('crontab', ['-'], { input: `${kept}${kept.endsWith('\n') ? '' : '\n'}${entry}\n` });
     if (result.status !== 0) throw new Error(`Maintenance crontab registration failed: ${result.stderr?.trim()}`);
   }
   return { scheduler: 'cron', id, cadence: expression, nextRun, disable: `crontab -e (remove ${marker})`, status: 'scheduled', host };

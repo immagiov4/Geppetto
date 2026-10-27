@@ -79,3 +79,14 @@ test('first-adoption CI selects only base scripts or a valid owner-pinned packag
   put(cwd, '.geppetto/bin/pr-event.mjs', 'trusted installed'); r = choose(); assert.equal(r.status, 0, r.stderr); assert.match(get(cwd, 'output'), /^script=.geppetto\/bin\/pr-event.mjs\nbootstrap=false/);
   assert.doesNotMatch(workflow, /pull_request\.head|pull_request\.body|secrets\./);
 });
+
+test('CI trusts the base workflow and checks changed documents using the trusted event script', () => {
+  const workflow = get(templates, 'ci/pr-gate.yml').replaceAll('\r\n', '\n');
+  assert.match(workflow, /\n  pull_request_target:\n/);
+  assert.doesNotMatch(workflow, /\n  pull_request:\n/);
+  assert.match(workflow, /if: github.event_name == 'pull_request_target'/);
+  assert.match(workflow, /ref: \$\{\{ github.event.pull_request.base.sha \}\}/);
+  assert.match(workflow, /pull-requests: read/);
+  assert.match(workflow, /run: node "\$GATE_SCRIPT" --docs/);
+  assert.doesNotMatch(workflow, /pull_request\.head|pull_request\.body/);
+});

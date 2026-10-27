@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { fixture, get, put, repo, invoke } from './helpers.mjs';
 import { reconcileMachine } from '../skills/geppetto-adopt/scripts/machine.mjs';
 import { scheduleMaintenance } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
@@ -50,7 +51,8 @@ test('cron attachment preserves unrelated entries and reuses its own job without
 
 test('Windows hidden launcher propagates the actual child exit status', { skip: process.platform !== 'win32' }, async t => {
   const home = fixture(t), source = { path: fixture(t) };
-  put(source.path, 'skills/geppetto-adopt/scripts/maintenance.mjs', 'process.exit(7);');
+  put(source.path, 'skills/geppetto-adopt/scripts/maintenance.mjs', 'export async function main() { return 7; }');
+  put(source.path, 'skills/geppetto-adopt/scripts/common.mjs', 'export async function cli(main) { process.exitCode = await main(); }');
   await scheduleMaintenance('curate-skills', { home, host: 'codex', source, platform: 'win32', command: {}, execute: (_binary, args) => ({ status: 0, stdout: args.includes('-EncodedCommand') ? '{"id":"fixture","nextRun":"2026-11-02T09:00:00"}' : '' }) });
   const result = spawnSync('cscript.exe', ['//B', '//Nologo', resolve(home, '.geppetto/maintenance.vbs'), 'curate-skills'], { encoding: 'utf8', windowsHide: true });
   assert.equal(result.status, 7, result.stderr);
@@ -101,4 +103,47 @@ test('native scheduler handoff is recorded before OS fallback', t => {
   assert.equal(result.status, 0, result.stderr);
   const machine = JSON.parse(get(home, '.geppetto/machine.json'));
   for (const name of Object.keys(jobs)) { assert.equal(machine.jobs[name].id, jobs[name].id); assert.equal(machine.jobs[name].status, 'scheduled'); }
+});
+
+for (const platform of ['win32', 'linux']) test(`${platform} maintenance launcher survives plugin upgrades and reconciles existing jobs in place`, async t => {
+  const home = isolatedMachine(t), project = fixture(t), oldSource = fixture(t), newSource = fixture(t);
+  put(oldSource, 'skills/geppetto-adopt/scripts/maintenance.mjs', 'export async function main() { return 7; }');
+  put(newSource, 'skills/geppetto-adopt/scripts/maintenance.mjs', 'export async function main() { return 9; }');
+  for (const source of [oldSource, newSource]) put(source, 'skills/geppetto-adopt/scripts/common.mjs', 'export async function cli(main) { process.exitCode = await main(process.argv.slice(2)); }');
+  let cron = '0 12 * * * echo unrelated\n', registrations = 0;
+  const windowsTasks = new Set();
+  const scheduler = (name, options) => scheduleMaintenance(name, { ...options, platform, command: {}, execute: (_binary, args, opts) => {
+    if (platform === 'linux') {
+      if (args[0] === '-l') return { status: 0, stdout: cron };
+      cron = opts.input; return { status: 0 };
+    }
+    if (!args.includes('-EncodedCommand')) return { status: 0 };
+    const id = `Geppetto-${name}`; windowsTasks.add(id); registrations++;
+    return { status: 0, stdout: JSON.stringify({ id, nextRun: '2026-11-02T09:00:00' }) };
+  } });
+  await reconcileMachine(project, 'codex', { path: oldSource }, { home, pluginHooks: true, scheduler });
+  if (platform === 'linux') {
+    // Simulate an owned action pointing into a disposable plugin cache.
+    cron = cron.replaceAll(resolve(home, '.geppetto/bin/maintenance-launcher.mjs'), resolve(oldSource, 'skills/geppetto-adopt/scripts/maintenance.mjs'));
+    cron = cron.replace('0 9 * * 1', '15 8 * * 2');
+  }
+  await reconcileMachine(project, 'codex', { path: newSource }, { home, pluginHooks: true, scheduler });
+  await reconcileMachine(project, 'codex', { path: newSource }, { home, pluginHooks: true, scheduler });
+  rmSync(oldSource, { recursive: true, force: true });
+  const launcher = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
+  const result = spawnSync(process.execPath, [launcher, '--run', 'curate-skills'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(result.status, 9, result.stderr);
+  const machine = JSON.parse(get(home, '.geppetto/machine.json'));
+  for (const name of ['curate-skills', 'maintain-memory']) {
+    assert.equal(machine.jobs[name].id, `Geppetto-${name}`);
+    assert.equal(machine.jobs[name].source, resolve(newSource, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`));
+  }
+  if (platform === 'win32') {
+    assert.equal(windowsTasks.size, 2); assert.equal(registrations, 6);
+    assert.ok(get(home, '.geppetto/maintenance.vbs').includes(launcher));
+  } else {
+    assert.equal(cron.split('\n').filter(line => line.includes('# Geppetto-')).length, 2);
+    assert.ok(cron.includes(launcher)); assert.ok(!cron.includes(oldSource)); assert.match(cron, /echo unrelated/);
+    assert.equal(machine.jobs['curate-skills'].cadence, '15 8 * * 2');
+  }
 });
