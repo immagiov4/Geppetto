@@ -11,6 +11,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | In-session learning reminder | `learn-nudge.mjs` |
 | Background subscription run and machine lock | `learn-runner.mjs` |
 | Current project capture through an isolated Git index | `learning-context.mjs` |
+| Structured learning decisions and validation | `learning-result.mjs` |
 | Bounded learner file tools | `learner-tools.mjs` |
 | Memory listing and configuration | `memory-hook.mjs`, `memory-config.mjs` |
 | Memory installation and Claude native directory ownership | `memory-setup.mjs` |

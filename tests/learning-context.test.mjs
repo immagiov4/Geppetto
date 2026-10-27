@@ -33,7 +33,7 @@ test('learning sees current permitted project files without changing the user in
     assert.equal(existsSync(resolve(cwd, '.env')), false);
     assert.equal(existsSync(resolve(cwd, 'ignored/cache.txt')), false);
     put(cwd, 'lesson.md', 'Retain the demonstrated improvement.\n');
-    return 0;
+    return { decision: 'applied', reason: 'Retained the demonstrated improvement.', owner: 'lesson.md' };
   } });
   assert.equal(result.status, 'committed');
   assert.deepEqual(readFileSync(resolve(root, '.git/index')), indexBefore);
@@ -66,7 +66,7 @@ test('learning captures file-directory replacements in either direction, includi
     const result = await runLearning(root, { home, execute: async ({ cwd }) => {
       assert.equal(get(cwd, directoryFirst ? 'owner' : 'owner/new.mjs'), 'current owner\n');
       if (directoryFirst) assert.equal(existsSync(resolve(cwd, 'owner/old.mjs')), false);
-      return 0;
+      return { decision: 'no_change', reason: 'The current owner already covers this case.', owner: 'owner' };
     } });
     assert.equal(result.status, 'unchanged');
     assert.deepEqual(readFileSync(resolve(root, '.git/index')), indexBefore);
@@ -85,7 +85,8 @@ test('Git text normalization in captured files does not become a false learning 
   put(root, 'app.mjs', 'export const behavior = "current";\r\n');
   put(root, '.geppetto/signals.jsonl', '{"id":"normalized","text":"Current behavior already covers the signal"}\n');
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
-    assert.match(get(cwd, 'app.mjs'), /behavior = "current"/); return 0;
+    assert.match(get(cwd, 'app.mjs'), /behavior = "current"/);
+    return { decision: 'no_change', reason: 'Current behavior covers the signal.', owner: 'app.mjs' };
   } });
   assert.equal(result.status, 'unchanged');
   assert.equal(get(root, 'app.mjs'), 'export const behavior = "current";\r\n');
@@ -111,7 +112,8 @@ test('a dirty submodule is reported as excluded while ordinary current files rem
   const indexBefore = readFileSync(resolve(root, '.git/index'));
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
     assert.equal(get(cwd, 'app.mjs'), 'current\n');
-    assert.equal(existsSync(resolve(cwd, 'dependency/lib.txt')), false); return 0;
+    assert.equal(existsSync(resolve(cwd, 'dependency/lib.txt')), false);
+    return { decision: 'no_change', reason: 'The current application covers the signal.', owner: 'app.mjs' };
   } });
   assert.equal(result.status, 'unchanged'); assert.equal(result.excludedChanges, 1);
   assert.equal(get(root, 'dependency/lib.txt'), 'dirty dependency\n');

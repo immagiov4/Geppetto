@@ -44,7 +44,7 @@ test('runner processes a signal snapshot on a branch, machine lock prevents over
   put(root, '.geppetto/signals.jsonl', JSON.stringify({ id: 'one', text: 'Use the existing helper', metric: 'complexity' }) + '\n');
   put(other, '.geppetto/signals.jsonl', '{"id":"other","text":"another project"}\n');
   let release, started; const active = new Promise(done => { release = done; }); const launched = new Promise(done => { started = done; }); let launches = 0;
-  const execute = async ({ cwd, prompt }) => { launches++; assert.match(prompt, /untrusted evidence/); started(); await active; put(cwd, 'lesson.md', 'Use existing helpers.\n'); return 0; };
+  const execute = async ({ cwd, prompt }) => { launches++; assert.match(prompt, /untrusted evidence/); started(); await active; put(cwd, 'lesson.md', 'Use existing helpers.\n'); return { decision: 'applied', reason: 'Retained the reusable helper lesson.', owner: 'lesson.md' }; };
   const first = runLearning(root, { home, execute });
   await Promise.race([first, launched]);
   assert.equal((await runLearning(root, { home, execute })).status, 'busy');
@@ -56,15 +56,15 @@ test('runner processes a signal snapshot on a branch, machine lock prevents over
   put(root, '.geppetto/signals.jsonl', get(root, '.geppetto/signals.jsonl') + JSON.stringify({ id: 'two', text: 'Fix verified dead end' }) + '\n');
   await assert.rejects(runLearning(root, { home, execute: async () => { throw new Error('fixture failure'); } }), /fixture failure/);
   assert.equal(existsSync(resolve(home, '.geppetto/learn.lock')), false);
-  const retry = await runLearning(root, { home, execute: async () => 0 }); assert.equal(retry.status, 'unchanged');
+  const retry = await runLearning(root, { home, execute: async () => ({ decision: 'no_change', reason: 'Existing procedure covers the signal.', owner: 'README.md' }) }); assert.equal(retry.status, 'unchanged');
 });
 
 test('the subscription CLI receives only file tools, with no model override or API routing', async t => {
   const cwd = fixture(t); const old = { ...process.env };
   t.after(() => { process.env = old; });
-  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>fs.writeFileSync('native.json',JSON.stringify({args:process.argv.slice(2),prompt,key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD})));`);
+  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>{const args=process.argv.slice(2);fs.writeFileSync('native.json',JSON.stringify({args,prompt,key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD}));fs.writeFileSync(args[args.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'Already covered.',owner:'README.md'}));});`);
   process.env.PATH = cwd; process.env.OPENAI_API_KEY = 'fixture-secret';
-  assert.equal(await executeLearning({ cwd, prompt: 'Fixed synthetic learning prompt', host: 'codex' }), 0);
+  assert.equal((await executeLearning({ cwd, prompt: 'Fixed synthetic learning prompt', host: 'codex', resultPath: resolve(cwd, 'result.json') })).decision, 'no_change');
   const result = JSON.parse(get(cwd, 'native.json'));
   assert.equal(result.prompt, 'Fixed synthetic learning prompt'); assert.equal(result.key, undefined); assert.equal(result.child, '1');
   assert.ok(result.args.includes('features.shell_tool=false')); assert.ok(result.args.includes('features.multi_agent=false'));
@@ -75,9 +75,9 @@ test('the subscription CLI receives only file tools, with no model override or A
 test('configured learning model and effort reach the CLI and the signal dispatcher', async t => {
   const cwd = fixture(t), home = fixture(t); const old = { ...process.env };
   t.after(() => { process.env = old; });
-  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `require('node:fs').writeFileSync('selection.json',JSON.stringify(process.argv.slice(2)));process.stdin.resume();`);
+  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'),args=process.argv.slice(2);fs.writeFileSync('selection.json',JSON.stringify(args));fs.writeFileSync(args[args.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'Already covered.',owner:'README.md'}));process.stdin.resume();`);
   process.env.PATH = cwd;
-  await executeLearning({ cwd, prompt: 'Actual incident', host: 'codex', model: 'gpt-6.1-terra', reasoningEffort: 'medium' });
+  await executeLearning({ cwd, prompt: 'Actual incident', host: 'codex', model: 'gpt-6.1-terra', reasoningEffort: 'medium', resultPath: resolve(cwd, 'result.json') });
   const args = JSON.parse(get(cwd, 'selection.json'));
   assert.equal(args[args.indexOf('--model') + 1], 'gpt-6.1-terra');
   assert.ok(args.includes('model_reasoning_effort="medium"'));
@@ -87,7 +87,7 @@ test('configured learning model and effort reach the CLI and the signal dispatch
   git(cwd, ['add', '.geppetto/config.json']); git(cwd, ['commit', '-qm', 'baseline']);
   put(cwd, '.geppetto/signals.jsonl', '{"id":"model","text":"A real incident"}\n');
   let selection;
-  await runLearning(cwd, { home, execute: async request => { selection = request; return 0; } });
+  await runLearning(cwd, { home, execute: async request => { selection = request; return { decision: 'no_change', reason: 'Existing behavior covers the signal.', owner: 'README.md' }; } });
   assert.equal(selection.model, 'gpt-6.1-terra'); assert.equal(selection.reasoningEffort, 'medium');
 });
 
@@ -128,10 +128,10 @@ test('write approval retains a staged result and a signal appended during a run 
   put(root, '.geppetto/config.json', { hooks: { signalLearning: { writeApproval: true } } });
   put(root, '.geppetto/signals.jsonl', '{"id":"one","text":"first"}\n');
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
-    put(cwd, 'lesson.md', 'Verified lesson\n'); put(root, '.geppetto/signals.jsonl', get(root, '.geppetto/signals.jsonl') + '{"id":"two","text":"second"}\n'); return 0;
+    put(cwd, 'lesson.md', 'Verified lesson\n'); put(root, '.geppetto/signals.jsonl', get(root, '.geppetto/signals.jsonl') + '{"id":"two","text":"second"}\n'); return { decision: 'applied', reason: 'Retained the verified lesson.', owner: 'lesson.md' };
   } });
   assert.equal(result.status, 'staged'); assert.match(git(result.path, ['diff', '--cached', '--name-only']).stdout, /lesson.md/);
-  let prompt; await runLearning(root, { home, execute: async request => { prompt = request.prompt; return 0; } });
+  let prompt; await runLearning(root, { home, execute: async request => { prompt = request.prompt; return { decision: 'no_change', reason: 'Existing owner covers the signal.', owner: 'README.md' }; } });
   assert.match(prompt, /second/); assert.doesNotMatch(prompt, /"text":"first"/);
 });
 
