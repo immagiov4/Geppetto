@@ -1,8 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, symlinkSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, delimiter } from 'node:path';
 import { fixture, put, invoke, git, config, scripts } from './helpers.mjs';
+
+test('learning readiness requires an initial Git commit, not just an available CLI', t => {
+  const cwd = fixture(t), home = fixture(t), bin = fixture(t);
+  put(bin, process.platform === 'win32' ? 'codex.exe' : 'codex', 'fixture');
+  const env = { PATH: `${bin}${delimiter}${process.env.PATH}` };
+  const learning = () => { const r = invoke('audit.mjs', ['--json'], { cwd, home, env }); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout).learning; };
+  assert.equal(learning().enabled, false); assert.match(learning().action, /Git.*commit/i);
+  git(cwd, ['init', '-q']);
+  assert.equal(learning().enabled, false);
+  git(cwd, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Initial revision']);
+  assert.deepEqual(learning(), { enabled: true, action: null });
+  put(cwd, '.geppetto/config.json', { ...config(), hooks: { signalLearning: { enabled: false } } });
+  assert.deepEqual(learning(), { enabled: false, action: null });
+});
 
 test('audit inventories an empty project without claiming active harness capabilities', t => {
   const cwd = fixture(t); const r = invoke('audit.mjs', ['--json'], { cwd }); assert.equal(r.status, 0, r.stderr);

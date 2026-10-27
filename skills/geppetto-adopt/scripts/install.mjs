@@ -222,7 +222,12 @@ function installationGit(root, manifest, opts) {
   };
   const branch = 'geppetto-install';
   if (opts['--dry-run']) { console.log(`Dry run: ${opts['--begin'] ? 'create' : 'commit owned files on'} ${branch}`); return 0; }
-  if (opts['--begin']) { if (git(['branch', '--show-current']) !== branch) git(['switch', '-c', branch]); return 0; }
+  if (opts['--begin']) {
+    const repository = run('git', ['rev-parse', '--git-dir'], { cwd: root, timeout: 0 });
+    if (repository.status !== 0) git(['init', '--quiet', '--initial-branch', branch]);
+    if (git(['branch', '--show-current']) !== branch) git(['switch', '-c', branch]);
+    return 0;
+  }
   if (git(['branch', '--show-current']) !== branch) throw new Error(`Complete adoption on ${branch}; run --begin first`);
   const files = [...new Set(Object.values(manifest.installations).flatMap(entry => Object.keys(entry.files)))].filter(path => path !== '.geppetto/authorizations');
   if (!files.length) throw new Error('No owned installation to commit');

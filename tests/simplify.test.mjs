@@ -72,6 +72,25 @@ test('the subscription CLI receives only file tools, with no model override or A
   assert.ok(result.args.every(arg => !/--model|service_tier/.test(arg)));
 });
 
+test('configured learning model and effort reach the CLI and the signal dispatcher', async t => {
+  const cwd = fixture(t), home = fixture(t); const old = { ...process.env };
+  t.after(() => { process.env = old; });
+  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `require('node:fs').writeFileSync('selection.json',JSON.stringify(process.argv.slice(2)));process.stdin.resume();`);
+  process.env.PATH = cwd;
+  await executeLearning({ cwd, prompt: 'Actual incident', host: 'codex', model: 'gpt-6.1-terra', reasoningEffort: 'medium' });
+  const args = JSON.parse(get(cwd, 'selection.json'));
+  assert.equal(args[args.indexOf('--model') + 1], 'gpt-6.1-terra');
+  assert.ok(args.includes('model_reasoning_effort="medium"'));
+  process.env = old;
+  git(cwd, ['init', '-q']); git(cwd, ['config', 'user.name', 'Fixture']); git(cwd, ['config', 'user.email', 'fixture@example.invalid']);
+  put(cwd, '.geppetto/config.json', { hooks: { signalLearning: { model: 'gpt-6.1-terra', reasoningEffort: 'medium' } } });
+  git(cwd, ['add', '.geppetto/config.json']); git(cwd, ['commit', '-qm', 'baseline']);
+  put(cwd, '.geppetto/signals.jsonl', '{"id":"model","text":"A real incident"}\n');
+  let selection;
+  await runLearning(cwd, { home, execute: async request => { selection = request; return 0; } });
+  assert.equal(selection.model, 'gpt-6.1-terra'); assert.equal(selection.reasoningEffort, 'medium');
+});
+
 test('learner file boundary preserves edits while excluding private, secret and escaped paths', async t => {
   const root = fixture(t);
   await learningFileTool(root, 'Write', { path: 'docs/lesson.md', content: 'Use the owner.' });

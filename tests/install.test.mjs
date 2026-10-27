@@ -4,6 +4,24 @@ import { cpSync, existsSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, get, invoke, git, scripts, repo } from './helpers.mjs';
 
+test('adoption initializes a new project and commits only owned files as its first revision', t => {
+  const cwd = fixture(t), home = fixture(t); const { install } = source(t);
+  const args = ['--target', 'codex', '--project', cwd, '--plugin-hooks'];
+  put(cwd, 'app.txt', 'Existing application');
+  let result = invoke(install, [...args, '--begin', '--dry-run'], { cwd, home });
+  assert.equal(result.status, 0, result.stderr); assert.equal(existsSync(resolve(cwd, '.git')), false);
+  result = invoke(install, [...args, '--begin'], { cwd, home }); assert.equal(result.status, 0, result.stderr);
+  assert.equal(git(cwd, ['branch', '--show-current']).stdout.trim(), 'geppetto-install');
+  git(cwd, ['config', 'user.name', 'Fixture']); git(cwd, ['config', 'user.email', 'fixture@example.invalid']);
+  git(cwd, ['add', 'app.txt']);
+  result = invoke(install, args, { cwd, home }); assert.equal(result.status, 0, result.stderr);
+  result = invoke(install, [...args, '--commit'], { cwd, home }); assert.equal(result.status, 0, result.stderr);
+  assert.equal(git(cwd, ['rev-parse', '--verify', 'HEAD']).status, 0);
+  assert.doesNotMatch(git(cwd, ['show', '--format=', '--name-only', 'HEAD']).stdout, /app.txt/);
+  assert.equal(git(cwd, ['diff', '--cached', '--name-only']).stdout.trim(), 'app.txt');
+  assert.equal(get(cwd, 'app.txt'), 'Existing application');
+});
+
 for (const target of ['claude', 'codex']) test(`${target} plugin adoption stays small, owns only installation files and finalizes on a local branch`, t => {
   const cwd = fixture(t), home = fixture(t); const { install } = source(t);
   const args = ['--target', target, '--project', cwd, '--plugin-hooks'];
