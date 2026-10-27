@@ -54,7 +54,7 @@ Review the dry-run, then rerun without `--dry-run`. In the project, ask:
 Install Geppetto on this project.
 ```
 
-`geppetto-adopt` inspects the project and machine, asks once, installs hooks and learning, connects maintenance jobs through an available scheduler and finishes with an installed/reused/skipped recap. An existing OpenRouter key enables skill and memory suggestions; when missing, the installer makes one optional offer. Reruns reconcile existing resources across projects. Architecture: [system map](docs/system-map.md). Contributor commands: [development](docs/development.md).
+An installation request, including this repository link, authorizes adoption. After installing the plugin, the agent reads `skills/geppetto-adopt/SKILL.md` from its installed path and completes project installation in the same session. A fresh session loads the plugin's hooks and skills for later work. Adoption reuses plugin skills, connects maintenance jobs, preserves project rules and finishes with a local `geppetto-install` commit and a recap. An existing OpenRouter key enables suggestions; a missing key receives one optional offer. [Installation details](skills/geppetto-adopt/references/installation.md), [architecture](docs/system-map.md), [development](docs/development.md).
 
 ## Limits
 

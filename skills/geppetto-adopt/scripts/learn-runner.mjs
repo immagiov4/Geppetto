@@ -22,7 +22,7 @@ function git(root, args) {
   return result.stdout;
 }
 
-export async function executeLearning({ cwd, prompt, host }) {
+export async function executeLearning({ cwd, prompt, host, output = 'ignore' }) {
   const command = learningCommand(host);
   if (!command) throw new Error(`Install ${host} CLI and sign in with your subscription account.`);
   const server = { command: process.execPath, args: [fileURLToPath(new URL('./learner-tools.mjs', import.meta.url)), cwd, 'workspace-write', '["Read","Write","Edit","Glob","Grep"]'] };
@@ -31,7 +31,7 @@ export async function executeLearning({ cwd, prompt, host }) {
     : ['exec', '--ignore-user-config', '--sandbox', 'read-only', '--config', 'forced_login_method="chatgpt"', '--config', 'approval_policy="never"', ...['shell_tool', 'multi_agent', 'multi_agent_v2', 'apps', 'plugins', 'browser_use', 'computer_use', 'image_generation', 'memories', 'code_mode', 'code_mode_only', 'skill_mcp_dependency_install'].flatMap(feature => ['--config', `features.${feature}=false`]), '--config', 'web_search="disabled"', '--config', `mcp_servers={geppetto_files={command=${JSON.stringify(server.command)},args=${JSON.stringify(server.args)},default_tools_approval_mode="approve"}}`, '-'];
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:OPENAI_API_KEY|OPENAI_BASE_URL|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_USE_.*|OPENROUTER_API_KEY|T3_.*)$/i.test(key)));
   return new Promise((done, reject) => {
-    const child = spawn(command.executable, [...command.prefix, ...args], { cwd, windowsHide: true, shell: false, stdio: ['pipe', 'ignore', 'ignore'], env: { ...env, GEPPETTO_LEARNING_CHILD: '1' } });
+    const child = spawn(command.executable, [...command.prefix, ...args], { cwd, windowsHide: true, shell: false, stdio: ['pipe', output, output], env: { ...env, GEPPETTO_LEARNING_CHILD: '1' } });
     child.once('error', () => reject(new Error('Learning CLI could not start.')));
     child.once('close', code => code === 0 ? done(code) : reject(new Error(`Learning CLI failed (exit ${code ?? 'signal'}); signals remain available.`)));
     child.stdin.on('error', () => {}); child.stdin.end(prompt);

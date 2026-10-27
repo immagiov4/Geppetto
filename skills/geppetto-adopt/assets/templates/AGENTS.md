@@ -21,11 +21,10 @@ Context is a budget: load the relevant owner through the map below. This file an
 - Substantial changes start with a Requirements map through `$geppetto-spec`.
 - Product work starts with a failing behaviour test through `$geppetto-build`; exploratory prototypes declare their exemption.
 - Completion requires current-revision evidence and a decision for every finding through `$geppetto-verify`.
-- At any time, record meaningful recurring friction or errors with `node .geppetto/bin/signal.mjs "<problem>" --metric <affected-metric>`; use `$geppetto-learn` for guidance. Do not log trivial one-offs.
+- At any time, use `$geppetto-learn` to record meaningful recurring friction and its affected metric at the existing owner.
 - Paid OpenRouter requests use `$geppetto-authorize` and the machine key configuration.
 - Memory procedures follow `$geppetto-memory`; retrieval respects bucket privacy.
 - Update each fact's existing owner in the same change. Keep explanations and procedures at their owners.
-- Run processes without visible Windows windows; use hidden launch flags, headless browsers and muted audio.
 
 ## Where to look
 

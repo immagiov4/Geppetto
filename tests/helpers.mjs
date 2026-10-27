@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, spawn } from 'node:child_process';
 
@@ -14,7 +14,15 @@ export function fixture(t) {
 export function put(dir, path, text) { mkdirSync(dirname(resolve(dir, path)), { recursive: true }); writeFileSync(resolve(dir, path), typeof text === 'string' ? text : JSON.stringify(text)); }
 export const get = (dir, path) => readFileSync(resolve(dir, path), 'utf8');
 export function invoke(script, args = [], { cwd = repo, home = cwd, input = '', env = {} } = {}) {
-  return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } });
+  // Installation fixtures use a fake native scheduler, never the host's real jobs.
+  const temporary = basename(script) === 'install.mjs' && !args.includes('--scheduler-jobs') ? mkdtempSync(resolve(tmpdir(), 'geppetto-scheduler-')) : null;
+  try {
+    if (temporary) {
+      const jobs = Object.fromEntries(['curate-skills', 'maintain-memory'].map(name => [name, { scheduler: 'fixture', id: name, cadence: 'weekly', nextRun: '2026-11-02T09:00:00', disable: `fixture disable ${name}` }]));
+      put(temporary, 'jobs.json', jobs); args = [...args, '--scheduler-jobs', resolve(temporary, 'jobs.json')];
+    }
+    return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } });
+  } finally { if (temporary) rmSync(temporary, { recursive: true, force: true }); }
 }
 export function parallel(script, args, { cwd, home = cwd }) {
   return new Promise((resolveResult, reject) => {

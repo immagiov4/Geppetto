@@ -1,11 +1,12 @@
 # System map
 
-Source procedures live in `skills/`; root manifests expose the plugin. `install.mjs` generates harness skill copies and standalone commands in `.geppetto/bin` (source-repository entrypoints import canonical tracked scripts), protects them with an ownership manifest and reconciles shared resources through `machine.mjs`. [Development](development.md) owns refresh and verification commands.
+Source procedures live in `skills/`; root manifests expose the plugin. `install.mjs` reuses plugin skills or generates copies for targets without a plugin, supplies CI gates in `.geppetto/bin` and protects ownership. `machine.mjs` reconciles shared resources. [Development](development.md) owns refresh and verification commands.
 
 | Concern | Source owner under `skills/geppetto-adopt/scripts/` |
 |---|---|
 | Project installation and ownership | `install.mjs` |
 | Shared hooks, job identities, key location and memory | `machine.mjs` |
+| OS maintenance attachment and subscription CLI execution | `maintenance.mjs` |
 | PR feedback and requirements/feedback context | `hook.mjs` |
 | In-session learning reminder | `learn-nudge.mjs` |
 | Background subscription run and machine lock | `learn-runner.mjs` |

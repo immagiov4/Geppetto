@@ -6,4 +6,4 @@ The project writes documentation in English, uses behavior tests and the bundled
 
 ## Observability
 
-Run `audit.mjs --project . --verify` after refreshing. Synthetic tests cover two projects sharing one machine, hook behavior, paid API caps and the learner lock. Hook events retain outcomes and diagnostic metadata in ignored local files.
+Run `audit.mjs --project . --verify` after refreshing. Synthetic tests cover plugin reuse, local adoption commits, two projects sharing machine jobs, hooks, paid caps and the learner lock. OS registration uses injected schedulers; the hidden Windows launcher runs a synthetic child. Compare project inventories and inspect machine job IDs, cadence, next run and disable controls; OS job output lives in `~/.geppetto/<job>.log`. Hook outcomes remain in ignored local files.

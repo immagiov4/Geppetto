@@ -1,24 +1,25 @@
 # Installation
 
-Node 22+ and Git are required. Source skills live in `skills/`; installations are generated copies. Use the source checkout's installer or an installed copy with recorded package provenance.
+Node 22+ and Git are required. Resolve `<adopt>` from the installed plugin or source checkout; keep using that path throughout adoption.
 
 ```sh
-node <adopt>/scripts/install.mjs --target <claude|codex|agents> --project <project> --dry-run
-node <adopt>/scripts/install.mjs --target <claude|codex|agents> --project <project>
+node <adopt>/scripts/install.mjs --target <target> --project <project> --begin
+node <adopt>/scripts/install.mjs --target <target> --project <project> --plugin-hooks --dry-run
+node <adopt>/scripts/install.mjs --target <target> --project <project> --plugin-hooks
 ```
 
-Use `--user` in place of `--project` for user-level skills. `--plugin-hooks` reuses plugin-level hooks; otherwise installation merges one shared hook set into the user's harness settings. Project settings remain project-owned. The installer reads `~/.geppetto/machine.json`, reuses the key location and memory repository, and records maintenance jobs for attachment through [jobs](../../geppetto-learn/references/jobs.md). Existing user memory configuration remains authoritative; projects store only their bucket selection.
+Targets are `claude`, `codex` and `agents`. With a plugin installed for that target, always pass `--plugin-hooks`: the project receives only CI gate modules, configuration, ownership state and the generated router/import/CI. Plugin mode persists on updates and reconciles owned duplicate skill copies. Only targets without the plugin receive project skill copies and shared user hooks. `--user` selects user-level installation instead of project adoption. Existing user memory defaults stay authoritative; project configuration holds bucket links.
 
-The hash manifest `.geppetto/install.json` protects existing edits and foreign files. Reruns reconcile owned files; `--uninstall` removes owned files. External projects receive standalone scripts in `.geppetto/bin`. The Geppetto source repository uses small command entrypoints importing its tracked canonical source. Exit codes are 0 success, 1 conflict/check failure, 2 invalid arguments. Dry runs inspect project file changes without writing.
+The hash manifest protects edits and foreign files; reruns reconcile ownership and `--uninstall` removes owned files. External CI gates are standalone; source-repository entrypoints import canonical scripts. Dry runs are read-only. Exit codes: 0 success, 1 conflict/check/blocker, 2 invalid arguments. If machine registration is permission-blocked, put the installer's single retry command in the recap for execution outside the sandbox.
 
 ## Project instructions and CI
 
-Work on the local installation branch. Read the existing instructions, preserve their project rules at their current owners and adapt the [router](../assets/templates/AGENTS.md). For a large migration, `migrate-agents.mjs inventory --source <original>` and `verify --inventory <json> --map <json> --project <project>` check paragraph retention. Apply the migration and link its diff in the final recap.
+`--begin` creates `geppetto-install` for both harnesses. Preserve existing project rules while adapting the [router](../assets/templates/AGENTS.md), [CLAUDE import](../assets/templates/CLAUDE.md) and [CI](../assets/templates/ci/README.md). For large instruction migrations, use `migrate-agents.mjs inventory` and `verify` to check retention. Keep inventories, instruction diffs, requirements maps and installation evidence inline in the recap or outside the project, in harness temporary storage or `~/.geppetto/`.
 
-Adapt [CLAUDE](../assets/templates/CLAUDE.md), [PR](../assets/templates/pr-ticket.md), [feature](../assets/templates/feature-doc.md) and [CI](../assets/templates/ci/README.md) templates. Record generated files with `--record-generated <project-relative-path>` so reconciliation protects them. Inspect `host-lint.mjs --project <project> --json`, register generated paths in the host's ignore configuration and record its existing check command as `hostChecks.changed`.
+Record generated files with `--record-generated <project-relative-path>`; write only Geppetto-owned project files. Record existing project checks as `hostChecks.changed`. Follow [jobs](../../geppetto-learn/references/jobs.md) before running installation: attach available native scheduler jobs and hand their registrations to `--scheduler-jobs <external-json>`. Otherwise the installer attaches OS jobs through the subscription CLI, hidden on Windows.
 
 ## Verify
 
-Run `audit.mjs --project <project> --verify`. Exercise a prompt hook and a memory listing on synthetic inputs. For Codex, inspect and persist the accepted installation's hook hashes with `codex-hook-trust.mjs --project <project> --plugin <actual-plugin-id> --approve`; use `--source <absolute-hooks-file>` for the shared file instead. The helper preserves disabled, managed and unrelated hooks and verifies saved hashes.
+Run `<adopt>/scripts/audit.mjs --project <project> --verify`, a synthetic prompt hook and memory listing. For Codex, use `<adopt>/scripts/codex-hook-trust.mjs --project <project> --plugin <actual-plugin-id> --approve` (or `--source <hooks-file>` for shared hooks). Then run the installer with `--target <target> --project <project> --commit`: it commits only owned installation paths on `geppetto-install`, preserving unrelated staged work. Include the commit and recap table in the response.
 
 [Process execution](processes.md) governs child processes. Runtime and provider limitations are listed once in the README's Limits section.

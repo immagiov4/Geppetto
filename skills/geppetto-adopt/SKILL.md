@@ -5,10 +5,10 @@ description: "Install, update, inspect or remove Geppetto in a project."
 
 # Install Geppetto
 
-1. **Look.** Run `node <adopt>/scripts/audit.mjs --project <project> --json`. Read the project's instructions and `~/.geppetto/machine.json`. Reuse the machine's hooks, jobs, key location and memory repository. Inspect existing plugin hooks and scheduler jobs before adding equivalents. Complete when existing resources and missing prerequisites are identified.
-2. **Ask once.** “Install Geppetto here, with its hooks, automatic learning and maintenance jobs?” Reuse an answer already given to this installation question. If OpenRouter is missing, make one short optional offer: “Add an OpenRouter key? It improves skill and memory suggestions.” Use the host's private secret entry. Complete when the installation answer and optional key choice are known.
-3. **Install.** Follow [installation](references/installation.md). Run the installer for each target, passing `--plugin-hooks` when the installed plugin supplies hooks. Adapt the router and CI to existing project conventions; apply instruction migration on the local installation branch. Attach missing maintenance jobs through the available scheduler and record their identifiers in the machine registry. Preserve existing settings. Run the gates and a hook smoke test. Complete when installed resources pass their checks and any unavailable prerequisite has a concrete reason.
-4. **Recap.** Give this short table with actual results and a link to the applied instruction diff:
+1. **Look.** Run `node <adopt>/scripts/audit.mjs --project <project> --json`. Read project instructions and the machine registry. Inspect plugins, scheduler jobs, key and memory before adding equivalents. Complete when reusable resources and prerequisites are known.
+2. **Consent.** An installation request is the yes, including a request containing the repository link. Otherwise ask once: “Install Geppetto here, with hooks, learning and maintenance jobs?” Only when OpenRouter is missing, offer its key once through private secret entry. Complete when consent and any key choice are known.
+3. **Install.** Follow [installation](references/installation.md), including plugin reuse, native scheduler attachment and local branch/commit. After plugin bootstrap, read this entry directly from its installed path and continue in the same session. Complete when gates and hook checks pass, jobs are attached or the actual blocker is named, and the local commit exists.
+4. **Recap.** Give actual results and the instruction diff inline or linked outside the project:
 
 | Installed | Reused from this machine | Skipped and why | How to change |
 |---|---|---|---|

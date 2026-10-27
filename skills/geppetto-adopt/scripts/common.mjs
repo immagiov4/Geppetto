@@ -53,7 +53,7 @@ export async function jsonFile(path, fallback) {
   try { return JSON.parse((await readFile(path, 'utf8')).replace(/^\uFEFF/, '')); }
   catch (error) {
     if (error.code === 'ENOENT' && fallback !== undefined) return fallback;
-    throw new Error(`${path}:1: ${error instanceof SyntaxError ? 'Invalid JSON' : error.message}`);
+    throw new Error(`${path}:1: ${error instanceof SyntaxError ? 'Invalid JSON' : error.message}`, { cause: error });
   }
 }
 
