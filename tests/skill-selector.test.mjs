@@ -102,10 +102,10 @@ test('batched skill decisions share the deadline, aggregate known charges and ke
   assert.deepEqual(timeout, {}); assert.equal(aborted, true); assert.deepEqual(unsettled.map(c => c[0]), ['reserve']);
 });
 
-test('audit exposes the skill selector as its own pending capability', t => {
+test('an existing key makes the skill selector ready', t => {
   const { cwd, home } = setup(t);
   const result = invoke('audit.mjs', ['--json'], { cwd, home, env: { OPENROUTER_API_KEY: 'fixture', PATH: '' } });
   assert.equal(result.status, 0, result.stderr);
   const selector = JSON.parse(result.stdout).skillSelector;
-  assert.equal(selector.enabled, false); assert.match(selector.action, /standing.*skill-selector/);
+  assert.equal(selector.enabled, true); assert.equal(selector.action, null);
 });

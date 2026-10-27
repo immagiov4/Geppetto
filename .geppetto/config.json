@@ -38,35 +38,7 @@
     "signalLearning": {
       "enabled": true,
       "benchmark": null,
-      "host": "codex",
-      "billing": "subscription",
-      "provider": "openai",
-      "boundary": "project-file-tools",
-      "writeApproval": false,
-      "hosts": {
-        "codex": {
-          "model": "gpt-6.1-sol",
-          "serviceTier": "default",
-          "sandbox": "workspace-write",
-          "tools": [
-            "Read",
-            "Edit",
-            "Write",
-            "Glob",
-            "Grep"
-          ]
-        },
-        "claude": {
-          "sandbox": "workspace-write",
-          "tools": [
-            "Read",
-            "Edit",
-            "Write",
-            "Glob",
-            "Grep"
-          ]
-        }
-      }
+      "writeApproval": false
     },
     "skillSelector": {
       "enabled": true,

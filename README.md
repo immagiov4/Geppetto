@@ -51,16 +51,17 @@ node geppetto/skills/geppetto-adopt/scripts/install.mjs --target agents --projec
 Review the dry-run, then rerun without `--dry-run`. In the project, ask:
 
 ```
-I want to follow Geppetto on this project.
+Install Geppetto on this project.
 ```
 
-`geppetto-adopt` reads what you already have, proposes the instruction and hook changes you approve, and checks that a fresh session loads them. Architecture: [system map](docs/system-map.md). Contributor commands: [development](docs/development.md).
+`geppetto-adopt` inspects the project and machine, asks once, installs hooks and learning, connects maintenance jobs through an available scheduler and finishes with an installed/reused/skipped recap. An existing OpenRouter key enables skill and memory suggestions; when missing, the installer makes one optional offer. Reruns reconcile existing resources across projects. Architecture: [system map](docs/system-map.md). Contributor commands: [development](docs/development.md).
 
 ## Limits
 
 - **Two harnesses tested.** Claude Code and Codex. Pi and OpenCode can load the skills; nobody has trialled them there yet.
-- **Codex project hooks need trust.** Until you approve them (`/hooks`), instructions and skills still load; hooks wait.
-- **Hooks are not a sandbox.** They block some direct grant-file writes, not every script. Put the real spend cap on the provider account.
+- **Harness loading and hook trust.** Installation checks files and native hook hashes; verify actual hook and skill loading in a fresh session. Codex project layers also require project trust.
+- **Paid API limits.** API accounting covers requests made through Geppetto. Put a hard spending limit on the OpenRouter key; a local maximum cannot bound a provider call whose final charge is unknown.
+- **Maintenance scheduling.** Periodic jobs need an available harness or OS scheduler; the recap names missing prerequisites. Subscription learning uses the installed CLI account and its available tools.
 - **First CI run** on the PR that introduces Geppetto needs an owner-pinned Geppetto commit. [CI bootstrap](skills/geppetto-adopt/assets/templates/ci/README.md).
 
 <details>
@@ -78,7 +79,7 @@ When the same friction keeps returning, a signal can be recorded, and `geppetto-
   <img src="assets/readme/memory-flow.png" width="880" alt="Memory repository, project index loaded at startup, and relevant pages read when needed.">
 </p>
 
-Facts that outlive a chat live in a private Git repository of Markdown, grouped into buckets, and at session start the hook supplies the indexes of the buckets you linked, with no API key required for that path. An optional classifier can suggest pages per request when its key, settings, and spending grant are present. [Memory retrieval](docs/memory-retrieval.md).
+Facts that outlive a chat live in a private Git repository of Markdown, grouped into buckets, and at session start the hook supplies the indexes of the buckets you linked, with no API key required for that path. An optional classifier suggests pages per request when its OpenRouter key is present. [Memory retrieval](docs/memory-retrieval.md).
 
 </details>
 
@@ -90,7 +91,7 @@ Facts that outlive a chat live in a private Git repository of Markdown, grouped 
 | **Procedures** | `geppetto-adopt`, `geppetto-spec`, `geppetto-build`, `geppetto-verify`, `geppetto-learn`, `geppetto-memory`, `geppetto-authorize` |
 | **Principles** | `geppetto-measure-it`, `geppetto-x-ray`, `geppetto-reuse-it`, `geppetto-living-docs`, `geppetto-behaviour-tests` |
 | **Bundled** | `writing-for-agents`, `requirements-blast-radius`, `skill-learning-patterns`, `code-review`, `receive-work-feedback`, `retro` (optional) |
-| **Scripts** | `audit`, `install`, `gate-sections`, `gate-agents`, `authz`, `signal`, `memory-hook`, `learn-nudge`, `migrate-agents`, `host-lint` |
+| **Scripts** | `audit`, `install`, `gate-sections`, `gate-agents`, `authz`, `signal`, `memory-hook`, `learn-nudge`, `learn-runner`, `machine`, `migrate-agents`, `host-lint` |
 
 Bundled copies keep provenance in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 

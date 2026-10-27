@@ -9,7 +9,7 @@ If this file is outside the current repository and the repository contains `.age
 
 Turn the request into a short, evidenced requirements map before choosing an implementation. The input is the human request and any agreed requirements it changes. For an orchestrator brief containing a `Requirements map` section, reuse that map and investigate only uncovered changes. Handle tiny edits and straightforward localized fixes directly when their outcome and affected path are already clear.
 
-In Geppetto, read [process execution](../geppetto-adopt/references/processes.md) before tools. Paid screening follows `$geppetto-authorize`; adopt offers semantic hooks through [a measured opt-in](../geppetto-adopt/references/semantic-hooks.md). Resolve credentials through the harness's private secret mechanism, never chat. Existing shell environment support remains an execution interface, not permission to disclose a key.
+In Geppetto, read [process execution](../geppetto-adopt/references/processes.md) before tools. Paid OpenRouter screening uses `$geppetto-authorize`; [hook operation](../geppetto-adopt/assets/templates/hooks/README.md) describes existing suggestions. Resolve credentials through the harness's private secret mechanism.
 
 ## 1. State the outcome
 

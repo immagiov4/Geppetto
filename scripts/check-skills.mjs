@@ -11,7 +11,7 @@ export const bundledSkills = [
   'code-review', 'receive-work-feedback', 'retro',
 ];
 const requiredTemplates = [
-  'AGENTS.md', 'CLAUDE.md', 'pr-ticket.md', 'feature-doc.md', 'authorizations',
+  'AGENTS.md', 'CLAUDE.md', 'pr-ticket.md', 'feature-doc.md',
   'jobs/learn.md', 'jobs/curate-skills.md', 'jobs/maintain-memory.md',
   'hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json', 'ci/pr-gate.yml',
 ];
@@ -67,8 +67,6 @@ export function checkPack(root) {
   }
   for (const file of requiredTemplates) requireFile(resolve(templates, file));
   for (const file of ['README.md', 'THIRD_PARTY_NOTICES.md']) requireFile(resolve(root, file));
-  const grants = resolve(templates, 'authorizations');
-  if (existsSync(grants) && readFileSync(grants).length !== 0) fail(grants, 1, 'Authorization template must start empty');
   const claude = resolve(templates, 'CLAUDE.md');
   if (existsSync(claude) && readFileSync(claude, 'utf8').trim() !== '@AGENTS.md') fail(claude, 1, 'CLAUDE template must import AGENTS.md');
   const router = resolve(templates, 'AGENTS.md');

@@ -75,10 +75,9 @@ test('a failed event log preserves the opportunity to deliver and measure the re
   assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).hook, 'learnNudge');
 });
 
-test('internal learning leaves pre-action grant protection and PR feedback intact', async t => {
+test('internal learning preserves PR feedback', async t => {
   const cwd = fixture(t); put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 1 } } });
   const event = { cwd, session_id: 'policy', hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: '.geppetto/authorizations' } };
-  assert.equal((await handleEvent(event)).hookSpecificOutput.permissionDecision, 'deny');
   const pr = { ...event, tool_name: 'Bash', tool_input: { command: 'gh pr create --fill' } };
   assert.match((await handleEvent(pr)).hookSpecificOutput.additionalContext, /provide --body-file/);
   const post = await handleEvent({ ...pr, hook_event_name: 'PostToolUse' });
@@ -96,4 +95,14 @@ test('learning children and tool-free completions create no reminder or hook sta
   }
   assert.deepEqual(await handleEvent({ cwd, session_id: 'no-tools', hook_event_name: 'Stop' }), {});
   assert.equal(existsSync(resolve(cwd, '.geppetto/hook-state')), false);
+});
+
+test('Stop supplies the reminder when the qualifying turn has no tool-completion event', async t => {
+  const cwd = fixture(t); put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 1 } } });
+  const event = { cwd, session_id: 'stop-fallback', tool_name: 'Read', tool_input: {} };
+  await handleEvent({ ...event, hook_event_name: 'PreToolUse' });
+  const result = await handleEvent({ ...event, hook_event_name: 'Stop' });
+  assert.equal(result.hookSpecificOutput.hookEventName, 'Stop');
+  assert.match(result.hookSpecificOutput.additionalContext, /\$geppetto-learn/);
+  assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop' }), {});
 });

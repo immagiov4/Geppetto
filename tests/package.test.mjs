@@ -22,7 +22,7 @@ test('declared plugin hook launches its shipped script with a real event', t => 
   const command = handler.hooks[0].command.replace('${CLAUDE_PLUGIN_ROOT}', repo);
   const match = command.match(/^node "([^"]+)"$/); assert.ok(match, 'Hook command uses a quoted script path');
   const r = invoke(match[1], [], { cwd, input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: '.geppetto/authorizations' }, cwd, hook_event_name: 'PreToolUse' }) });
-  assert.equal(r.status, 0, r.stderr); assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout), {});
 });
 
 test('plugin UserPromptSubmit delivers both reminders without a standalone hook or project configuration', t => {

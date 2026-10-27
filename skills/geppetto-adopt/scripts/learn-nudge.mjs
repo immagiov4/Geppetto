@@ -14,7 +14,7 @@ async function projectRoot(cwd) {
 export async function learningEvent(event, now) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const kind = event.hook_event_name ?? 'PreToolUse';
-  if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active) return {};
+  if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active) return {};
   const root = await projectRoot(event.cwd ?? '.');
   if (!root) return {};
   const configPath = resolve(root, '.geppetto/config.json');
@@ -24,7 +24,7 @@ export async function learningEvent(event, now) {
   const session = createHash('sha256').update(event.session_id).digest('hex');
   const state = resolve(root, '.geppetto/hook-state', session);
   const activity = resolve(state, 'activity.jsonl');
-  if (kind !== 'PostToolUse') {
+  if (!['PostToolUse', 'Stop'].includes(kind)) {
     await mkdir(state, { recursive: true });
     await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);
     await appendFile(activity, `${JSON.stringify({ kind, at: now(), id: event.tool_use_id ?? randomUUID(), turn: event.turn_id ?? null })}\n`, { mode: 0o600 });
@@ -47,5 +47,5 @@ export async function learningEvent(event, now) {
   const entry = { hook: 'learnNudge', event: kind, session, turn, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
   try { await appendFile(resolve(root, '.geppetto/hook-events.jsonl'), `${JSON.stringify(entry)}\n`, { mode: 0o600 }); }
   catch (error) { await unlink(fired); throw error; }
-  return { hookSpecificOutput: { hookEventName: kind, additionalContext: 'Before your final reply, use $geppetto-learn to judge whether this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<lesson>" --metric <affected-metric> from the project root. Keep this routine check internal and continue the requested task. Include --episode <observed-episode-id> --source <project-evidence-reference> together when actually known; never invent independent provenance.' } };
+  return { hookSpecificOutput: { hookEventName: kind, additionalContext: 'Before your final reply, use $geppetto-learn to improve the existing owner when this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<lesson>" --metric <affected-metric> from the project root. Keep this routine check internal and continue the requested task. ' } };
 }

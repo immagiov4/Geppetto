@@ -6,6 +6,7 @@ import { fixture, put, get, invoke, git, scripts, repo } from './helpers.mjs';
 
 function source(t) {
   const root = fixture(t); cpSync(scripts, resolve(root, 'skills/geppetto-adopt/scripts'), { recursive: true });
+  cpSync(resolve(repo, 'hooks'), resolve(root, 'hooks'), { recursive: true });
   put(root, 'package.json', { name: 'geppetto', version: '0.1.0' });
   put(root, 'skills/geppetto-adopt/SKILL.md', '---\nname: geppetto-adopt\ndescription: Adopt\n---\nAdopt');
   put(root, 'skills/geppetto-example/SKILL.md', '---\nname: geppetto-example\ndescription: Example\n---\nOriginal');
@@ -80,7 +81,7 @@ test('user install selects the user home and multiple targets retain shared gate
   assert.equal(existsSync(resolve(cwd, '.agents')), false); assert.match(get(home, '.agents/skills/geppetto-example/SKILL.md'), /Original$/);
   put(root, 'skills/geppetto-adopt/scripts/gate-sections.mjs', `${get(root, 'skills/geppetto-adopt/scripts/gate-sections.mjs')}\n// Updated shared gate\n`);
   const update = invoke(install, ['--target', 'agents', '--user'], { cwd, home }); assert.equal(update.status, 0, update.stderr);
-  assert.match(get(home, '.geppetto/bin/gate-sections.mjs'), /Updated shared gate/);
+  assert.match(get(home, '.agents/skills/geppetto-adopt/scripts/gate-sections.mjs'), /Updated shared gate/);
   assert.equal(invoke(install, ['--target', 'codex', '--user', '--uninstall'], { cwd, home }).status, 0); assert.equal(existsSync(resolve(home, '.geppetto/bin/gate-sections.mjs')), true);
   assert.equal(invoke(install, ['--target', 'agents', '--user', '--uninstall'], { cwd, home }).status, 0); assert.equal(existsSync(resolve(home, '.geppetto/bin/gate-sections.mjs')), false);
   assert.equal(invoke(install, ['--target', 'codex', '--user', '--project', cwd], { cwd, home }).status, 2);
@@ -140,8 +141,9 @@ test('preflight lists every unowned overlap with both hashes and adopts only ide
 
 test('generated adoption files are owned, retained on update and protected during uninstall', t => {
   const cwd = fixture(t); const { install } = source(t); const args = ['--target', 'codex', '--project', cwd];
+  args.push('--plugin-hooks');
   const generated = ['AGENTS.md', 'CLAUDE.md', '.geppetto/config.json', '.geppetto/authorizations', '.claude/settings.json', '.codex/hooks.json', '.github/workflows/pr-gate.yml'];
-  for (const path of generated) put(cwd, path, `Owned ${path}`);
+  for (const path of generated) put(cwd, path, path === '.geppetto/config.json' ? '{}' : `Owned ${path}`);
   let r = invoke(install, [...args, '--record-generated', ...generated], { cwd }); assert.equal(r.status, 0, r.stderr);
   const state = JSON.parse(get(cwd, '.geppetto/install.json')).installations.codex;
   assert.deepEqual(state.generated, [...generated].sort()); for (const path of generated) assert.match(state.files[path], /^[a-f\d]{64}$/);

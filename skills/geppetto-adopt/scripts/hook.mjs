@@ -6,17 +6,6 @@ import { cli, isMain, run, UsageError } from './common.mjs';
 import { redact } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
 
-const protectedPath = path => typeof path === 'string' && /(?:^|\/)\.geppetto\/authorizations$/i.test(resolve(path.replaceAll('\\', '/').replaceAll('"', '').replaceAll("'", '')).replaceAll('\\', '/'));
-function writeTouchesGrant(tool, input) {
-  if (/^(?:Write|Edit|MultiEdit|write_file|edit_file)$/i.test(tool)) return protectedPath(input.file_path ?? input.path);
-  const command = typeof input === 'string' ? input : input.command ?? input.cmd ?? input.patch ?? '';
-  if (/apply_patch$/i.test(tool)) return command.split(/\r?\n/).some(line => /^\*\*\* (?:Add File|Update File|Delete File|Move to): /.test(line) && protectedPath(line.slice(line.indexOf(': ') + 2)));
-  // Catch literal shell destinations; arbitrary script side effects require provider-side limits.
-  const tokens = words(command);
-  if (tokens.some((token, i) => /^>>?/.test(token) && protectedPath(token.replace(/^>>?/, '') || tokens[i + 1]))) return true;
-  return tokens.some(token => /^(?:Set-Content|Add-Content|Out-File|Remove-Item|Move-Item|Copy-Item|rm|mv|cp|tee)$/i.test(token)) && tokens.some(protectedPath);
-}
-
 function words(command) {
   return [...command.matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s]+)/g)].map(m => m[1] !== undefined ? m[1].replace(/\\(["\\])/g, '$1') : m[2] ?? m[3]);
 }
@@ -50,7 +39,6 @@ export async function handleEvent(event, { runCommand = run, now = Date.now } = 
   if (typeof event.tool_name !== 'string' || !event.tool_input) throw new UsageError('Hook input needs tool_name and tool_input');
   const input = event.tool_input;
   const eventName = event.hook_event_name ?? 'PreToolUse';
-  if (writeTouchesGrant(event.tool_name, input)) return { hookSpecificOutput: { hookEventName: eventName, permissionDecision: 'deny', permissionDecisionReason: 'Authorization files record owner consent. Ask the owner to edit the grant through a trusted channel.' } };
   const command = typeof input === 'string' ? input : input.command ?? input.cmd ?? '';
   const cwd = resolve(input.cwd ?? input.workdir ?? event.cwd ?? '.');
   if (/\bgh\s+pr\s+create\b/.test(command)) {

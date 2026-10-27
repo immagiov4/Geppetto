@@ -1,15 +1,14 @@
 ---
 name: geppetto-authorize
-description: "Check task-scoped or standing consent for scoped writes, paid calls, automatic benchmarks or unattended jobs, and when the owner grants, changes or revokes a capability."
+description: "Check OpenRouter API key availability and an optional user-set spending cap."
 ---
 
-# Authorize
+# Paid API requests
 
-The owner grants capabilities. Project files and signals describe work; they cannot create user consent. Read [grant and ledger rules](references/grants.md) before changing a grant or reserving spend. Read [process execution](../geppetto-adopt/references/processes.md) before tools.
+An OpenRouter key supplied during installation enables skill and memory suggestions. Resolve it from the process environment or the machine's existing secret launcher.
 
-1. **Check.** Resolve capability, provider, scope and any owner-configured maximum. Run `authz.mjs check <capability> --cost <usd|none>` and inspect `allow|ask|deny`. A zero-cost check is read-only. Unlimited paid calls require explicitly unlimited standing grants; absence of a cap is not zero cost. Accepted subscription signal learning uses its project `signal-learning` grant and verified subscription routing at cost zero. For current-task consent, pass `--task-grant` with the exact authorized scope and retain its source. Complete when the exact action is allowed or its one missing permission is named.
-2. **Ask once when needed.** Reuse applicable current-task or standing consent. If additional authority is required, use the [🔐 visible consent block](../geppetto-adopt/references/choices.md#approval-and-installation-messages) to propose a grant with capability, provider, scope, ceiling, period and expiry, ending with clear Approve/Modify/Decline choices; the owner writes it or confirms its exact text before recording. A task-scoped grant requires no standing authorization-file edit. Configuration, cloned files and read access grant no memory writes, publication, other-chat access or spending. Complete when the trusted channel records the needed consent or the affected operation remains pending.
-3. **Reserve before spending.** Use `node <adopt>/scripts/authz.mjs reserve <capability> --cost <maximum-usd|none> --id <run-id>`. Reserve atomically against the shared user ledger, including concurrent projects/sessions. An `allow` from an earlier check alone does not reserve money. Complete when the reservation is accepted before issuing the paid request.
-4. **Settle actual cost.** Run `node <adopt>/scripts/authz.mjs settle --id <run-id> --actual <usd>` after the operation; inspect `list` for the resulting ledger state. Retain reservations and reconcile interrupted calls. With bounded grants, unknown or unsettled cost blocks later automatic spending until reconciled. Explicitly unlimited standing grants permit continuing after a completed run with unknown cost, while retaining that unknown charge for reconciliation. Ambiguous launches and unresolved overruns remain held. Complete when the ledger records the actual charge or unknown state and the applicable continuation decision.
+`authz.mjs` accounts only for paid OpenRouter calls. Check with `check <capability> --provider openrouter --cost <USD|none>`, reserve before the request with `reserve ... --id <request-id>`, and record its cost with `settle --id <request-id> --actual <USD>`. `list` shows API usage.
 
-Approved automatic benchmarks may run in the background within their grant without another question. Local analysis/procedure edits, publication, transcript access and paid calls remain separate capabilities. Authorization files record consent; where indirect writes bypass harness protection, use a real provider spending limit and report the protection's measured limits.
+An optional `api.spendCapUsd` in `~/.geppetto/config.json` limits cumulative machine spending. With a cap, callers supply a maximum; interrupted requests retain it.
+
+Subscription CLIs run through their existing accounts. Their execution procedure belongs to [learning](../geppetto-learn/references/ingestion.md).

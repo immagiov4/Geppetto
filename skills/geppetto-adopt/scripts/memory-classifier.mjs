@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
-import { jsonFile, userHome, run } from './common.mjs';
+import { jsonFile, userHome, run, skillSelectorDefaults } from './common.mjs';
 import { memorySettings, memoryClassifierSettings } from './memory-config.mjs';
 import { memoryCatalog } from './memory-index.mjs';
 import { candidateClassifier, traverseMemory } from './memory-traversal.mjs';
@@ -33,11 +33,12 @@ function selections(result, candidates, threshold) {
 }
 
 function ledgerAuthorization(project, home, capability) {
+  let currentKey;
   const command = args => {
-    const result = run(process.execPath, [fileURLToPath(new URL('./authz.mjs', import.meta.url)), ...args], { cwd: project, env: { ...process.env, HOME: home, USERPROFILE: home } });
+    const result = run(process.execPath, [fileURLToPath(new URL('./authz.mjs', import.meta.url)), ...args], { cwd: project, env: { ...process.env, HOME: home, USERPROFILE: home, OPENROUTER_API_KEY: currentKey } });
     if (result.status !== 0) throw new Error(`Classifier authorization: ${redact(result.stdout?.trim() || result.stderr?.trim() || result.error?.message || 'failed')}`);
   };
-  return { reserve: (id, maximum) => command(['reserve', capability, '--provider', 'openrouter', '--cost', maximum == null ? 'none' : String(maximum), '--id', id]), settle: (id, actual) => command(['settle', '--id', id, '--actual', String(Math.ceil(actual * 1_000_000) / 1_000_000)]) };
+  return { reserve: (id, maximum, key) => { currentKey = key; return command(['reserve', capability, '--provider', 'openrouter', '--cost', maximum == null ? 'none' : String(maximum), '--id', id]); }, settle: (id, actual) => command(['settle', '--id', id, '--actual', String(Math.ceil(actual * 1_000_000) / 1_000_000)]) };
 }
 
 async function withDeadline(action, milliseconds) {
@@ -66,7 +67,7 @@ async function classifyContext(event, { project, home = userHome(), provider, au
   const started = Date.now();
   try {
     const user = await jsonFile(resolve(home, '.geppetto/config.json'), {}); const local = await jsonFile(resolve(project, '.geppetto/config.json'), {});
-    const settings = skills ? { ...user.hooks?.[hook], ...local.hooks?.[hook] } : memoryClassifierSettings(user, local);
+    const settings = skills ? { ...skillSelectorDefaults, ...user.hooks?.[hook], ...local.hooks?.[hook] } : memoryClassifierSettings(user, local);
     if (settings.enabled === false) return {};
     if (!env.OPENROUTER_API_KEY) throw new Error('Classifier key is absent from the environment or secret store');
     (skills ? validateSkillSelectorSettings : validateClassifierSettings)(settings);
@@ -77,7 +78,7 @@ async function classifyContext(event, { project, home = userHome(), provider, au
     const candidates = skills ? catalog : catalog.filter(bucket => bucket.name.toLowerCase() !== 'private' && (bucket.scope === 'global' || memory.buckets.includes(bucket.name))).map(bucket => ({ id: bucket.name, description: bucket.description }));
     if (!candidates.length) return {};
     runId = `${capability}:${randomUUID()}`;
-    await authorization.reserve(runId, settings.maxCostUsd);
+    await authorization.reserve(runId, settings.maxCostUsd, env.OPENROUTER_API_KEY);
     reserved = true;
     const account = cost => {
       if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) { costUsd += cost; unknownCosts--; }

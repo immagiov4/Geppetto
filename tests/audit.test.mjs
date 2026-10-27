@@ -6,7 +6,7 @@ import { fixture, put, invoke, git, config, scripts } from './helpers.mjs';
 
 test('audit inventories an empty project without claiming active harness capabilities', t => {
   const cwd = fixture(t); const r = invoke('audit.mjs', ['--json'], { cwd }); assert.equal(r.status, 0, r.stderr);
-  const report = JSON.parse(r.stdout); assert.equal(report.projectFiles['AGENTS.md'], 'absent'); assert.equal(report.memory.status, 'absent'); assert.equal(report.harnesses.codex.skillLoading.status, 'unverifiable'); assert.equal(report.harnesses.claude.scheduling.status, 'unverifiable');
+  const report = JSON.parse(r.stdout); assert.deepEqual(report.installed, []); assert.equal(report.memory.status, 'absent');
   assert.equal(invoke('audit.mjs', ['--nope'], { cwd }).status, 2);
 });
 
@@ -40,7 +40,7 @@ test('verification names live-evidence gaps and fails when the configured memory
   put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.com/intended.git', localPath: memory } });
   let r = invoke('audit.mjs', ['--verify'], { cwd, home }); assert.equal(r.status, 1, r.stderr);
   assert.match(r.stdout, /PASS config/); assert.match(r.stdout, /FAIL memory-remote-url/);
-  for (const gap of ['hook-trust', 'instruction-loading', 'skill-loading', 'remote-ci', 'provider-spend-limits', 'host-affected-file-check']) assert.match(r.stdout, new RegExp(`NOT VERIFIED ${gap}`));
+  assert.doesNotMatch(r.stdout, /NOT VERIFIED/);
   git(memory, ['remote', 'set-url', 'origin', 'https://example.com/intended.git']);
   r = invoke('audit.mjs', ['--verify', '--json'], { cwd, home }); assert.equal(r.status, 0, r.stderr);
   let result = JSON.parse(r.stdout); assert.equal(result.memory.remote.matchesConfigured, true); assert.deepEqual(result.memory.remote.urls, ['https://example.com/intended.git']);

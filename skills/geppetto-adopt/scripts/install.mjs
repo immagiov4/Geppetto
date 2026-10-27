@@ -3,6 +3,7 @@ import { resolve, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { cli, isMain, parseArgs, UsageError, exists, filesUnder, contained, jsonFile, atomicJson, userHome, ignoreLocalFiles } from './common.mjs';
+import { reconcileMachine } from './machine.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const portable = path => path.split(sep).join('/');
@@ -60,19 +61,28 @@ async function desiredFiles(target, uninstall, root, source, previous, generated
     for (const source of await filesUnder(skillsRoot)) desired.set(portable(relative(root, resolve(root, skillDir, relative(skillsRoot, source)))), await readFile(source));
     const scriptsRoot = resolve(sourceRoot, 'skills/geppetto-adopt/scripts');
     for (const source of await filesUnder(scriptsRoot)) {
-      if (source.endsWith('.mjs')) desired.set(`.geppetto/bin/${portable(relative(scriptsRoot, source))}`, await readFile(source));
+      if (source.endsWith('.mjs') && resolve(root) === resolve(sourceRoot)) {
+        const module = `../../skills/geppetto-adopt/scripts/${portable(relative(scriptsRoot, source))}`;
+        desired.set(`.geppetto/bin/${portable(relative(scriptsRoot, source))}`, Buffer.from(`export * from '${module}';\nimport * as script from '${module}';\nimport { cli, isMain } from '${module.replace(/[^/]+$/, 'common.mjs')}';\nif (isMain(import.meta.url) && script.main) await cli(script.main);\n`));
+      } else if (source.endsWith('.mjs')) desired.set(`.geppetto/bin/${portable(relative(scriptsRoot, source))}`, await readFile(source));
     }
     desired.set('.geppetto/bin/message-context.cjs', await readFile(resolve(skillsRoot, 'requirements-blast-radius/scripts/message-context.cjs')));
     for (const path of new Set([...(previous.generated ?? []), ...generated])) {
       await safePath(root, resolve(root, path));
       if (path === '.geppetto/authorizations' && !generated.includes(path) && !await exists(resolve(root, path))) continue;
-      desired.set(path, await readFile(resolve(root, path)));
+      let content = await readFile(resolve(root, path));
+      if (['.codex/hooks.json', '.claude/settings.json'].includes(path) && /\.geppetto[/\\]bin[/\\]|geppetto-adopt[/\\]scripts[/\\]/.test(content.toString())) {
+        const settings = JSON.parse(content);
+        for (const [event, groups] of Object.entries(settings.hooks ?? {})) settings.hooks[event] = groups.map(group => ({ ...group, hooks: group.hooks.filter(hook => !/\.geppetto[/\\]bin[/\\]|geppetto-adopt[/\\]scripts[/\\]/.test(hook.command ?? '')) })).filter(group => group.hooks.length);
+        content = Buffer.from(`${JSON.stringify(settings, null, 2)}\n`);
+      }
+      desired.set(path, content);
     }
   }
   return desired;
 }
 
-async function planInstallation({ root, manifest, target, desired }) {
+async function planInstallation({ root, manifest, target, desired, acceptedGenerated }) {
   const previous = manifest.installations[target]?.files ?? {};
   const changes = []; const nextFiles = {}; const observed = new Map(); const sharedUpdates = new Map(); const overlaps = []; const conflicts = [];
   const otherFiles = Object.entries(manifest.installations).filter(([key]) => key !== target).map(([, entry]) => entry.files ?? {});
@@ -82,13 +92,13 @@ async function planInstallation({ root, manifest, target, desired }) {
     const currentHash = await exists(destination) ? hash(await readFile(destination)) : null;
     observed.set(path, currentHash);
     const content = desired.get(path); const desiredHash = content !== undefined ? hash(content) : null;
-    if (previous[path] && currentHash && currentHash !== previous[path]) conflicts.push(`${destination}:1: Local edits need reconciliation; preserve or merge them before retrying`);
+    if (previous[path] && currentHash && currentHash !== previous[path] && !acceptedGenerated.includes(path)) conflicts.push(`${destination}:1: Local edits need reconciliation; preserve or merge them before retrying`);
     const otherHash = otherFiles.map(files => files[path]).find(Boolean);
     if (!previous[path] && !otherHash && currentHash) {
       overlaps.push({ path, currentHash, desiredHash, disposition: currentHash === desiredHash ? 'adopt-identical' : 'conflict' });
       if (currentHash !== desiredHash) conflicts.push(`${destination}:1: Existing file is not owned; reconcile it before installation`);
     }
-    if (otherFiles.some(files => files[path] && currentHash && files[path] !== currentHash)) conflicts.push(`${destination}:1: Shared file has local edits or inconsistent ownership; reconcile it before installation`);
+    if (!acceptedGenerated.includes(path) && otherFiles.some(files => files[path] && currentHash && files[path] !== currentHash)) conflicts.push(`${destination}:1: Shared file has local edits or inconsistent ownership; reconcile it before installation`);
     if (otherHash && desiredHash) sharedUpdates.set(path, desiredHash);
     if (content !== undefined) {
       nextFiles[path] = desiredHash;
@@ -143,7 +153,7 @@ async function applyInstallation({ root, manifest, statePath, target, uninstall,
 }
 
 export async function main(args) {
-  const opts = parseArgs(args, { values: ['--target', '--project'], repeat: ['--record-generated'], flags: ['--user', '--dry-run', '--uninstall'] });
+  const opts = parseArgs(args, { values: ['--target', '--project'], repeat: ['--record-generated'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks'] });
   const target = opts['--target'];
   if (opts._.length || !['claude', 'codex', 'agents'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents> (--project <dir> | --user) [--dry-run] [--uninstall]');
   const root = resolve(opts['--user'] ? userHome() : opts['--project']);
@@ -156,11 +166,13 @@ export async function main(args) {
   const generated = [...new Set([...(manifest.installations[target]?.generated ?? []), ...recorded])].sort();
   const source = opts['--uninstall'] ? null : await packageSource(manifest, statePath);
   const desired = await desiredFiles(target, opts['--uninstall'], root, source, manifest.installations[target] ?? {}, recorded);
-  const plan = await planInstallation({ root, manifest, target, desired });
+  const plan = await planInstallation({ root, manifest, target, desired, acceptedGenerated: recorded });
   console.log(`${opts['--dry-run'] ? 'Dry run: ' : ''}${opts['--uninstall'] ? 'Uninstall' : 'Install'} ${target}: ${plan.changes.length} file changes`);
-  for (const change of plan.changes) console.log(`${change.action} ${change.path}`);
+  if (opts['--dry-run']) for (const change of plan.changes) console.log(`${change.action} ${change.path}`);
   if (opts['--dry-run'] || (opts['--uninstall'] && !manifest.installations[target])) return 0;
   await applyInstallation({ root, manifest, statePath, target, uninstall: opts['--uninstall'], source, generated, plan });
+  const machine = await reconcileMachine(root, target, source, { pluginHooks: opts['--plugin-hooks'], uninstall: opts['--uninstall'] });
+  console.log(`Machine resources: ${Object.keys(machine.hooks).join(', ')} hooks; ${Object.keys(machine.jobs).join(', ')} jobs; OpenRouter ${process.env.OPENROUTER_API_KEY ? 'available' : 'key missing'}`);
   return 0;
 }
 

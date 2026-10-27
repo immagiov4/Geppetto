@@ -38,7 +38,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-host.mjs\" --host claude",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/hook.mjs\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-runner.mjs\"",
             "async": true
           }
         ]
@@ -53,15 +62,6 @@
             "timeout": 30
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-host.mjs\" --host claude",
-            "async": true
-          }
-        ]
       }
     ],
     "PostToolUse": [
@@ -73,17 +73,8 @@
             "timeout": 30
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-host.mjs\" --host claude",
-            "async": true
-          }
-        ]
       }
     ]
   },
-  "description": "PR feedback, owner-consent protection and internal learning context during long turns."
+  "description": "PR feedback, memory and skill suggestions, and learning."
 }

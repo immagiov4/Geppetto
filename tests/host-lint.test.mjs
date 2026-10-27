@@ -2,14 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, put, get, invoke, config } from './helpers.mjs';
 
-test('host lint inventories every host formatter/linter config and proposes consent-bound vendored ignores', t => {
+test('host lint inventories every host formatter/linter config and proposes vendored ignores', t => {
   const cwd = fixture(t);
   put(cwd, 'biome.json', { files: { includes: ['**'] } });
   put(cwd, 'config/eslint.config.mjs', 'export default [{ignores: []}];\n');
   put(cwd, 'config/eslint.sonar.config.mjs', 'export default [];\n');
   put(cwd, '.prettierrc', '{}');
   const r = invoke('host-lint.mjs', ['--json'], { cwd }); assert.equal(r.status, 0, r.stderr);
-  const report = JSON.parse(r.stdout); assert.equal(report.ownerConsentRequired, true); assert.equal(report.configurations.length, 4);
+  const report = JSON.parse(r.stdout); assert.equal(report.configurations.length, 4);
   assert.deepEqual(report.configurations.map(c => c.registration), Array(4).fill('proposed'));
   assert.deepEqual(report.configurations.find(c => c.tool === 'Biome').patterns, ['!!**/.agents/skills', '!!**/.geppetto']);
   assert.equal(get(cwd, 'biome.json'), '{"files":{"includes":["**"]}}'); assert.equal(report.check.status, 'not-verified');

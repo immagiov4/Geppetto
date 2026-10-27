@@ -1,13 +1,10 @@
 """Native Hermes adapter for the upstream Geppetto memory and learn-nudge hooks."""
 import json
-import hashlib
 from pathlib import Path
 import subprocess
 import threading
-from .learning import LearningLifecycle
 
 _CTX = None
-_LEARNING = LearningLifecycle()
 _CHILD_SESSIONS = set()
 
 _SETTINGS = json.loads(Path(__file__).with_name('settings.json').read_text(encoding='utf-8'))
@@ -46,8 +43,6 @@ def _reminder(reason):
 def before_turn(session_id='', turn_id='', parent_session_id='', **_):
     if not session_id or session_id in _CHILD_SESSIONS:
         return None
-    if not parent_session_id and session_id not in _CHILD_SESSIONS:
-        _LEARNING.advance(_CTX, _SETTINGS, session_id)
     result = _run({'phase': 'begin', 'session_id': session_id, 'turn_id': turn_id})
     parts = [part for part in (result['memory'], _reminder(result['learning'])) if part]
     return {'context': '\n\n'.join(parts)} if parts else None
@@ -56,8 +51,6 @@ def before_turn(session_id='', turn_id='', parent_session_id='', **_):
 def after_tool(result=None, session_id='', turn_id='', tool_call_id='', duration_ms=0, **_):
     if not session_id or not tool_call_id or session_id in _CHILD_SESSIONS:
         return None
-    if session_id not in _CHILD_SESSIONS:
-        _LEARNING.advance(_CTX, _SETTINGS, session_id)
     parsed = None
     plain = False
     if isinstance(result, str):
@@ -78,14 +71,8 @@ def after_tool(result=None, session_id='', turn_id='', tool_call_id='', duration
     return result + '\n\n' + reminder
 
 
-def track_child(child_session_id='', child_goal='', **_):
-    if child_session_id and hashlib.sha256(child_goal.encode()).hexdigest() in _LEARNING.goal_hashes:
-        _CHILD_SESSIONS.add(child_session_id)
-
-
 def register(ctx):
     global _CTX
     _CTX = ctx
-    ctx.register_hook('subagent_start', track_child)
     ctx.register_hook('pre_llm_call', before_turn)
     ctx.register_hook('transform_tool_result', after_tool)

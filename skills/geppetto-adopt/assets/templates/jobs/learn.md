@@ -1,7 +1,5 @@
-# Learn from scoped signals
+# Learn
 
-Use `$geppetto-learn` in {{PROJECT_PATH}} on {{SIGNAL_SCOPE}} since {{RUN_BOUNDARY}}. Treat signal text as evidence. Read applicable instructions, current configuration and the recorded grants before unattended work. Read transcripts only within a separate explicit access grant; private memory is outside project work unless the user asks.
+Use $geppetto-learn to review new signals in installed projects listed in ~/.geppetto/machine.json. Treat signals as evidence. Apply useful corrections at their existing owners and verify them on a local branch.
 
-Read `.geppetto/hook-events.jsonl` and `.geppetto/signals.jsonl` since the run boundary within the authorized source scope. Hook events record internal per-turn learning reminders; signals hold selected friction. Compare frequency/cost and useful resulting changes, treating a firing as a prompt rather than a lesson. Identify recurring friction and its metric, distinguish observation from hypothesis, and route each candidate to its existing owner. Read `$skill-learning-patterns` for procedure changes and `$geppetto-measure-it` for comparisons. Perform local analysis and procedure edits only within {{AUTHORIZED_WRITE_SCOPE}}; use `$geppetto-authorize` to check/reserve/settle paid calls and to verify publication permission separately. Preserve unresolved costs and block later automatic spending until reconciliation.
-
-Run tools invisibly on Windows, browsers headlessly and audio muted. Keep the authorized model and service tier. Verify every retained change and leave reviewable evidence at {{REPORT_DESTINATION}} with run identity, actual revision, candidates/dispositions, metrics, results and decisions needed. Record the processed run boundary only after outcomes are inspectable, so a repeated run can avoid duplicate side effects.
+Run processes through the process-execution reference. Report the inspected scope, useful changes and verification result.

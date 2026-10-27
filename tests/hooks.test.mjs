@@ -5,15 +5,6 @@ import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 import { run } from '../skills/geppetto-adopt/scripts/common.mjs';
 
 const hook = (cwd, tool_name, tool_input) => invoke('hook.mjs', [], { cwd, input: JSON.stringify({ hook_event_name: 'PreToolUse', cwd, tool_name, tool_input }) });
-test('Claude file writes and Codex patches cannot edit authorization records', t => {
-  const cwd = fixture(t);
-  for (const [tool, input] of [['Write', { file_path: `${cwd}/.geppetto/authorizations`, content: 'grant' }], ['Edit', { file_path: 'C:\\Users\\someone\\.geppetto\\authorizations' }], ['apply_patch', { command: '*** Begin Patch\n*** Add File: .geppetto/authorizations\n+grant\n*** End Patch' }], ['Bash', { command: 'echo grant > .geppetto/authorizations' }]]) {
-    const r = hook(cwd, tool, input); assert.equal(r.status, 0, r.stderr); assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
-  }
-  const pass = hook(cwd, 'Write', { file_path: `${cwd}/notes.md`, content: 'notes' }); assert.deepEqual(JSON.parse(pass.stdout), {});
-  const prose = hook(cwd, 'Bash', { command: "gh pr create --body '## Observability\nDescribe .geppetto/authorizations > its documentation'" }); assert.match(JSON.parse(prose.stdout).hookSpecificOutput.additionalContext, /sections pass/);
-});
-
 test('PR-creation feedback runs gate-sections over literal bodies and body files without executing commands', t => {
   const cwd = fixture(t); put(cwd, 'body.md', '## Observability\nLogs');
   let r = hook(cwd, 'Bash', { command: 'gh pr create --body-file body.md' }); assert.equal(r.status, 0, r.stderr); assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /sections pass/);

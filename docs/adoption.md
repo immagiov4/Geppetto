@@ -1,11 +1,9 @@
 # Geppetto self-adoption
 
-This repository runs the pack it publishes. Source skills in `skills/` stay authoritative. Git ignores the local skill copies under `.agents/skills` (agents and Codex) and `.claude/skills`. `.geppetto/bin` is the copy that provides reproducible project enforcement. The installer records ownership in an ignored local manifest. How the copy is produced is on the [system map](system-map.md).
+Source skills in `skills/` are authoritative. Generated copies under `.agents/skills` and `.claude/skills` are ignored. `.geppetto/bin` supplies command entrypoints importing canonical tracked source. The local manifest records ownership; the user machine registry records shared hooks, maintenance jobs, key location and memory repository.
 
-The project writes documentation in English, uses behaviour tests, bundles [code review](../skills/code-review/SKILL.md) and keeps its GitHub Actions matrix. The check to run is `npm run check`, described in [development](development.md). Standing policy: an optional feature with no recorded decision stays pending and disabled; a choice already recorded is kept.
-
-Repository checks do not establish hook trust in an external harness, or a spend limit on the provider account.
+The project writes documentation in English, uses behavior tests and the bundled review procedure, and runs its GitHub Actions matrix. [Development](development.md) owns the check and refresh commands.
 
 ## Observability
 
-The public repository contains no personal memory text, keys, private hook receipts or automation prompts. After a source change, refresh with the install commands in [development](development.md), then run `node skills/geppetto-adopt/scripts/audit.mjs --project . --verify`.
+Run `audit.mjs --project . --verify` after refreshing. Synthetic tests cover two projects sharing one machine, hook behavior, paid API caps and the learner lock. Hook events retain outcomes and diagnostic metadata in ignored local files.

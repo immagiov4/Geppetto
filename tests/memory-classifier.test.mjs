@@ -28,8 +28,6 @@ test('a minimal existing memory-classifier config inherits Flash and the baselin
   } });
   assert.match(result.hookSpecificOutput.additionalContext, /playback.md/);
   assert.equal(requests.length, 2); assert.ok(requests.every(request => request.model === 'perplexity/pplx-decider-flash-v1.2'));
-  const grant = '[memory-classifier] provider=openrouter budget_usd=none per=1d scope="synthetic indexed topics" expires=never\n';
-  put(home, '.geppetto/authorizations', grant); put(cwd, '.geppetto/authorizations', grant);
   const audit = invoke('audit.mjs', ['--json'], { cwd, home, env: { OPENROUTER_API_KEY: 'fixture', PATH: '' } });
   assert.equal(audit.status, 0, audit.stderr); const readiness = JSON.parse(audit.stdout).memoryClassifier;
   assert.equal(readiness.enabled, true); assert.equal(readiness.model, 'perplexity/pplx-decider-flash-v1.2'); assert.equal(readiness.api, 'decisions');
@@ -85,13 +83,11 @@ test('known charges settle even for rejected provider selections; unknown charge
   assert.equal(pending.length, 1); assert.equal(JSON.parse(get(unknown.cwd, '.geppetto/hook-events.jsonl')).costUsd, null);
 });
 
-test('the automatic hook uses the real user/project ledger and never obtains a task grant from configuration', async t => {
+test('the automatic hook accounts paid API usage using the machine key', async t => {
   const { cwd, home, event } = setup(t);
-  const grant = '[memory-classifier] provider=openrouter budget_usd=0.1 per=30d scope="memory selection in fixture" expires=2099-12-31\n';
-  put(home, '.geppetto/authorizations', grant); put(cwd, '.geppetto/authorizations', grant);
   const result = await handleMemoryEvent(event, { home, env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => ({ selections: [], costUsd: 0.001 }) });
-  assert.deepEqual(result, {}); const events = get(home, '.geppetto/ledger.jsonl').trim().split('\n').map(JSON.parse);
-  assert.equal(events.length, 2); assert.equal(events[0].capability, 'memory-classifier'); assert.equal(events[0].reserved, 10000); assert.equal(events[1].actual, 1000); assert.equal(events[0].taskGrant, undefined);
+  assert.deepEqual(result, {}); const events = get(home, '.geppetto/api-usage.jsonl').trim().split('\n').map(JSON.parse);
+  assert.equal(events.length, 2); assert.equal(events[0].capability, 'memory-classifier'); assert.equal(events[0].reserved, 10000); assert.equal(events[1].actual, 1000);
 });
 
 test('bucket scores below the configured threshold skip stage two and invalid configuration stays local', async t => {
@@ -113,14 +109,12 @@ test('no selected buckets stops after stage one and an authorization denial star
   assert.match(get(denied.cwd, '.geppetto/hook-events.jsonl'), /does not grant/);
 });
 
-test('key and standing unlimited grant activate the classifier without an enable flag, cost cap or benchmark', async t => {
+test('a key activates the classifier without an enable flag, cost cap or benchmark', async t => {
   const { cwd, home, event } = setup(t, { enabled: undefined, maxCostUsd: undefined });
-  const grant = '[memory-classifier] provider=openrouter budget_usd=none per=1d scope="fixture question and indexed candidates" expires=never\n';
-  put(home, '.geppetto/authorizations', grant); put(cwd, '.geppetto/authorizations', grant);
   let calls = 0;
   await handleMemoryEvent(event, { home, env: { OPENROUTER_API_KEY: 'fixture-only' }, provider: async () => { calls++; return { selections: [], costUsd: 0.02 }; } });
   assert.equal(calls, 1);
-  const ledger = get(home, '.geppetto/ledger.jsonl').trim().split('\n').map(JSON.parse);
+  const ledger = get(home, '.geppetto/api-usage.jsonl').trim().split('\n').map(JSON.parse);
   assert.equal(ledger[0].reserved, null); assert.equal(ledger[1].actual, 20000);
   assert.equal(JSON.parse(get(cwd, '.geppetto/config.json')).hooks.memoryClassifier.benchmark, null);
 });

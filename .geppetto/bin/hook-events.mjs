@@ -1,8 +1,4 @@
-import { appendFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { ignoreLocalFiles } from './common.mjs';
-
-export async function logHookEvent(project, event) {
-  await ignoreLocalFiles(project, ['/hook-events.jsonl']);
-  await appendFile(resolve(project, '.geppetto/hook-events.jsonl'), `${JSON.stringify({ ts: new Date().toISOString(), ...event })}\n`, { mode: 0o600 });
-}
+export * from '../../skills/geppetto-adopt/scripts/hook-events.mjs';
+import * as script from '../../skills/geppetto-adopt/scripts/hook-events.mjs';
+import { cli, isMain } from '../../skills/geppetto-adopt/scripts/common.mjs';
+if (isMain(import.meta.url) && script.main) await cli(script.main);

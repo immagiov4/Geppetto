@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { isAbsolute, resolve } from 'node:path';
 import { cli, isMain, parseArgs, UsageError } from './common.mjs';
-import { learningCommand } from './learning-config.mjs';
+import { learningCommand } from './learn-runner.mjs';
 
 const requestTimeoutMs = 30000;
 const usage = 'Usage: codex-hook-trust.mjs --project <dir> [--plugin <id> | --source <hooks-file> | --key <key>...] [--approve] [--json]';

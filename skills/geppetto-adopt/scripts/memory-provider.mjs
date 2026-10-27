@@ -14,7 +14,7 @@ export function classificationPayload({ stage, model, api, prompt, candidates, m
 
 export const classificationCost = result => typeof result?.usage?.cost === 'number' && Number.isFinite(result.usage.cost) && result.usage.cost >= 0 ? result.usage.cost : null;
 
-/** OpenRouter adapter. Callers own consent, deadlines, candidate validation and accounting. */
+/** OpenRouter adapter. Callers own deadlines, candidate validation and API accounting. */
 export async function openRouterClassify(request, { fetchImpl = fetch } = {}) {
   if (classificationApi(request) === 'decisions') return openRouterDecisions(request, { fetchImpl });
   const { apiKey, signal } = request;

@@ -47,12 +47,6 @@ test('a broken procedure pointer reports its file and line', t => {
   assert.ok(checkPack(root).errors.some(error => error.includes('geppetto-build/SKILL.md:') && error.includes('Unresolved local link')));
 });
 
-test('an authorization template containing a grant fails closed', t => {
-  const root = fixture(t);
-  writeFileSync(resolve(root, 'skills/geppetto-adopt/assets/templates/authorizations'), '[publish] provider=any budget_usd=0 per=30d scope="all" expires=2099-01-01\n');
-  assert.ok(checkPack(root).errors.some(error => error.includes('Authorization template must start empty')));
-});
-
 test('instruction routing detects an oversized always-loaded template', t => {
   const root = fixture(t);
   const path = resolve(root, 'skills/geppetto-adopt/assets/templates/AGENTS.md');
