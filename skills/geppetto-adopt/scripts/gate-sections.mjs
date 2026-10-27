@@ -43,6 +43,8 @@ export function checkSections(text, required, file = '<stdin>') {
   for (const title of required) {
     const matches = sections.filter(h => h.title.toLowerCase() === title.toLowerCase());
     if (!matches.length) { errors.push(`${file}:1: Missing section: ${title}`); continue; }
+    const misplaced = matches.find(h => h.level !== 2);
+    if (misplaced) { errors.push(`${file}:${misplaced.line + 1}: Use a level-two heading: ## ${title}`); continue; }
     for (const heading of matches) {
       const end = sections.find(h => h.line > heading.line && h.level <= heading.level)?.line ?? lines.length;
       const childHeadings = new Set(sections.filter(h => h.line > heading.line && h.line < end).flatMap(h => Array.from({ length: h.start - h.line }, (_, index) => h.line + index)));
