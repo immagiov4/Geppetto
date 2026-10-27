@@ -189,8 +189,8 @@ export async function main(args) {
     const preview = choice && choice !== memory?.choice ? { choice, localPath: resolve(userHome(), 'geppetto-memory'), repo: choice === 'github' ? 'private GitHub repository' : resolve(userHome(), 'geppetto-memory') } : memory;
     console.log(`Memory: ${memoryDescription(preview)}; change with --memory <local|github|native|none>.`);
   }
-  if (opts['--dry-run'] || (opts['--uninstall'] && !manifest.installations[target])) return 0;
-  await applyInstallation({ root, manifest, statePath, target, uninstall: opts['--uninstall'], source, generated, plan, plugin });
+  if (opts['--dry-run']) return 0;
+  if (!opts['--uninstall']) await applyInstallation({ root, manifest, statePath, target, uninstall: false, source, generated, plan, plugin });
   let machine;
   try { machine = await reconcileMachine(root, target, source, { pluginHooks: plugin, uninstall: opts['--uninstall'], uninstallMemory: ['native', 'none'].includes(memory?.choice) ? null : memory, memoryChoice: opts['--memory'], addJobs: opts['--add-job'], jobs: opts['--scheduler-jobs'] ? await jsonFile(opts['--scheduler-jobs']) : {} }); }
   catch (error) {
@@ -206,9 +206,11 @@ export async function main(args) {
       await atomicJson(statePath, currentManifest);
     }
   }
+  if (opts['--uninstall']) await applyInstallation({ root, manifest, statePath, target, uninstall: true, source, generated, plan, plugin });
   console.log(`Machine resources: ${Object.keys(machine.hooks).join(', ')} hooks; ${Object.keys(machine.jobs).join(', ')} jobs; OpenRouter ${process.env.OPENROUTER_API_KEY ? 'available' : 'key missing'}`);
   console.log(`Memory: ${memoryDescription(await memoryConfiguration(root))}; change with --memory <local|github|native|none>.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
+  for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
   return 0;
 }
 

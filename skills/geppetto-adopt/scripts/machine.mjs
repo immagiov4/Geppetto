@@ -5,10 +5,57 @@ import { jsonFile, atomicJson, userHome, defaultConfig, exists, run } from './co
 import { memorySettings } from './memory-config.mjs';
 import { setupMemory, bridgeNativeMemory } from './memory-setup.mjs';
 import { memoryJobs } from './memory-jobs.mjs';
-import { scheduleMaintenance, maintenanceJobs, refreshMaintenanceLauncher } from './maintenance.mjs';
+import { scheduleMaintenance, disableMaintenance, maintenanceJobs, refreshMaintenanceLauncher } from './maintenance.mjs';
+
+async function stopJobs(machine, path, jobs, unscheduler, execute) {
+  for (const name of maintenanceJobs) {
+    const previous = machine.jobs[name];
+    if (!['scheduled', 'needs-disable', 'starting'].includes(previous?.status)) continue;
+    const confirmation = jobs[name];
+    if (confirmation?.status === 'disabled' && ((previous.id && confirmation.id !== previous.id) || (previous.scheduler && confirmation.scheduler !== previous.scheduler))) throw new Error('Disabled job confirmation must match the registered scheduler and id.');
+    machine.jobs[name] = { ...previous, status: 'needs-disable' };
+    await atomicJson(path, machine);
+    if (!await unscheduler(name, confirmation?.status === 'disabled' ? confirmation : previous, { execute })) throw new Error(`Disable ${name} in ${previous.scheduler}, then retry with its disabled confirmation through --scheduler-jobs.`);
+    machine.jobs[name].status = 'disabled';
+    await atomicJson(path, machine);
+  }
+}
+
+async function attachJobs(machine, path, registry, { home, harness, source, jobs, scheduler, addJobs, machineName }) {
+  const previousJobs = { ...machine.jobs };
+  const claim = rows => maintenanceJobs.map(name => {
+    const own = rows.find(row => row.job === name && row.machine === machineName);
+    const owner = own ?? rows.find(row => row.job === name);
+    if (owner && owner.machine !== machineName && !addJobs.includes(name) && previousJobs[name]?.status !== 'scheduled') return { name, elsewhere: { ...owner } };
+    const row = { machine: machineName, job: name, scheduler: own?.scheduler ?? 'pending', cadence: own?.cadence ?? 'pending', registered: own?.registered ?? new Date().toISOString() };
+    if (own) Object.assign(own, row); else rows.push(row);
+    return { name };
+  });
+  // Claim the whole installation before the first scheduler can activate either job.
+  const decisions = registry ? await registry.update(claim) : maintenanceJobs.map(name => ({ name }));
+  for (const { name, elsewhere } of decisions) {
+    if (elsewhere) {
+      machine.jobs[name] = { ...elsewhere, status: elsewhere.scheduler === 'pending' ? 'pending-elsewhere' : 'scheduled-elsewhere' };
+      await atomicJson(path, machine); continue;
+    }
+    const previous = previousJobs[name];
+    machine.jobs[name] = { ...previous, status: 'starting' };
+    await atomicJson(path, machine);
+    const osJob = ['windows-task-scheduler', 'cron'].includes(previous?.scheduler);
+    const attached = previous?.status === 'scheduled' && !osJob ? previous : jobs[name] ?? await scheduler(name, { home, host: previous?.host ?? harness, source });
+    machine.jobs[name] = { ...attached, source: resolve(source.path, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`), status: attached ? 'scheduled' : 'needs-scheduler' };
+    await atomicJson(path, machine);
+    if (registry) await registry.update(rows => {
+      const index = rows.findIndex(row => row.machine === machineName && row.job === name);
+      if (!attached) { if (index !== -1) rows.splice(index, 1); return; }
+      const row = { machine: machineName, job: name, scheduler: attached.scheduler, cadence: attached.cadence, registered: index === -1 ? new Date().toISOString() : rows[index].registered };
+      if (index === -1) rows.push(row); else rows[index] = row;
+    });
+  }
+}
 
 /** Reuse machine resources; hook commands point to the recorded package source. */
-export async function reconcileMachine(project, target, source, { pluginHooks = false, uninstall = false, home = userHome(), jobs = {}, scheduler = scheduleMaintenance, memoryChoice, addJobs = [], machineName = hostname(), execute = run, uninstallMemory } = {}) {
+export async function reconcileMachine(project, target, source, { pluginHooks = false, uninstall = false, home = userHome(), jobs = {}, scheduler = scheduleMaintenance, unscheduler = disableMaintenance, memoryChoice, addJobs = [], machineName = hostname(), execute = run, uninstallMemory } = {}) {
   for (const [name, job] of Object.entries(jobs)) if (!maintenanceJobs.includes(name) || ['id', 'scheduler', 'cadence', 'nextRun', 'disable'].some(key => typeof job?.[key] !== 'string' || !job[key].trim())) throw new Error('Scheduler registrations need name, id, scheduler, cadence, nextRun and disable command');
   const directory = resolve(home, '.geppetto');
   await mkdir(directory, { recursive: true });
@@ -17,14 +64,17 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
     const path = resolve(directory, 'machine.json'); const machine = await jsonFile(path, { projects: {}, hooks: {}, jobs: {}, keys: {} });
     const harness = target === 'claude' ? 'claude' : 'codex';
     if (uninstall) {
-      const memory = uninstallMemory === undefined ? await memorySettings(project, home) : uninstallMemory;
-      if (machine.projects[project]) { delete machine.projects[project][target]; if (!Object.keys(machine.projects[project]).length) delete machine.projects[project]; }
-      if (!machine.projects[project]) await bridgeNativeMemory(project, machine, null);
-      if (!Object.keys(machine.projects).length && memory?.localPath) {
+      if (!machine.projects[project]?.[target]) return machine;
+      const remaining = Object.entries(machine.projects).some(([root, targets]) => root !== project || Object.keys(targets).some(name => name !== target));
+      if (!remaining) {
+        await stopJobs(machine, path, jobs, unscheduler, execute);
+        const memory = uninstallMemory === undefined ? await memorySettings(project, home) ?? machine.memory : uninstallMemory;
         const registry = await memoryJobs(memory, execute);
-        registry.rows.splice(0, registry.rows.length, ...registry.rows.filter(row => row.machine !== machineName));
-        await registry.save();
+        if (registry) await registry.update(rows => { rows.splice(0, rows.length, ...rows.filter(row => row.machine !== machineName)); });
+        delete machine.memory;
       }
+      delete machine.projects[project][target];
+      if (!Object.keys(machine.projects[project]).length) { delete machine.projects[project]; await bridgeNativeMemory(project, machine, null); }
       if (!Object.values(machine.projects).some(project => harness === 'claude' ? project.claude : project.codex || project.agents)) {
         const installed = machine.hooks[harness];
         if (installed?.commands) {
@@ -69,24 +119,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
     }
     machine.jobs.learn = { source: resolve(source.path, 'skills/geppetto-adopt/assets/templates/jobs/learn.md'), trigger: 'Stop', status: 'installed' };
     await refreshMaintenanceLauncher(home, source);
-    for (const name of maintenanceJobs) {
-      const previous = machine.jobs[name];
-      const registered = registry?.rows.find(row => row.job === name && row.machine === machineName) ?? registry?.rows.find(row => row.job === name);
-      if (registered && registered.machine !== machineName && !addJobs.includes(name) && previous?.status !== 'scheduled') {
-        machine.jobs[name] = { ...registered, status: 'scheduled-elsewhere' };
-        await atomicJson(path, machine); continue;
-      }
-      const osJob = ['windows-task-scheduler', 'cron'].includes(previous?.scheduler);
-      const attached = previous?.status === 'scheduled' && !osJob ? previous : jobs[name] ?? await scheduler(name, { home, host: previous?.host ?? harness, source });
-      machine.jobs[name] = { ...attached, source: resolve(source.path, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`), status: attached ? 'scheduled' : 'needs-scheduler' };
-      await atomicJson(path, machine);
-      if (attached && registry) {
-        const row = { machine: machineName, job: name, scheduler: attached.scheduler, cadence: attached.cadence, registered: registered?.machine === machineName ? registered.registered : new Date().toISOString() };
-        const index = registry.rows.findIndex(entry => entry.machine === machineName && entry.job === name);
-        if (index === -1) registry.rows.push(row); else registry.rows[index] = row;
-      }
-    }
-    if (registry) await registry.save();
+    await attachJobs(machine, path, registry, { home, harness, source, jobs, scheduler, addJobs, machineName });
     await atomicJson(path, machine);
     return machine;
   } finally { await lock.close(); await unlink(lockPath); }

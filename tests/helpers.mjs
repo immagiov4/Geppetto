@@ -28,7 +28,7 @@ export function invoke(script, args = [], { cwd = repo, home = cwd, input = '', 
       if (memoryChoice) args = [...args, '--memory', memoryChoice];
     }
     if (temporary) {
-      const jobs = Object.fromEntries(['curate-skills', 'maintain-memory'].map(name => [name, { scheduler: 'fixture', id: name, cadence: 'weekly', nextRun: '2026-11-02T09:00:00', disable: `fixture disable ${name}` }]));
+      const jobs = Object.fromEntries(['curate-skills', 'maintain-memory'].map(name => [name, { scheduler: 'fixture', id: name, cadence: 'weekly', nextRun: '2026-11-02T09:00:00', disable: `fixture disable ${name}`, ...(args.includes('--uninstall') ? { status: 'disabled' } : {}) }]));
       put(temporary, 'jobs.json', jobs); args = [...args, '--scheduler-jobs', resolve(temporary, 'jobs.json')];
     }
     return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } });
@@ -42,5 +42,5 @@ export function parallel(script, args, { cwd, home = cwd }) {
     child.on('error', reject); child.on('close', status => resolveResult({ status, stdout, stderr }));
   });
 }
-export function git(dir, args) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true }); }
+export function git(dir, args, options = {}) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true, ...options }); }
 export const config = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: {} });

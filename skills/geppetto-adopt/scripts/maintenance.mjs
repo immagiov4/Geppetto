@@ -71,11 +71,32 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
   return { scheduler: 'cron', id, cadence: expression, nextRun, disable: `crontab -e (remove ${marker})`, status: 'scheduled', host };
 }
 
-/** Run the registered prompt with the subscription CLI, inheriting its model settings. */
+/** Remove only the known OS registration; external schedulers need confirmation from adoption. */
+export async function disableMaintenance(name, job, { execute = run } = {}) {
+  if (job.status === 'disabled') return true;
+  if (job.scheduler === 'windows-task-scheduler') {
+    if (job.id !== `Geppetto-${name}`) throw new Error('Reconcile the maintenance task identity before disabling it.');
+    const result = execute('schtasks.exe', ['/Change', '/TN', job.id, '/DISABLE']);
+    if (result.status !== 0) throw new Error(`Cannot disable maintenance task: ${result.stderr?.trim() || result.error?.message}`);
+    return true;
+  }
+  if (job.scheduler === 'cron') {
+    const listed = execute('crontab', ['-l']);
+    if (listed.status !== 0 && !/no crontab/i.test(listed.stderr ?? '')) throw new Error('Cannot inspect maintenance crontab for removal.');
+    const text = listed.stdout ?? '';
+    const kept = text.split('\n').filter(line => !line.endsWith(`# Geppetto-${name}`)).join('\n');
+    if (kept !== text && execute('crontab', ['-'], { input: kept }).status !== 0) throw new Error('Cannot remove maintenance crontab entry.');
+    return true;
+  }
+  return false;
+}
+
+/** Run only active registrations with the subscription CLI, inheriting its model settings. */
 export async function main(args) {
   if (args.length !== 2 || args[0] !== '--run' || !maintenanceJobs.includes(args[1])) throw new Error('Usage: maintenance.mjs --run <curate-skills|maintain-memory>');
   const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'));
   const job = machine.jobs[args[1]];
+  if (job?.status !== 'scheduled') return 0;
   const memory = args[1] === 'maintain-memory' ? await memorySettings(userHome()) : null;
   const procedure = new URL(`../../${args[1] === 'maintain-memory' ? 'geppetto-memory' : 'skill-learning-patterns'}/SKILL.md`, import.meta.url);
   const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(job.source, 'utf8')}\nResolved machine context: ${JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory })}. Work only within the supplied file tools; private buckets are excluded. Keep changes local for review.\n`;

@@ -11,7 +11,7 @@ const jobs = Object.fromEntries(['curate-skills', 'maintain-memory'].map(name =>
 function setup(t) {
   const home = fixture(t), project = resolve(fixture(t), 'example-app');
   put(project, 'README.md', 'Example');
-  return { home, project, options: { home, pluginHooks: true, jobs } };
+  return { home, project, options: { home, pluginHooks: true, jobs, unscheduler: async () => true } };
 }
 
 test('fresh installation asks one informed memory question before writing files', t => {
@@ -65,7 +65,7 @@ test('GitHub memory creates a private repository and seeds the same local layout
       return { status: 0, stdout: '' };
     }
     if (['push', 'fetch'].includes(args[0])) return { status: 0, stdout: '' };
-    return git(opts.cwd, args);
+    return git(opts.cwd, args, opts);
   };
   await reconcileMachine(project, 'claude', { path: repo }, { ...options, memoryChoice: 'github', execute });
   const memory = JSON.parse(get(home, '.geppetto/config.json')).memory;
@@ -105,7 +105,7 @@ test('two machines sharing a Git remote deduplicate jobs, force extras and remov
   b.project = resolve(fixture(t), 'second-app'); put(b.project, 'README.md', 'Second app');
   for (const [machine, localPath] of [[a, first], [b, second]]) {
     put(machine.home, '.geppetto/config.json', { memory: { repo: remote, localPath, ...(machine === a ? { buckets: ['example-app'] } : { choice: 'github' }) } });
-    machine.options = { home: machine.home, pluginHooks: true, machineName: machine === a ? 'machine-a' : 'machine-b', scheduler: async name => { calls.push([machine.home, name]); return registration(name); } };
+    machine.options = { home: machine.home, pluginHooks: true, machineName: machine === a ? 'machine-a' : 'machine-b', scheduler: async name => { calls.push([machine.home, name]); return registration(name); }, unscheduler: async () => true };
   }
   await reconcileMachine(a.project, 'codex', { path: repo }, a.options);
   put(first, 'remote-lesson.md', 'A newer remote lesson.'); git(first, ['add', 'remote-lesson.md']);

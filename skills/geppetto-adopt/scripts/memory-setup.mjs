@@ -17,8 +17,8 @@ export function memoryDescription(memory) {
   return memory?.localPath ? `${memory.choice === 'github' ? 'Private GitHub repo' : 'Git folder'} ${memory.localPath} (${memory.repo})` : 'choice required';
 }
 
-export function memoryGit(root, args, execute = run) {
-  const result = execute('git', args, { cwd: root, timeout: 0 });
+export function memoryGit(root, args, execute = run, options = {}) {
+  const result = execute('git', args, { cwd: root, timeout: 0, ...options });
   if (result.status !== 0) throw new Error(`Memory Git ${args[0]} failed: ${result.stderr?.trim() || result.error?.message || 'unknown error'}`);
   return result.stdout?.trim() ?? '';
 }

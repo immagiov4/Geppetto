@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { rmSync, existsSync } from 'node:fs';
 import { fixture, get, put, repo, invoke } from './helpers.mjs';
 import { reconcileMachine } from '../skills/geppetto-adopt/scripts/machine.mjs';
-import { scheduleMaintenance } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
+import { scheduleMaintenance, disableMaintenance } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
 
 function isolatedMachine(t) {
   const home = fixture(t), original = { ...process.env };
@@ -62,7 +62,7 @@ test('maintenance runs the subscription CLI in the memory checkout with inherite
   const home = fixture(t), memory = fixture(t);
   put(home, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>{fs.writeFileSync('maintenance-proof.json',JSON.stringify({args:process.argv.slice(2),prompt,cwd:process.cwd(),key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD}));console.log('fixture complete');});`);
   put(home, 'memory-prompt.md', 'Maintain only nonprivate memory.');
-  put(home, '.geppetto/machine.json', { memory: { localPath: memory }, jobs: { 'maintain-memory': { host: 'codex', source: resolve(home, 'memory-prompt.md') } } });
+  put(home, '.geppetto/machine.json', { memory: { localPath: memory }, jobs: { 'maintain-memory': { status: 'scheduled', host: 'codex', source: resolve(home, 'memory-prompt.md') } } });
   const result = invoke('maintenance.mjs', ['--run', 'maintain-memory'], { cwd: home, home, env: { PATH: home, OPENAI_API_KEY: 'synthetic-secret' } });
   assert.equal(result.status, 0, result.stderr);
   const proof = JSON.parse(get(memory, 'maintenance-proof.json'));
@@ -70,6 +70,31 @@ test('maintenance runs the subscription CLI in the memory checkout with inherite
   assert.ok(proof.args.includes('exec')); assert.ok(proof.args.every(arg => !/--model|service_tier/.test(arg)));
   assert.ok(proof.args.includes('features.shell_tool=false')); assert.ok(proof.args.includes('features.multi_agent=false')); assert.ok(proof.args.includes('read-only'));
   assert.match(get(home, '.geppetto/maintain-memory.log'), /fixture complete/);
+});
+
+test('uninstall disables only owned OS jobs and requires external confirmation', async () => {
+  let cron = '0 12 * * * echo unrelated\n0 9 * * 1 node owned # Geppetto-maintain-memory\n';
+  const execute = (_command, args, options) => {
+    if (args[0] === '-l') return { status: 0, stdout: cron };
+    cron = options.input; return { status: 0 };
+  };
+  assert.equal(await disableMaintenance('maintain-memory', { scheduler: 'cron' }, { execute }), true);
+  assert.match(cron, /echo unrelated/); assert.doesNotMatch(cron, /Geppetto-maintain-memory/);
+  const calls = [];
+  assert.equal(await disableMaintenance('curate-skills', { scheduler: 'windows-task-scheduler', id: 'Geppetto-curate-skills' }, { execute: (command, args) => { calls.push([command, ...args]); return { status: 0 }; } }), true);
+  assert.deepEqual(calls, [['schtasks.exe', '/Change', '/TN', 'Geppetto-curate-skills', '/DISABLE']]);
+  assert.equal(await disableMaintenance('maintain-memory', { scheduler: 'native' }), false);
+  assert.equal(await disableMaintenance('maintain-memory', { scheduler: 'native', status: 'disabled' }), true);
+});
+
+test('inactive maintenance registrations never launch a model or read its prompt', t => {
+  const home = fixture(t);
+  for (const status of ['disabled', 'needs-disable', 'starting', 'scheduled-elsewhere']) {
+    put(home, '.geppetto/machine.json', { projects: {}, jobs: { 'maintain-memory': { status, source: 'nonexistent-prompt.md' } } });
+    const result = invoke('maintenance.mjs', ['--run', 'maintain-memory'], { cwd: home, home, env: { PATH: home } });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(resolve(home, '.geppetto/maintain-memory.log')), false);
+  }
 });
 
 test('maintenance attaches once per machine through the supplied scheduler and preserves native identities', async t => {
