@@ -35,11 +35,11 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
     const action = `"${process.execPath}" "${script}" --run `;
     await writeFile(launcher, `WScript.Quit CreateObject("WScript.Shell").Run("${action.replaceAll('"', '""')}" & WScript.Arguments(0), 0, True)\n`);
     const args = `"${launcher}" ${name}`;
-    const code = `$ErrorActionPreference='Stop'; $id=${psQuote(id)}; $task=Get-ScheduledTask -TaskName $id -ErrorAction SilentlyContinue; if ($task) { if ($task.Actions.Execute -ne 'wscript.exe' -or $task.Actions.Arguments -ne ${psQuote(args)}) { throw 'Existing task has a different action; reconcile it before adoption' } } else { $action=New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ${psQuote(args)}; $trigger=New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At '09:00'; $settings=New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable; $task=Register-ScheduledTask -TaskName $id -Action $action -Trigger $trigger -Settings $settings }; $info=Get-ScheduledTaskInfo -TaskName $id; @{id=$id;cadence=($task.Triggers | ConvertTo-Json -Compress);nextRun=$info.NextRunTime.ToString('o')} | ConvertTo-Json -Compress`;
+    const code = `$ErrorActionPreference='Stop'; $id=${psQuote(id)}; $task=Get-ScheduledTask -TaskName $id -ErrorAction SilentlyContinue; if ($task) { if ($task.Actions.Execute -ne 'wscript.exe' -or $task.Actions.Arguments -ne ${psQuote(args)}) { throw 'Existing task has a different action; reconcile it before adoption' } } else { $action=New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ${psQuote(args)}; $trigger=New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At '09:00'; $settings=New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable; $task=Register-ScheduledTask -TaskName $id -Action $action -Trigger $trigger -Settings $settings }; $info=Get-ScheduledTaskInfo -TaskName $id; @{id=$id;nextRun=$info.NextRunTime.ToString('o')} | ConvertTo-Json -Compress`;
     const result = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
     if (result.status !== 0) throw new Error(`Windows maintenance registration failed: ${result.stderr?.trim() || result.error?.message}`);
     const registered = JSON.parse(result.stdout);
-    return { ...registered, scheduler: 'windows-task-scheduler', cadence: registered.cadence || cadence, disable: `schtasks.exe /Change /TN ${id} /DISABLE`, status: 'scheduled', host };
+    return { ...registered, scheduler: 'windows-task-scheduler', cadence, disable: `schtasks.exe /Change /TN ${id} /DISABLE`, status: 'scheduled', host };
   }
   const listed = execute('crontab', ['-l']);
   if (listed.error?.code === 'ENOENT') return null;
