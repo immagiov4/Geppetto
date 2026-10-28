@@ -14,3 +14,7 @@ Run `npm run check` for package integrity, router validation and behaviour tests
 Change a behaviour in the source file that already owns it. The owner table is the [system map](system-map.md). Keep user-facing documentation in English. A public issue or pull request includes a meaningful Observability section. Before opening the PR, run `node .geppetto/bin/gate-sections.mjs --pr <body-file>`. CI runs the same gate on the PR body. That check is separate from `npm run check`.
 
 Tests use synthetic repositories and injected providers. Paid provider comparisons are separate from installation; preserve their measurements as evidence.
+
+Every change to shipped files in `skills/`, `.claude-plugin/`, `.codex-plugin/` or `.agents/plugins/` reaching main carries a version bump.
+Keep the same version in `package.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json` and `.agents/plugins/marketplace.json`.
+Use a patch for fixes and a minor version for new or removed behaviour; run `node scripts/bump-version.mjs <x.y.z>`.

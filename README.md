@@ -102,3 +102,5 @@ Bundled copies keep provenance in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.m
 MIT. Bundled skills keep their own MIT notices; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Influenced by [Matt Pocock's skills](https://github.com/mattpocock/skills), [pstack](https://github.com/backnotprop/pstack), and [OpenRig](https://github.com/mvschwarz/openrig).
+
+Contributors: enable the version checks with `git config core.hooksPath .githooks`.
