@@ -52,7 +52,7 @@ export async function recordSignal(root, input, { launch } = {}) {
   const previous = (await signalArchive(root)).find(row => row.key === input.key);
   if (previous?.category && previous.category !== input.category) throw new UsageError(`Key ${previous.key} uses category ${previous.category}; maintenance owns category changes.`);
   if (previous?.status.startsWith('merged-into:')) throw new UsageError(`Use ${previous.status.slice('merged-into:'.length)} instead.`);
-  if (previous?.status === 'open' && previous.sessions.includes(input.session)) return { duplicate: true, key: input.key };
+  if (source !== 'user' && previous?.status === 'open' && previous.sessions.includes(input.session)) return { duplicate: true, key: input.key };
   const clean = value => typeof value === 'string' ? redact(value) : Array.isArray(value) ? value.map(clean) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, clean(child)])) : value; const entry = clean({ ...input, transcript_path: active.transcript_path, source, id: randomUUID(), ts: new Date().toISOString(), status: 'open' });
   await appendRecord(root, 'signals', entry);
   if (policy.enabled !== false && process.env.GEPPETTO_LEARNING_CHILD !== '1' && (await eligibleSignals(root)).some(row => row.key === input.key)) await (launch ?? launchLearning)({ cwd: root, session_id: input.session, turn_id: input.turn ?? active.turn, transcript_path: active.transcript_path, signal_qualified: true });

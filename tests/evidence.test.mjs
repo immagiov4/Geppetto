@@ -223,16 +223,16 @@ test('PostToolUse records successful memory and skill reads only, with no conten
 });
 
 test('outcome audit reopens evidence recurring after a change and flags changed pages never read since it', async t => {
-  const root = fixture(t), home = fixture(t);
+  const root = fixture(t), home = fixture(t), path = 'skills/lesson/SKILL.md';
   put(root, '.geppetto/signals.jsonl', rows([
     { id: 'a', key: 'redo', session: 'one', category: 'efficiency', source: 'agent', status: 'open', ts: '2026-10-01T00:00:00Z' },
-    { key: 'redo', status: 'resolved', reference: 'abc', paths: ['lesson.md'], ts: '2026-10-02T00:00:00Z' },
+    { key: 'redo', status: 'resolved', reference: 'abc', paths: [path], ts: '2026-10-02T00:00:00Z' },
     { id: 'b', key: 'redo', session: 'two', category: 'efficiency', source: 'agent', status: 'open', ts: '2026-10-03T00:00:00Z' }
   ]));
-  put(root, '.geppetto/reads.jsonl', rows([{ path: resolve(root, 'lesson.md'), kind: 'memory', ts: '2026-10-01T00:00:00Z', session: 'one' }]));
+  put(root, '.geppetto/reads.jsonl', rows([{ path: resolve(root, path), kind: 'skill', ts: '2026-10-01T00:00:00Z', session: 'one' }]));
   const report = await learningAudit(root, { home });
-  assert.equal(report.outcomes[0].didNotFix, true); assert.deepEqual(report.outcomes[0].neverRead, ['lesson.md']);
+  assert.equal(report.outcomes[0].didNotFix, true); assert.deepEqual(report.outcomes[0].neverRead, [path]);
   assert.equal((await signalArchive(root)).find(row => row.key === 'redo').status, 'open');
-  put(root, '.geppetto/reads.jsonl', rows([{ path: resolve(root, 'lesson.md'), kind: 'memory', ts: '2026-10-04T00:00:00Z', session: 'two' }]));
+  put(root, '.geppetto/reads.jsonl', rows([{ path: resolve(root, path), kind: 'skill', ts: '2026-10-04T00:00:00Z', session: 'two' }]));
   assert.deepEqual((await learningAudit(root, { home })).outcomes[0].neverRead, []);
 });

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { readFile, writeFile, mkdir, readdir, lstat, realpath } from 'node:fs/promises';
 import { resolve, relative, dirname, sep, matchesGlob } from 'node:path';
 import { createInterface } from 'node:readline';
-import { contained, isMain, userHome } from './common.mjs';
+import { contained, isMain, userHome, gitOutput } from './common.mjs';
 import { redact, maintainEvidence } from './signal.mjs';
 import { logReads } from './hook-events.mjs';
 const blocked = part => /^(?:\.git|\.geppetto|\.codex|\.claude|\.agents|node_modules|private|\.env(?:\..*)?|.*\.(?:pem|key))$/i.test(part);
@@ -28,7 +28,7 @@ async function listFiles(root, directory = root) {
 /** File-only MCP boundary; neither shell, delegation nor publication is exposed. */
 export async function learningFileTool(root, name, args, readOnly = false, referenceRoot = null, telemetry = {}) {
   root = await realpath(root);
-  const read = async path => { const text = redact(await readFile(path, 'utf8')); await logReads({ cwd: telemetry.root ?? root, session_id: telemetry.session ?? 'learner', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { path } }); return text; };
+  const read = async path => { const text = redact(await readFile(path, 'utf8')); await logReads({ cwd: telemetry.root ?? root, session_id: telemetry.session ?? 'learner', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { path } }, { home: telemetry.home, readRoot: root, reference: telemetry.root && contained(root, path) ? gitOutput(root, ['rev-parse', 'HEAD']) : undefined }); return text; };
   if (name === 'MaintainEvidence') { if (!telemetry.maintenance || readOnly) throw new Error('Maintenance capability is unavailable'); await maintainEvidence(root, args); return 'Evidence maintenance saved'; }
   if (name === 'Read' && referenceRoot) {
     referenceRoot = await realpath(referenceRoot);
