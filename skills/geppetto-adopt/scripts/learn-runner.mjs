@@ -12,7 +12,7 @@ import { logHookEvent } from './hook-events.mjs';
 import { transcriptSlice, publicLearningRecords } from './learn-nudge.mjs';
 import { redact } from './signal.mjs';
 import { memorySettings } from './memory-config.mjs';
-import { privateEvidence, privateContent } from './learning-privacy.mjs';
+import { privateEvidence, privateContent, normalizePrivateText } from './learning-privacy.mjs';
 export function learningCommand(name) {
   for (const directory of (process.env.PATH ?? '').split(delimiter)) {
     const paths = [resolve(directory, process.platform === 'win32' ? `${name}.exe` : name), resolve(directory, name === 'codex' ? 'node_modules/@openai/codex/bin/codex.js' : 'node_modules/@anthropic-ai/claude-code/cli.js')];
@@ -130,14 +130,16 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
     let privacyReason;
     try {
       const privateLines = await privateContent(privateRoot);
-      const unsafe = text => text.split(/\r?\n/).some(line => privateEvidence(line, privateRoot, root) || privateLines.some(secret => line.includes(secret)));
+      const additions = [];
       let privateOutput = paths.some(name => privateEvidence(name, privateRoot, root)), hunk = false;
-      for (const line of git(path, ['diff', '--text', '--no-color', '--word-diff=none', '--output-indicator-new=+', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', context.baseline, '--']).split('\n')) {
+      for (const line of git(path, ['diff', '--text', '--no-color', '--word-diff=none', '--output-indicator-new=+', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=0', context.baseline, '--'], { maxBuffer: Infinity }).split('\n')) {
         if (line.startsWith('diff --git ')) hunk = false;
         if (line.startsWith('@@ ')) hunk = true;
-        if (hunk && line.startsWith('+') && unsafe(line.slice(1))) privateOutput = true;
+        if (hunk && line.startsWith('+')) additions.push(line.slice(1));
       }
-      for (const name of git(path, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean)) if (unsafe(await readFile(await learningFilePath(path, name), 'utf8'))) privateOutput = true;
+      for (const name of git(path, ['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean)) additions.push(await readFile(await learningFilePath(path, name), 'utf8'));
+      const text = additions.join('\n'), normalized = normalizePrivateText(text);
+      privateOutput ||= privateLines.some(secret => normalized.includes(secret)) || privateEvidence(text, privateRoot, root);
       if (privateOutput) privacyReason = 'Learning output contains private memory content or a private-bucket path.';
     }
     catch { privacyReason = 'Learning output could not be checked against private memory.'; }

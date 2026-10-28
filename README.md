@@ -58,6 +58,7 @@ An installation request, including this repository link, authorizes adoption. Af
 
 ## Limits
 
+- **Private learning content.** The learner cannot detect paraphrases of private content; learning changes stay local until you publish them.
 - **Semantic screening costs.** Source screening uses the OpenRouter key from the environment and reports provider usage. Put a hard spending limit on the key; a local maximum cannot bound a request whose final charge is unknown.
 - **Two harnesses tested.** Claude Code and Codex. Pi and OpenCode can load the skills; nobody has trialled them there yet.
 - **Harness loading and hook trust.** Installation checks files and native hook hashes; verify actual hook and skill loading in a fresh session. Codex project layers also require project trust.

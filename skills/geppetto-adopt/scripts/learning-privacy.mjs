@@ -1,7 +1,16 @@
 import { readFile, readdir } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { resolve, posix } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { contained } from './common.mjs';
 const minimumPrivateLineCharacters = 20;
+export const normalizePrivateText = text => text.toLowerCase().replace(/\s+/g, ' ').trim();
+function evidencePath(name, base) {
+  let path;
+  try { path = /^file:/i.test(name) ? fileURLToPath(name) : resolve(base, name); }
+  catch { path = resolve(base, name); }
+  try { return realpathSync(path); } catch { return path; }
+}
 /** Shell arguments are best-effort provenance; output retention also checks private content. */
 export function privateEvidence(value, privateRoot = null, cwd = process.cwd()) {
   if (typeof value === 'string') {
@@ -10,8 +19,8 @@ export function privateEvidence(value, privateRoot = null, cwd = process.cwd()) 
     for (const match of value.matchAll(/"(?:workdir|cwd)"\s*:\s*("(?:\\.|[^"\\])*")/g)) bases.push(resolve(cwd, JSON.parse(match[1])));
     const text = value.replaceAll('\\', '/');
     const tokens = [text, ...Array.from(text.matchAll(/"([^"\n]+)"|'([^'\n]+)'|([^\s"'`{}()[\],;=]+)/g), match => match[1] ?? match[2] ?? match[3])];
-    return tokens.some(token => /\bbuckets\/private(?:\/|["'\s]|$)/i.test(posix.normalize(token))
-      || privateRoot && bases.some(base => contained(privateRoot, resolve(base, token))));
+    return [...new Set(tokens)].some(token => /\bbuckets\/private(?:\/|["'\s]|$)/i.test(posix.normalize(token))
+      || privateRoot && bases.some(base => contained(evidencePath(privateRoot, cwd), evidencePath(token, base))));
   }
   if (!value || typeof value !== 'object') return false;
   const directory = value.workdir ?? value.cwd;
@@ -28,7 +37,10 @@ export async function privateContent(privateRoot) {
     for (const entry of entries) {
       const path = resolve(directory, entry.name);
       if (entry.isDirectory()) await visit(path);
-      else for (const line of (await readFile(path, 'utf8')).split(/\r?\n/)) if (line.replace(/\s/g, '').length >= minimumPrivateLineCharacters) lines.add(line.trim());
+      else for (const raw of (await readFile(path, 'utf8')).split(/\r?\n/)) {
+        const line = normalizePrivateText(raw);
+        if (line.replace(/\s/g, '').length >= minimumPrivateLineCharacters) lines.add(line);
+      }
     }
   }
   if (privateRoot) await visit(privateRoot);
