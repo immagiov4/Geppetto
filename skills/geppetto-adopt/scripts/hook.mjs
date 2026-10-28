@@ -23,10 +23,10 @@ const currentState = state => state && typeof state.turn === 'string' && typeof 
 const currentDecision = decision => decision && typeof decision.epoch === 'string' && decision.value && Array.isArray(decision.decisions) && decision.decisions.length ? decision : null;
 async function worktreeFingerprint(root) {
   const status = gitOutput(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).geppetto/.gitignore'], { trim: false });
-  const hash = createHash('sha256').update(status), entries = status.split('\0').filter(Boolean);
+  const gitRoot = gitOutput(root, ['rev-parse', '--show-toplevel']), hash = createHash('sha256').update(status), entries = status.split('\0').filter(Boolean);
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i], name = entry.slice(3); if (/[RC]/.test(entry.slice(0, 2))) i++;
-    const stat = await lstat(resolve(root, name), { bigint: true }).catch(error => { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; });
+    const stat = await lstat(resolve(gitRoot, name), { bigint: true }).catch(error => { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; });
     if (stat) hash.update(`${name}\0${stat.size}\0${stat.mtimeNs}\0${stat.ctimeNs}\n`);
   } return hash.digest('hex');
 }

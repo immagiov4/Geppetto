@@ -28,8 +28,8 @@ export function commandArgs(command) {
   }
   return { executable, positional, flags };
 }
-export function reviewResult(event, policy) {
-  const command = toolCommand(event), { executable, positional, flags } = commandArgs(command);
+export const reviewResult = (event, policy) => (toolCommand(event).match(/(?:[^"';&|\r\n]|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? ['']).some(command => {
+  const { executable, positional, flags } = commandArgs(command);
   if (words(command).some(token => ['--help', '-h'].includes(token))) return false;
   return policy.rearmOn.some(rule => {
     if (!new RegExp(rule.tool).test(toolName(event))) return false;
@@ -38,7 +38,7 @@ export function reviewResult(event, policy) {
     const subcommand = rule.gh.split(' ');
     return executable === 'gh' && subcommand.every((word, i) => positional[i] === word) && (!rule.path || new RegExp(rule.path).test(positional[subcommand.length] ?? '')) && (!rule.flags || rule.flags.every(flag => flags.has(flag) && flags.get(flag) !== 'false'));
   });
-}
+});
 export function turnMetrics(rows) {
   const edited = rows.filter(row => row.edited === true), delays = edited.filter(row => Number.isFinite(row.addedSeconds)).map(row => row.addedSeconds).sort((a, b) => a - b);
   const next = edited.map(row => rows.find(after => after.sessionId === row.sessionId && after.previousTurnId === row.turnId)); const classified = next.filter(row => typeof row?.userCorrection === 'boolean');

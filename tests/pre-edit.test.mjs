@@ -6,16 +6,16 @@ import { fixture, put, get, git, invoke, config } from './helpers.mjs';
 import { spawnSync } from 'node:child_process';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 const decision = { requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false } };
-function project(t, settings = {}) {
-  const cwd = fixture(t);
-  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(cwd, args);
+function project(t, settings = {}, nested = false) {
+  const root = fixture(t), cwd = nested ? resolve(root, 'app') : root;
+  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(root, args);
   put(cwd, 'README.md', '# Fixture'); put(cwd, '.geppetto/config.json', { ...config(), memory: { choice: 'none' }, hooks: { learnNudge: { enabled: false }, signalLearning: { enabled: false } }, ...settings });
   git(cwd, ['add', '.']); git(cwd, ['commit', '-qm', 'baseline']);
   const send = (kind, extra = {}) => handleEvent({ cwd, session_id: 'session', turn_id: 'turn', hook_event_name: kind, ...extra });
   const edit = (extra = {}) => send('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: 'README.md' }, ...extra });
   const record = (value, session = 'session', turn = 'turn') => invoke('hook.mjs', ['--record-turn', JSON.stringify(value), '--session', session, '--turn', turn], { cwd });
   const rows = () => get(cwd, '.geppetto/turns.jsonl').trim().split('\n').map(JSON.parse);
-  return { cwd, send, edit, record, rows };
+  return { root, cwd, send, edit, record, rows };
 }
 const denied = result => result.hookSpecificOutput?.permissionDecision === 'deny';
 test('F1: PreToolUse and PostToolUse errors fail open with one diagnostic; audit/install validate config', async t => {
@@ -71,6 +71,58 @@ test('F3: gh review intent survives options and positional argument placement', 
   for (const command of ['gh api --method GET repos/o/r/pulls/12/comments', 'gh api -H "Accept: application/vnd.github+json" repos/o/r/pulls/12/comments', 'gh --repo o/r pr view 12 --comments', 'gh -R o/r pr checks 12', 'gh api --hostname github.com --jq . repos/o/r/pulls/12/reviews', 'gh api --preview fixture repos/o/r/pulls/12/comments', 'gh pr view --repo=o/r --comments=true 12', 'gh run view --job 1 12 --log-failed']) {
     const { send, edit, record } = project(t); await send('UserPromptSubmit'); assert.equal(record(decision).status, 0);
     await send('PostToolUse', { tool_name: 'Bash', tool_input: { command } }); assert.ok(denied(await edit()), command);
+  }
+});
+test('N1: each shell command owns its review flags and help request', async t => {
+  for (const separator of [';', '&&', '||', '|', '\n', '\r\n']) {
+    for (const [left, right, expected] of [
+      ['gh pr view 12', 'echo --comments', false],
+      ['echo --comments', 'gh pr view 12', false],
+      ['gh pr view 12 --comments', 'echo --help', true],
+      ['echo --help', 'gh pr view 12 --comments', true],
+      ['gh pr view 12 --comments --help', 'echo done', false],
+      ['echo done', 'gh pr view 12 --comments --help', false],
+    ]) {
+      const command = `${left}${separator}${right}`;
+      const { send, edit, record } = project(t); await send('UserPromptSubmit'); assert.equal(record(decision).status, 0);
+      await send('PostToolUse', { tool_name: 'Bash', tool_input: { command } }); assert.equal(denied(await edit()), expected, command);
+    }
+  }
+});
+test('N1: quoted separators stay within arguments and pipelines retain review intent', async t => {
+  for (const [command, expected] of [
+    ['echo "unrelated; gh pr view 12 --comments"', false],
+    ["echo 'unrelated && gh pr view 12 --comments'", false],
+    ['gh pr view 12 --repo "o/r;echo --help" --comments', true],
+    ["gh pr view 12 --repo 'o/r|echo --help' --comments", true],
+    ['gh api repos/o/r/pulls/12/comments | Out-String', true],
+    ['gh api repos/o/r/pulls/12/comments?per_page=100|Out-String', true],
+    ['python skills/code-review/scripts/run_review.py;echo --help', true],
+    ['echo --help;python skills/code-review/scripts/run_review.py', true],
+    ['python skills/code-review/scripts/run_review.py --help;echo done', false],
+  ]) {
+    const { send, edit, record } = project(t); await send('UserPromptSubmit'); assert.equal(record(decision).status, 0);
+    await send('PostToolUse', { tool_name: 'exec_command', tool_input: { cmd: command } }); assert.equal(denied(await edit()), expected, command);
+  }
+});
+test('N2: nested project shell observation resolves dirty paths from the Git root and excludes siblings', async t => {
+  for (const mode of ['dirty', 'untracked', 'staged', 'sibling']) {
+    const { root, cwd, send, record } = project(t, {}, true);
+    const path = mode === 'untracked' ? 'new.txt' : 'README.md';
+    if (mode !== 'sibling') put(cwd, path, 'before\n');
+    else put(root, 'sibling.txt', 'before\n');
+    if (mode === 'staged') git(cwd, ['add', path]);
+    await send('UserPromptSubmit');
+    const event = { tool_name: 'Bash', tool_input: { command: 'arbitrary-program' } };
+    assert.deepEqual(await send('PreToolUse', event), {});
+    const target = mode === 'sibling' ? resolve(root, 'sibling.txt') : resolve(cwd, path);
+    const execution = spawnSync(process.execPath, ['-e', "require('node:fs').writeFileSync(process.argv[1], 'after!\\n')", target], { cwd, encoding: 'utf8', windowsHide: true });
+    assert.equal(execution.status, 0, execution.stderr); assert.equal(get(cwd, target), 'after!\n');
+    await send('PostToolUse', event);
+    const read = { tool_name: 'Read', tool_input: { file_path: path } };
+    assert.equal(denied(await send('PreToolUse', read)), mode !== 'sibling', mode);
+    assert.deepEqual(await send('PreToolUse', read), {});
+    if (mode !== 'sibling') { assert.equal(record(decision).status, 0); await send('PostToolUse', event); assert.deepEqual(await send('PreToolUse', read), {}); }
   }
 });
 test('F4: help and unrelated gh reads preserve the decision', async t => {
