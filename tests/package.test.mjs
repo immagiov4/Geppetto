@@ -46,5 +46,5 @@ test('plugin UserPromptSubmit delivers the routing reminders without a standalon
 
 test('PR workflow reacts to body edits and runs the trusted base gate without interpolating PR prose', () => {
   const workflow = readFileSync(resolve(repo, '.github/workflows/pr-gate.yml'), 'utf8');
-  assert.match(workflow, /types: \[opened, edited, synchronize, reopened\]/); assert.match(workflow, /workflow_call:/); assert.match(workflow, /ref: \$\{\{ github.event.pull_request.base.sha \}\}/); assert.match(workflow, /script=\.geppetto\/bin\/pr-event.mjs/); assert.doesNotMatch(workflow, /\$\{\{[^}]*\.body/);
+  assert.match(workflow, /types: \[opened, edited, synchronize, reopened\]/); assert.match(workflow, /workflow_call:/); assert.match(workflow, /ref: \$\{\{ github.event.pull_request.base.sha \}\}/); assert.match(workflow, /run: node \.\.\/geppetto\/skills\/geppetto-adopt\/scripts\/pr-event.mjs/); assert.doesNotMatch(workflow, /\$\{\{[^}]*\.body/);
 });

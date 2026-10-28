@@ -1,6 +1,6 @@
 # Geppetto self-adoption
 
-Source skills in `skills/` are authoritative. Generated copies under `.agents/skills` and `.claude/skills` are ignored. `.geppetto/bin` supplies command entrypoints importing canonical tracked source. The local manifest records ownership; the user machine registry records shared hooks, maintenance jobs, key location and memory repository.
+Source skills in `skills/` are authoritative. Generated copies under `.agents/skills` and `.claude/skills` are ignored. Local commands run the canonical scripts; the CI workflow checks out a pinned Geppetto package beside the trusted project base. The local manifest records ownership; the user machine registry records shared hooks, maintenance jobs, key location and memory repository.
 
 The project writes documentation in English, uses behavior tests and the bundled review procedure, and runs its GitHub Actions matrix. [Development](development.md) owns the check and refresh commands.
 

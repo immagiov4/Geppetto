@@ -1,6 +1,6 @@
 # System map
 
-Source procedures live in `skills/`; root manifests expose the plugin. `install.mjs` reuses plugin skills or generates copies for targets without a plugin, supplies CI gates in `.geppetto/bin` and protects ownership. `machine.mjs` reconciles shared resources. [Development](development.md) owns refresh and verification commands.
+Source procedures live in `skills/`; root manifests expose the plugin. `install.mjs` reuses plugin skills or generates copies for targets without a plugin, pins package CI gates in the project workflow and protects ownership. `machine.mjs` reconciles shared resources. [Development](development.md) owns refresh and verification commands.
 
 | Concern | Source owner under `skills/geppetto-adopt/scripts/` |
 |---|---|
@@ -16,12 +16,16 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Memory listing and configuration | `memory-hook.mjs`, `memory-config.mjs` |
 | Memory installation and Claude native directory ownership | `memory-setup.mjs` |
 | Cross-machine maintenance registrations | `memory-jobs.mjs` |
-| Suggestion coordination and telemetry | `memory-classifier.mjs`, `hook-events.mjs` |
-| Memory indexes and traversal | `memory-index.mjs`, `memory-traversal.mjs` |
-| OpenRouter adapters | `memory-provider.mjs`, `skill-provider.mjs` |
-| Skill catalog and prompt hook | `skill-catalog.mjs`, `skill-hook.mjs` |
+| Suggestion coordination and telemetry | `skill-selector.mjs`, `hook-events.mjs` |
+| Memory indexes | `memory-index.mjs` |
+| OpenRouter adapters | `skill-provider.mjs` |
+| Skill catalog and prompt hook | `skill-catalog.mjs`, `skill-hook.mjs`, `skill-batches.mjs` |
 | Paid API accounting | `authz.mjs` |
 | Codex native hook trust | `codex-hook-trust.mjs` |
 | Structural gates and instruction migration | `gate-agents.mjs`, `gate-sections.mjs`, `migrate-agents.mjs` |
 
 Tests exercise public script and hook flows with temporary repositories and injected providers. `scripts/check-skills.mjs` checks the distributable inventory and document links. [Memory retrieval](memory-retrieval.md) describes recursive indexing; [learning](../skills/geppetto-learn/references/ingestion.md) owns the background lifecycle.
+
+## Observability
+
+The mapped scripts expose gate diagnostics, audit readiness and hook-event records at their owning boundaries. The [adoption checks](adoption.md#observability) describe their runtime evidence; this map records source ownership, which remains a source-review responsibility.

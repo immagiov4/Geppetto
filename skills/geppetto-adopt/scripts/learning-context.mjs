@@ -1,12 +1,7 @@
 import { readFile, lstat, unlink } from 'node:fs/promises';
-import { run } from './common.mjs';
+import { gitOutput } from './common.mjs';
 import { learningFilePath, LearningScopeError } from './learner-tools.mjs';
-
-export function learningGit(root, args, options = {}) {
-  const result = run('git', ['-c', 'core.hooksPath=', ...args], { cwd: root, timeout: 0, ...options });
-  if (result.status !== 0) throw new Error('Learning Git operation failed.');
-  return result.stdout;
-}
+export const learningGit = (root, args, options = {}) => gitOutput(root, args, { prefix: ['-c', 'core.hooksPath='], trim: false, label: 'Learning Git operation', detail: false, ...options });
 
 /** Capture permitted working files through a private index; never stage or commit the user's checkout. */
 export async function learningContext(root, indexPath) {

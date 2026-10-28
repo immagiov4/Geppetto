@@ -109,3 +109,38 @@ test('an existing key makes the skill selector ready', t => {
   const selector = JSON.parse(result.stdout).skillSelector;
   assert.equal(selector.enabled, true); assert.equal(selector.action, null);
 });
+
+test('skill batches preserve serialized byte limits, concurrency and every selected procedure', async t => {
+  const { cwd, home, event } = setup(t, { maxConcurrentRequests: 2 });
+  const catalog = await skillCatalog(cwd, home, settings, { CODEX_HOME: home });
+  const limit = Math.max(...catalog.map(candidate => Buffer.byteLength(JSON.stringify(skillSelectionPayload({ model: settings.model, prompt: event.prompt, candidates: [candidate] })))));
+  put(cwd, '.geppetto/config.json', { hooks: { skillSelector: { ...settings, timeoutMs: 8000, maxConcurrentRequests: 2, maxRequestBytes: limit } } });
+  let active = 0, peak = 0; const seen = [], spending = [];
+  const provider = request => openRouterSelectSkills(request, { fetchImpl: async (_url, options) => {
+    assert.ok(Buffer.byteLength(options.body) <= limit);
+    const body = JSON.parse(options.body); seen.push(...Object.keys(body.questions));
+    active++; peak = Math.max(peak, active); await new Promise(done => setImmediate(done)); active--;
+    return { ok: true, json: async () => ({ answers: Object.fromEntries(Object.keys(body.questions).map(id => [id, { noul: 1 }])), usage: { cost: 0.001 } }) };
+  } });
+  const result = await handleSkillEvent(event, { home, provider, authorization: authority(spending), env: { CODEX_HOME: home, OPENROUTER_API_KEY: 'fixture' } });
+  assert.equal(peak, 2); assert.deepEqual(seen.sort(), catalog.map(c => c.id).sort());
+  for (const candidate of catalog) assert.ok(result.hookSpecificOutput.additionalContext.includes(candidate.path));
+  assert.equal(spending.at(-1)[0], 'settle');
+});
+
+test('an indivisible skill request settles zero cost without a provider call', async t => {
+  const { cwd, home, event } = setup(t, { maxRequestBytes: 1 }); const spending = []; let calls = 0;
+  const result = await handleSkillEvent(event, { home, authorization: authority(spending), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async () => { calls++; } });
+  assert.deepEqual(result, {}); assert.equal(calls, 0); assert.equal(spending.at(-1)[2], 0);
+  assert.match(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).error, /byte budget/);
+});
+
+test('timeout aborts the active skill request and prevents dispatch of the remaining queue', async t => {
+  const { cwd, home, event } = setup(t, { batchSize: 1, timeoutMs: 20 }); const spending = []; let calls = 0;
+  const result = await handleSkillEvent(event, { home, authorization: authority(spending), env: { OPENROUTER_API_KEY: 'fixture' }, provider: async request => {
+    calls++;
+    await new Promise((_, reject) => request.signal.addEventListener('abort', () => reject(new Error('Aborted')), { once: true }));
+  } });
+  assert.deepEqual(result, {}); assert.equal(calls, 1); assert.deepEqual(spending.map(c => c[0]), ['reserve']);
+  assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).costUsd, null);
+});

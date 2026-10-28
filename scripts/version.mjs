@@ -1,6 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-
 export const manifests = ['package.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.agents/plugins/marketplace.json'];
 const versionOf = (doc, file) => file.includes('marketplace.json') ? doc.plugins.find(p => p.name === 'geppetto').version : doc.version;
 export function versions(revision) {
@@ -15,4 +14,3 @@ export function bump(version) {
     writeFileSync(file, JSON.stringify(doc, null, 2) + '\n');
   }
 }
-

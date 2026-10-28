@@ -1,11 +1,5 @@
 import { resolve, isAbsolute } from 'node:path';
-import { jsonFile, userHome, validateMemory, memoryClassifierDefaults } from './common.mjs';
-
-/** Runtime and readiness resolve the same factory, user and project profile. */
-export function memoryClassifierSettings(user, local) {
-  return { ...memoryClassifierDefaults, ...user.hooks?.memoryClassifier, ...local.hooks?.memoryClassifier };
-}
-
+import { jsonFile, userHome, validateMemory } from './common.mjs';
 /** Project settings override user settings, including a legacy single-bucket selection. */
 export async function memoryConfiguration(project, home = userHome()) {
   const userFile = resolve(home, '.geppetto/config.json'); const projectFile = resolve(project, '.geppetto/config.json');

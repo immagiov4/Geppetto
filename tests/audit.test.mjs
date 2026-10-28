@@ -25,10 +25,11 @@ test('audit inventories an empty project without claiming active harness capabil
 });
 
 test('post-install audit executes installed green/red gate fixtures and validates project config and instruction budget', t => {
-  const cwd = fixture(t); cpSync(scripts, resolve(cwd, '.geppetto/bin'), { recursive: true }); put(cwd, 'AGENTS.md', '# Router\n'); put(cwd, '.geppetto/config.json', config());
-  let r = invoke('audit.mjs', ['--verify', '--json'], { cwd }); assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout).verification.map(c => [c.name, c.pass]), [['config', true], ['sections-valid-fixture', true], ['sections-invalid-fixture', true], ['agents-valid-fixture', true], ['agents-invalid-fixture', true], ['project-agents-budget', true]]);
-  put(cwd, '.geppetto/bin/gate-sections.mjs', 'process.exit(0)'); r = invoke('audit.mjs', ['--verify', '--json'], { cwd }); assert.equal(r.status, 1); assert.equal(JSON.parse(r.stdout).verification.find(c => c.name === 'sections-invalid-fixture').pass, false);
-  put(cwd, '.geppetto/config.json', { version: 1 }); r = invoke('audit.mjs', ['--verify', '--json'], { cwd }); assert.equal(r.status, 1); assert.equal(JSON.parse(r.stdout).verification[0].pass, false);
+  const cwd = fixture(t), packageRoot = fixture(t); cpSync(scripts, packageRoot, { recursive: true });
+  const audit = (...args) => invoke(resolve(packageRoot, 'audit.mjs'), args, { cwd }); put(cwd, 'AGENTS.md', '# Router\n'); put(cwd, '.geppetto/config.json', config());
+  let r = audit('--verify', '--json'); assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout).verification.map(c => [c.name, c.pass]), [['config', true], ['sections-valid-fixture', true], ['sections-invalid-fixture', true], ['agents-valid-fixture', true], ['agents-invalid-fixture', true], ['project-agents-budget', true]]);
+  put(packageRoot, 'gate-sections.mjs', 'process.exit(0)'); r = audit('--verify', '--json'); assert.equal(r.status, 1); assert.equal(JSON.parse(r.stdout).verification.find(c => c.name === 'sections-invalid-fixture').pass, false);
+  put(cwd, '.geppetto/config.json', { version: 1 }); r = audit('--verify', '--json'); assert.equal(r.status, 1); assert.equal(JSON.parse(r.stdout).verification[0].pass, false);
 });
 
 test('memory audit merges user/project settings and observes clone, indexes and remote using temporary repositories', t => {
@@ -49,7 +50,7 @@ test('user-only memory configuration reports missing indexes and remote separate
 
 test('verification names live-evidence gaps and fails when the configured memory remote differs', t => {
   const cwd = fixture(t); const home = fixture(t); const memory = fixture(t);
-  cpSync(scripts, resolve(cwd, '.geppetto/bin'), { recursive: true }); put(cwd, 'AGENTS.md', '# Router\n');
+  put(cwd, 'AGENTS.md', '# Router\n');
   git(memory, ['init', '-q']); git(memory, ['remote', 'add', 'origin', 'https://example.com/wrong.git']);
   put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.com/intended.git', localPath: memory } });
   let r = invoke('audit.mjs', ['--verify'], { cwd, home }); assert.equal(r.status, 1, r.stderr);

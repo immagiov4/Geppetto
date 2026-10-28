@@ -9,27 +9,14 @@ const client = process.argv[process.argv.indexOf('--client') + 1];
 if (!['claude', 'codex'].includes(client)) throw new Error('Pass --client claude or codex');
 let directory = path.resolve(input.cwd || process.cwd());
 while (true) {
-  const localHook = path.join(
-    directory,
-    '.agents/skills/requirements-blast-radius/scripts/prompt-hook.cjs'
-  );
-  const settings = path.join(
-    directory,
-    client === 'claude' ? '.claude/settings.json' : '.codex/hooks.json'
-  );
+  const localHook = path.join(directory, '.agents/skills/requirements-blast-radius/scripts/prompt-hook.cjs');
+  const settings = path.join(directory, client === 'claude' ? '.claude/settings.json' : '.codex/hooks.json');
   if (fs.existsSync(settings)) {
     const groups = JSON.parse(fs.readFileSync(settings, 'utf8')).hooks?.UserPromptSubmit || [];
-    const geppettoContext = path.join(directory, '.geppetto/bin/message-context.cjs');
-    const geppettoHook = path.join(directory, '.geppetto/bin/hook.mjs');
-    if (fs.existsSync(geppettoContext) && fs.existsSync(geppettoHook) && groups.some(group =>
-      group.hooks?.some(handler => handler.type === 'command' && handler.command?.includes('.geppetto/bin/hook.mjs'))
-    )) process.exit(0);
+    const integrated = groups.flatMap(group => group.hooks ?? []).map(handler => handler.type === 'command' && /^node "([^"]+\/geppetto-adopt\/scripts\/hook\.mjs)"$/.exec(handler.command ?? '')?.[1]);
+    if (integrated.some(script => script && fs.existsSync(script) && fs.existsSync(path.resolve(path.dirname(script), '../../requirements-blast-radius/scripts/message-context.cjs')))) process.exit(0);
     const projectMarker = ` --client ${client} --requirements-project-hook`;
-    const declared = groups.some(group =>
-      group.hooks?.some(
-        handler => handler.type === 'command' && handler.command?.endsWith(projectMarker)
-      )
-    );
+    const declared = groups.some(group => group.hooks?.some(handler => handler.type === 'command' && handler.command?.endsWith(projectMarker)));
     if (fs.existsSync(localHook) && declared) {
       if (!process.argv.includes('--requirements-project-hook')) process.exit(0);
       break;
@@ -40,15 +27,6 @@ while (true) {
   if (parent === directory) break;
   directory = parent;
 }
-const instruction = require('./message-context.cjs');
-process.stdout.write(
-  JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
-      additionalContext: process.argv.includes('--requirements-project-hook')
-        ? instruction +
-          ' Use the repository skill at .agents/skills/requirements-blast-radius/SKILL.md, resolved from the Git root, and resolve its references from that directory.'
-        : instruction,
-    },
-  })
-);
+let additionalContext = require('./message-context.cjs');
+if (process.argv.includes('--requirements-project-hook')) additionalContext += ' Use the repository skill at .agents/skills/requirements-blast-radius/SKILL.md, resolved from the Git root, and resolve its references from that directory.';
+process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } }));

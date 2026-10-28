@@ -2,11 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { cli, isMain, run, UsageError } from './common.mjs';
+import { cli, isMain, hookMain, run, UsageError } from './common.mjs';
 import { redact } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent } from './memory-hook.mjs';
-
 function words(command) {
   return [...command.matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s]+)/g)].map(m => m[1] !== undefined ? m[1].replace(/\\(["\\])/g, '$1') : m[2] ?? m[3]);
 }
@@ -25,9 +24,7 @@ function sectionFeedback(body, cwd, runCommand) {
 
 function messageContext(event) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1' || typeof event.prompt !== 'string' || !event.prompt.trim()) return {};
-  const modulePath = new URL(import.meta.url.endsWith('/scripts/hook.mjs')
-    ? '../../requirements-blast-radius/scripts/message-context.cjs'
-    : './message-context.cjs', import.meta.url);
+  const modulePath = new URL('../../requirements-blast-radius/scripts/message-context.cjs', import.meta.url);
   const additionalContext = createRequire(import.meta.url)(fileURLToPath(modulePath));
   return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext } };
 }
@@ -69,11 +66,5 @@ export async function handleEvent(event, { runCommand = run, now = Date.now, hom
   return {};
 }
 
-export async function main(args) {
-  if (args.length) throw new UsageError('Usage: hook.mjs < hook-event.json');
-  let event;
-  try { event = JSON.parse(readFileSync(0, 'utf8')); } catch { throw new UsageError('Hook input must be JSON'); }
-  console.log(JSON.stringify(await handleEvent(event))); return 0;
-}
-
+export const main = args => hookMain(args, 'Hook', handleEvent);
 if (isMain(import.meta.url)) await cli(main);

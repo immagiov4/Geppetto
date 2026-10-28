@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fixture, put, get, invoke, repo, scripts, git, config } from './helpers.mjs';
+import { fixture, put, get, invoke, repo, git, config } from './helpers.mjs';
 
 const templates = resolve(repo, 'skills/geppetto-adopt/assets/templates');
 test('both shipped hook fragments deliver internal context from nested directories and leave Stop for background learning', t => {
@@ -15,9 +15,9 @@ test('both shipped hook fragments deliver internal context from nested directori
     put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: true, benchmark: null, minToolCalls: 1, minDurationMs: 300000 } } });
     const hooks = JSON.parse(get(templates, path)).hooks;
     const event = (name, extra = {}) => {
-      const command = hooks[name][0].hooks[0].command;
-      assert.match(command, /^node -e ".*"$/);
-      const result = spawnSync(process.execPath, ['-e', command.slice('node -e "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: name, session_id: 'template', cwd: resolve(cwd, 'apps/backend'), tool_name: 'Read', tool_input: {}, ...extra }), encoding: 'utf8', windowsHide: true });
+      const command = hooks[name][0].hooks[0].command.replaceAll('${CLAUDE_PLUGIN_ROOT}', repo);
+      assert.match(command, /^node ".*"$/);
+      const result = spawnSync(process.execPath, [command.slice('node "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: name, session_id: 'template', cwd: resolve(cwd, 'apps/backend'), tool_name: 'Read', tool_input: {}, ...extra }), encoding: 'utf8', windowsHide: true });
       assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
     };
     assert.deepEqual(event('UserPromptSubmit'), {});
@@ -41,7 +41,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     assert.equal(hooks.UserPromptSubmit.flatMap(group => group.hooks).some(handler => handler.command.includes('memory-hook.mjs')), false);
     const selector = hooks.UserPromptSubmit.flatMap(group => group.hooks).find(handler => handler.command.includes('skill-hook.mjs'));
     assert.ok(selector);
-    const selected = spawnSync(process.execPath, ['-e', selector.command.slice('node -e "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd, prompt: ' ' }), encoding: 'utf8', windowsHide: true });
+    const selected = spawnSync(process.execPath, [selector.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', repo).slice('node "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd, prompt: ' ' }), encoding: 'utf8', windowsHide: true });
     assert.equal(selected.status, 0, selected.stderr); assert.deepEqual(JSON.parse(selected.stdout), {});
   }
 });
@@ -60,25 +60,31 @@ test('the plugin hook entrypoint requests learning internally while preserving a
   assert.deepEqual(JSON.parse(send('Stop').stdout), {});
 });
 
-test('first-adoption CI selects only base scripts or a valid owner-pinned package and runs its gate', t => {
-  const workflow = get(templates, 'ci/pr-gate.yml').replaceAll('\r\n', '\n'); assert.equal(get(repo, '.github/workflows/pr-gate.yml').replaceAll('\r\n', '\n'), workflow);
-  const selection = workflow.match(/run: \|\n([\s\S]*?)      - name: Fetch owner-pinned bootstrap/)[1].split('\n').map(line => line.slice(10)).join('\n');
-  const shell = process.platform === 'win32' ? resolve(git(repo, ['--exec-path']).stdout.trim(), '../../../bin/bash.exe') : 'bash';
-  const cwd = fixture(t); const output = resolve(cwd, 'output').replaceAll('\\', '/');
-  const choose = (repository = '', sha = '') => {
-    put(cwd, 'output', '');
-    return spawnSync(shell, ['-c', selection], { cwd, env: { ...process.env, GITHUB_OUTPUT: output, BOOTSTRAP_REPOSITORY: repository, BOOTSTRAP_SHA: sha }, encoding: 'utf8', windowsHide: true });
-  };
-  let r = choose(); assert.equal(r.status, 1); assert.match(r.stderr, /owner-set/);
-  r = choose('owner/geppetto', 'main'); assert.equal(r.status, 1);
-  r = choose('owner/geppetto', 'a'.repeat(40)); assert.equal(r.status, 0, r.stderr);
-  assert.match(get(cwd, 'output'), /script=.geppetto-bootstrap\/skills\/geppetto-adopt\/scripts\/pr-event.mjs\nbootstrap=true/);
-  cpSync(scripts, resolve(cwd, '.geppetto-bootstrap/skills/geppetto-adopt/scripts'), { recursive: true });
-  put(cwd, 'event.json', { pull_request: { body: '## Observability\nLogs $(touch unsafe)' } });
-  r = invoke(resolve(cwd, '.geppetto-bootstrap/skills/geppetto-adopt/scripts/pr-event.mjs'), ['--event', 'event.json'], { cwd }); assert.equal(r.status, 0, r.stderr);
-  put(cwd, 'skills/geppetto-adopt/scripts/pr-event.mjs', 'trusted package'); r = choose(); assert.equal(r.status, 0, r.stderr); assert.match(get(cwd, 'output'), /script=skills\/geppetto-adopt/);
-  put(cwd, '.geppetto/bin/pr-event.mjs', 'trusted installed'); r = choose(); assert.equal(r.status, 0, r.stderr); assert.match(get(cwd, 'output'), /^script=.geppetto\/bin\/pr-event.mjs\nbootstrap=false/);
-  assert.doesNotMatch(workflow, /pull_request\.head|pull_request\.body|secrets\./);
+test('generated CI runs only the pinned package gate against base configuration without vendored scripts', t => {
+  const cwd = fixture(t), home = fixture(t), workspace = fixture(t);
+  const installed = invoke('install.mjs', ['--target', 'codex', '--project', cwd, '--plugin-hooks'], { cwd, home });
+  assert.equal(installed.status, 0, installed.stderr);
+  const workflow = get(cwd, '.github/workflows/pr-gate.yml').replaceAll('\r\n', '\n');
+  const template = get(templates, 'ci/pr-gate.yml').replaceAll('\r\n', '\n');
+  assert.equal(workflow, template.replaceAll('{{GEPPETTO_SHA}}', git(repo, ['rev-parse', 'HEAD']).stdout.trim()));
+  cpSync(cwd, resolve(workspace, 'project'), { recursive: true });
+  const pinned = git(repo, ['rev-parse', 'HEAD']).stdout.trim();
+  assert.equal(git(workspace, ['clone', '--quiet', '--shared', '--no-checkout', repo, 'geppetto']).status, 0);
+  assert.equal(git(resolve(workspace, 'geppetto'), ['checkout', '--quiet', '--detach', pinned]).status, 0);
+  assert.equal(git(resolve(workspace, 'geppetto'), ['rev-parse', 'HEAD']).stdout.trim(), pinned);
+  const project = resolve(workspace, 'project');
+  put(project, '.geppetto/config.json', { ...config(), sections: { ...config().sections, pr: ['Base contract'] } });
+  put(project, 'event.json', { pull_request: { body: '## Observability\nInsufficient for base' } });
+  const command = workflow.match(/        run: node (.+)\n/)[1];
+  let result = invoke(resolve(project, command), [], { cwd: project, env: { GITHUB_EVENT_PATH: resolve(project, 'event.json') } });
+  assert.equal(result.status, 1); assert.match(result.stderr, /Base contract/);
+  put(project, 'event.json', { pull_request: { body: '## Base contract\nLogs $(touch unsafe)' } });
+  result = invoke(resolve(project, command), [], { cwd: project, env: { GITHUB_EVENT_PATH: resolve(project, 'event.json') } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(resolve(project, 'unsafe')), false);
+  assert.equal(existsSync(resolve(project, '.geppetto/bin')), false);
+  assert.doesNotMatch(workflow, /vars\.|pull_request\.head|pull_request\.body|secrets\./);
+  for (const [, sha] of workflow.matchAll(/uses: [^@]+@([^\s]+)/g)) assert.match(sha, /^[a-f\d]{40}$/);
 });
 
 test('CI trusts the base workflow and checks changed documents using the trusted event script', () => {
@@ -88,6 +94,6 @@ test('CI trusts the base workflow and checks changed documents using the trusted
   assert.match(workflow, /if: github.event_name == 'pull_request_target'/);
   assert.match(workflow, /ref: \$\{\{ github.event.pull_request.base.sha \}\}/);
   assert.match(workflow, /pull-requests: read/);
-  assert.match(workflow, /run: node "\$GATE_SCRIPT" --docs/);
+  assert.match(workflow, /run: node \.\.\/geppetto\/skills\/geppetto-adopt\/scripts\/pr-event\.mjs --docs/);
   assert.doesNotMatch(workflow, /pull_request\.head|pull_request\.body/);
 });

@@ -1,17 +1,29 @@
-import { readFile, lstat, readdir, mkdir, rename, writeFile, appendFile } from 'node:fs/promises';
+import { readFile, lstat, mkdir, rename, writeFile, appendFile } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-
 export class UsageError extends Error {}
 export const userHome = () => homedir();
 export const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 15000, ...options, windowsHide: true, shell: false });
+export function gitOutput(root, args, { execute = run, prefix = [], trim = true, label = 'Git operation', detail = true, ...options } = {}) {
+  const result = execute('git', [...prefix, ...args], { cwd: root, timeout: 0, ...options });
+  if (result.status !== 0) throw new Error(`${label} failed${detail ? `: ${result.stderr?.trim() || result.error?.message || 'unknown error'}` : '.'}`);
+  return trim ? result.stdout?.trim() ?? '' : result.stdout;
+}
 export const isMain = url => process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === url;
 
 export async function cli(main) {
   try { process.exitCode = (await main(process.argv.slice(2))) ?? 0; }
   catch (error) { console.error(`${error.path ? `${error.path}:1: ` : ''}${error.message}`); process.exitCode = error instanceof UsageError ? 2 : 1; }
+}
+
+export async function hookMain(args, name, handler) {
+  if (args.length) throw new UsageError(`Usage: ${name.toLowerCase().replace(' ', '-')}.mjs < hook-event.json`);
+  let event;
+  try { event = JSON.parse(readFileSync(0, 'utf8')); } catch { throw new UsageError(`${name} input must be JSON`); }
+  console.log(JSON.stringify(await handler(event))); return 0;
 }
 
 export function parseArgs(args, { values = [], flags = [], repeat = [] } = {}) {
@@ -34,6 +46,14 @@ export function parseArgs(args, { values = [], flags = [], repeat = [] } = {}) {
     result._.push(arg);
   }
   return result;
+}
+
+export async function rejectSymlinks(path, { ancestors = true } = {}) {
+  for (let current = resolve(path); ; current = dirname(current)) {
+    try { if ((await lstat(current)).isSymbolicLink()) throw new Error(`${current}:1: Reconcile symbolic link before writing`); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (!ancestors || current === dirname(current)) break;
+  }
 }
 
 export async function exists(path) {
@@ -69,30 +89,31 @@ export function contained(root, path) {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel));
 }
 
-export async function filesUnder(root) {
-  const files = [];
-  for (const entry of (await readdir(root, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+export function filesUnder(root, { skipLinks = false } = {}) {
+  return readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en')).flatMap(entry => {
     const path = resolve(root, entry.name);
-    if (entry.isSymbolicLink()) throw new Error(`${path}:1: Symbolic links require manual reconciliation`);
-    if (entry.isDirectory()) files.push(...await filesUnder(path));
-    else if (entry.isFile()) files.push(path);
-  }
-  return files;
+    if (entry.isSymbolicLink()) {
+      if (skipLinks) return [];
+      throw new Error(`${path}:1: Symbolic links require manual reconciliation`);
+    }
+    return entry.isDirectory() ? filesUnder(path, { skipLinks }) : entry.isFile() ? [path] : [];
+  });
+}
+
+/** Preserve hook groups and foreign handlers while removing owned commands. */
+export function filterHooks(settings, keep) {
+  for (const [event, groups] of Object.entries(settings.hooks ?? {})) settings.hooks[event] = groups.map(group => ({ ...group, hooks: group.hooks.filter(keep) })).filter(group => group.hooks.length);
 }
 
 // Twenty calls catches tool-heavy work; five minutes also catches long single-command turns.
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
 export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, writeApproval: false });
 export const skillSelectorDefaults = { enabled: true, model: 'perplexity/pplx-decider-v1.2', threshold: 0.75, timeoutMs: 8000, batchSize: 80 };
-export const memoryClassifierDefaults = { enabled: false, benchmark: null, model: 'perplexity/pplx-decider-flash-v1.2', bucketThreshold: 0.65, pageThreshold: 0.65, timeoutMs: 8000 };
 export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults(), skillSelector: { enabled: true, benchmark: null } } });
 
 export async function ignoreLocalFiles(project, paths) {
   const ignorePath = resolve(project, '.geppetto/.gitignore');
-  for (const path of [dirname(ignorePath), ignorePath]) {
-    try { if ((await lstat(path)).isSymbolicLink()) throw new Error(`${path}:1: Reconcile symbolic link before updating local ignore rules`); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-  }
+  for (const path of [dirname(ignorePath), ignorePath]) await rejectSymlinks(path, { ancestors: false });
   await mkdir(dirname(ignorePath), { recursive: true });
   let ignored = '';
   try { ignored = await readFile(ignorePath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }

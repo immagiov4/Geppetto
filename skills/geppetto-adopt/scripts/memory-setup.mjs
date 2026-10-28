@@ -1,27 +1,21 @@
-import { mkdir, readFile, writeFile, lstat, realpath } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
 import { resolve, basename, dirname } from 'node:path';
-import { atomicJson, jsonFile, exists, run, UsageError, validateMemory } from './common.mjs';
+import { atomicJson, gitOutput, jsonFile, exists, run, UsageError, rejectSymlinks as memoryWritePath } from './common.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
 import { bucketCatalog } from './memory-index.mjs';
-
 export const memoryQuestion = `Which memory should Geppetto use?
 1. Local Git folder (recommended): ~/geppetto-memory, shared by Claude and Codex, with history of every change; link to GitHub later.
 2. Private GitHub repo: the same, plus sync across machines; needs GitHub access.
 3. Only Claude/Codex's own memory: separate per tool and per machine.
 4. No memory.
 Choose with --memory <local|github|native|none>.`;
-
 export function memoryDescription(memory) {
   if (memory?.choice === 'native') return "Only Claude/Codex's own memory";
   if (memory?.choice === 'none') return 'No memory';
   return memory?.localPath ? `${memory.choice === 'github' ? 'Private GitHub repo' : 'Git folder'} ${memory.localPath} (${memory.repo})` : 'choice required';
 }
 
-export function memoryGit(root, args, execute = run, options = {}) {
-  const result = execute('git', args, { cwd: root, timeout: 0, ...options });
-  if (result.status !== 0) throw new Error(`Memory Git ${args[0]} failed: ${result.stderr?.trim() || result.error?.message || 'unknown error'}`);
-  return result.stdout?.trim() ?? '';
-}
+export const memoryGit = (root, args, execute = run, options = {}) => gitOutput(root, args, { execute, label: `Memory Git ${args[0]}`, ...options });
 
 export async function syncMemory(memory, execute = run) {
   const root = memory.localPath;
@@ -45,14 +39,7 @@ export async function syncMemory(memory, execute = run) {
   return { git, remote, branch };
 }
 
-/** Local configuration and native settings are merged at their own key boundaries. */
-export async function memoryWritePath(path) {
-  for (let current = resolve(path); ; current = dirname(current)) {
-    try { if ((await lstat(current)).isSymbolicLink()) throw new Error(`Reconcile symbolic link before memory setup: ${current}`); }
-    catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (current === dirname(current)) break;
-  }
-}
+export { memoryWritePath };
 
 async function seed(memory, bucket, execute) {
   await memoryWritePath(memory.localPath);
@@ -96,7 +83,6 @@ async function seed(memory, bucket, execute) {
 }
 
 export async function setupMemory(project, machine, { home, memoryChoice, execute = run }) {
-  if (memoryChoice !== undefined) validateMemory({ choice: memoryChoice }, '--memory');
   let memory = await memoryConfiguration(project, home);
   const fresh = memoryChoice && (memoryChoice !== memory?.choice || !memory?.localPath);
   if (memoryChoice) {

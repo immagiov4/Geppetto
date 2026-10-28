@@ -1,12 +1,11 @@
 import { readFile, mkdir, open, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { hostname } from 'node:os';
-import { jsonFile, atomicJson, userHome, defaultConfig, exists, run } from './common.mjs';
+import { jsonFile, atomicJson, userHome, defaultConfig, exists, run, filterHooks } from './common.mjs';
 import { memorySettings } from './memory-config.mjs';
 import { setupMemory, bridgeNativeMemory } from './memory-setup.mjs';
 import { memoryJobs } from './memory-jobs.mjs';
 import { scheduleMaintenance, disableMaintenance, maintenanceJobs, refreshMaintenanceLauncher } from './maintenance.mjs';
-
 async function stopJobs(machine, path, jobs, unscheduler, execute) {
   for (const name of maintenanceJobs) {
     const previous = machine.jobs[name];
@@ -79,7 +78,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
         const installed = machine.hooks[harness];
         if (installed?.commands) {
           const settings = await jsonFile(installed.source, {});
-          for (const [event, groups] of Object.entries(settings.hooks ?? {})) settings.hooks[event] = groups.map(group => ({ ...group, hooks: group.hooks.filter(hook => !installed.commands.includes(hook.command)) })).filter(group => group.hooks.length);
+          filterHooks(settings, hook => !installed.commands.includes(hook.command));
           await atomicJson(installed.source, settings);
         }
         delete machine.hooks[harness];
@@ -100,7 +99,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
       const installed = machine.hooks[harness];
       if (installed?.commands) {
         const settings = await jsonFile(hooksPath, {});
-        for (const [event, groups] of Object.entries(settings.hooks ?? {})) settings.hooks[event] = groups.map(group => ({ ...group, hooks: group.hooks.filter(hook => !installed.commands.includes(hook.command)) })).filter(group => group.hooks.length);
+        filterHooks(settings, hook => !installed.commands.includes(hook.command));
         await atomicJson(hooksPath, settings);
       }
       machine.hooks[harness] = { source: 'plugin' };

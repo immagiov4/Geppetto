@@ -16,12 +16,12 @@ Context is a budget: load the relevant owner through the map below. This file an
 
 ## Mandatory
 
-- Every PR/ticket contains a meaningful `## Observability` section, checked by `node .geppetto/bin/gate-sections.mjs --pr <body-file>` and CI.
+- Every PR/ticket contains a meaningful `## Observability` section, checked by `node skills/geppetto-adopt/scripts/gate-sections.mjs --pr <body-file>` and CI.
 - Each feature document declares its own observability. Follow `.geppetto/config.json` for significant test declarations and required sections.
 - Substantial changes start with a Requirements map through `$geppetto-spec`.
 - Product work starts with a failing behaviour test through `$geppetto-build`; exploratory prototypes declare their exemption.
 - Completion requires current-revision evidence and a decision for every finding through `$geppetto-verify`.
-- At any time, record meaningful recurring friction or errors with `node .geppetto/bin/signal.mjs "<problem>" --metric <affected-metric>`; use `$geppetto-learn` for guidance. Do not log trivial one-offs.
+- At any time, record meaningful recurring friction or errors with `node skills/geppetto-adopt/scripts/signal.mjs "<problem>" --metric <affected-metric>`; use `$geppetto-learn` for guidance. Do not log trivial one-offs.
 - Paid OpenRouter requests use `$geppetto-authorize` and the machine key configuration.
 - Memory procedures follow `$geppetto-memory`; retrieval respects bucket privacy.
 - Update each fact's existing owner in the same change. Keep explanations and procedures at their owners.
@@ -55,7 +55,7 @@ Keep project context to durable orientation and pointers. Resolve unfamiliar fac
 
 The project gate and CI configuration are named in the commands owner above. Local hooks provide early feedback; CI enforces required sections. Run the configured checks on the revision being delivered.
 
-Use `node .geppetto/bin/gate-agents.mjs --file AGENTS.md` after instruction changes. Keep this file a small router; move detailed rules to their existing owners and preserve their authority.
+Use `node skills/geppetto-adopt/scripts/gate-agents.mjs --file AGENTS.md` after instruction changes. Keep this file a small router; move detailed rules to their existing owners and preserve their authority.
 
 ## Decisions
 

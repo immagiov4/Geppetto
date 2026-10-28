@@ -22,14 +22,19 @@ class ProjectChecks(unittest.TestCase):
                 settings=root/name; settings.parent.mkdir(parents=True)
                 settings.write_text(json.dumps({'hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':'node .geppetto/bin/hook.mjs'}]}]}}))
                 self.assertTrue(invoke(HERE/'prompt-hook.cjs',root,client), 'an old Geppetto handler alone is not equivalent')
-                (root/'.geppetto/bin').mkdir(parents=True,exist_ok=True)
-                (root/'.geppetto/bin/hook.mjs').write_text('owned fixture')
-                (root/'.geppetto/bin/message-context.cjs').write_text('owned fixture')
+                package=root/'plugin with spaces'
+                hook=package/'skills/geppetto-adopt/scripts/hook.mjs'
+                context=package/'skills/requirements-blast-radius/scripts/message-context.cjs'
+                hook.parent.mkdir(parents=True,exist_ok=True); context.parent.mkdir(parents=True,exist_ok=True)
+                settings.write_text(json.dumps({'hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':'node "'+hook.as_posix()+'"'}]}]}}))
+                self.assertTrue(invoke(HERE/'prompt-hook.cjs',root,client), 'missing integrated scripts leave the reminder available')
+                hook.write_text('owned fixture'); context.write_text('owned fixture')
                 self.assertIsNone(invoke(HERE/'prompt-hook.cjs',root,client))
                 self.assertIsNone(invoke(HERE/'prompt-hook.cjs',root,client,project=True))
-                (root/'.geppetto/bin/message-context.cjs').unlink()
+                context.unlink()
+                self.assertTrue(invoke(HERE/'prompt-hook.cjs',root,client))
 
-    def test_prompt_routes_requirements_and_feedback_in_two_internal_lines(self):
+    def test_prompt_routes_requirements_feedback_and_learning_in_three_internal_lines(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)
             for client in ['claude','codex']:
@@ -39,7 +44,7 @@ class ProjectChecks(unittest.TestCase):
                     self.assertEqual(list(output),['hookSpecificOutput'])
                     self.assertEqual(output['hookSpecificOutput']['hookEventName'],'UserPromptSubmit')
                     lines=output['hookSpecificOutput']['additionalContext'].splitlines()
-                    self.assertEqual(len(lines),2)
+                    self.assertEqual(len(lines),3)
                     self.assertIn('$requirements-blast-radius',lines[0])
                     self.assertIn('reuse a supplied map',lines[0])
                     self.assertIn('$receive-work-feedback',lines[1])

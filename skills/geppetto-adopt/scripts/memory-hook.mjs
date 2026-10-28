@@ -1,13 +1,11 @@
-import { readFileSync } from 'node:fs';
 import { mkdir, open, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { cli, isMain, UsageError, projectRoot, userHome, jsonFile, atomicJson, ignoreLocalFiles, contained } from './common.mjs';
+import { cli, isMain, hookMain, UsageError, projectRoot, userHome, jsonFile, atomicJson, ignoreLocalFiles, contained } from './common.mjs';
 import { memorySettings } from './memory-config.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { redact } from './signal.mjs';
 import { memoryCatalog, memoryIndex } from './memory-index.mjs';
-
 function writtenPaths(event) {
   const tool = typeof event.tool_name === 'string' ? event.tool_name.split(/[.:/]/).at(-1).toLowerCase() : '';
   const input = event.tool_input;
@@ -86,16 +84,5 @@ export async function handleMemoryEvent(event, options = {}) {
   return { hookSpecificOutput: { hookEventName: name, additionalContext: text } };
 }
 
-export async function main(args) {
-  if (args.length === 1 && args[0] === '--check-credential') {
-    const present = Boolean(process.env.OPENROUTER_API_KEY);
-    console.log(JSON.stringify({ credential: present ? 'present' : 'missing', source: present ? 'process-environment' : null, providerAuthentication: 'not-verified' }));
-    return present ? 0 : 1;
-  }
-  if (args.length) throw new UsageError('Usage: memory-hook.mjs [--check-credential] < hook-event.json');
-  let event;
-  try { event = JSON.parse(readFileSync(0, 'utf8')); } catch { throw new UsageError('Memory hook input must be JSON'); }
-  console.log(JSON.stringify(await handleMemoryEvent(event))); return 0;
-}
-
+export const main = args => hookMain(args, 'Memory hook', handleMemoryEvent);
 if (isMain(import.meta.url)) await cli(main);

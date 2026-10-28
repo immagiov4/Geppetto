@@ -10,6 +10,6 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node scripts/check-skills.mjs && node .geppetto/bin/gate-agents.mjs --file AGENTS.md && node --test tests/*.test.mjs"
+    "check": "node scripts/check-skills.mjs && node skills/geppetto-adopt/scripts/gate-agents.mjs --file AGENTS.md && node --test tests/*.test.mjs"
   }
 }

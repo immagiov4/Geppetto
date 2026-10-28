@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, unlinkSync } from 'node:fs';
+import { cpSync, existsSync, unlinkSync, renameSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fixture, put, get, invoke, git, scripts, repo } from './helpers.mjs';
 
 test('adoption initializes a new project and commits only owned files as its first revision', t => {
@@ -31,21 +32,22 @@ for (const target of ['claude', 'codex']) test(`${target} plugin adoption stays 
   let result = invoke(install, [...args, '--begin'], { cwd, home }); assert.equal(result.status, 0, result.stderr);
   assert.equal(git(cwd, ['branch', '--show-current']).stdout.trim(), 'geppetto-install');
   const generated = ['AGENTS.md', 'CLAUDE.md', '.github/workflows/pr-gate.yml'];
-  for (const path of generated) put(cwd, path, path === 'CLAUDE.md' ? '@AGENTS.md' : '# Installation');
+  for (const path of generated.filter(path => !path.endsWith('.yml'))) put(cwd, path, path === 'CLAUDE.md' ? '@AGENTS.md' : '# Installation');
   result = invoke(install, [...args, '--record-generated', ...generated], { cwd, home }); assert.equal(result.status, 0, result.stderr);
   const state = JSON.parse(get(cwd, '.geppetto/install.json')).installations[target];
   assert.equal(state.plugin, true);
   assert.ok(Object.keys(state.files).length <= 13);
-  assert.deepEqual(Object.keys(state.files).filter(p => p.startsWith('.geppetto/bin/')).sort(), ['common.mjs', 'gate-agents.mjs', 'gate-sections.mjs', 'pr-event.mjs'].map(p => `.geppetto/bin/${p}`).sort());
+  assert.deepEqual(Object.keys(state.files).filter(p => p.startsWith('.geppetto/bin/')).sort(), []);
   assert.equal(existsSync(resolve(cwd, target === 'claude' ? '.claude/skills' : '.agents/skills')), false);
   put(home, 'event.json', { pull_request: { body: '## Observability\nSynthetic event.' } });
-  result = invoke(resolve(cwd, '.geppetto/bin/pr-event.mjs'), [], { cwd, home, env: { GITHUB_EVENT_PATH: resolve(home, 'event.json') } }); assert.equal(result.status, 0, result.stderr);
+  result = invoke(resolve(install, '../pr-event.mjs'), [], { cwd, home, env: { GITHUB_EVENT_PATH: resolve(home, 'event.json') } }); assert.equal(result.status, 0, result.stderr);
   result = invoke(install, ['--target', target, '--project', cwd, '--dry-run'], { cwd, home }); assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /0 file changes/);
   put(cwd, 'docs/geppetto-installation.md', 'Unowned evidence');
   result = invoke(install, [...args, '--record-generated', 'docs/geppetto-installation.md'], { cwd, home }); assert.equal(result.status, 2);
   result = invoke(install, [...args, '--commit'], { cwd, home }); assert.equal(result.status, 0, result.stderr);
   const committed = git(cwd, ['show', '--format=', '--name-only', 'HEAD']).stdout;
-  assert.match(committed, /AGENTS.md/); assert.doesNotMatch(committed, /unrelated|docs\//);
+  assert.match(committed, /AGENTS.md/); assert.doesNotMatch(committed, /unrelated|docs\/|\.geppetto\/install\.json/);
+  assert.equal(git(cwd, ['check-ignore', '.geppetto/install.json']).status, 0);
   assert.equal(git(cwd, ['diff', '--cached', '--name-only']).stdout.trim(), 'unrelated.txt');
   assert.equal(get(cwd, 'README.md'), 'Original project');
 });
@@ -60,7 +62,7 @@ test('plugin reconciliation removes owned duplicate skills, retains foreign skil
   result = invoke(install, [...args, '--plugin-hooks'], { cwd, home }); assert.equal(result.status, 0, result.stderr);
   assert.equal(existsSync(resolve(cwd, '.agents/skills/geppetto-example/SKILL.md')), false);
   assert.equal(get(cwd, '.agents/skills/foreign/SKILL.md'), 'Keep');
-  assert.equal(existsSync(resolve(cwd, '.geppetto/bin/install.mjs')), false);
+  assert.equal(existsSync(resolve(cwd, '.agents/skills/geppetto-adopt/scripts/install.mjs')), false);
 });
 
 test('permission-blocked machine registration prints one retry command and keeps evidence outside project docs', t => {
@@ -89,6 +91,9 @@ function source(t) {
   put(root, 'skills/geppetto-adopt/SKILL.md', '---\nname: geppetto-adopt\ndescription: Adopt\n---\nAdopt');
   put(root, 'skills/geppetto-example/SKILL.md', '---\nname: geppetto-example\ndescription: Example\n---\nOriginal');
   put(root, 'skills/requirements-blast-radius/scripts/message-context.cjs', get(repo, 'skills/requirements-blast-radius/scripts/message-context.cjs'));
+  cpSync(resolve(repo, 'skills/geppetto-adopt/assets/templates'), resolve(root, 'skills/geppetto-adopt/assets/templates'), { recursive: true });
+  git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']); git(root, ['config', 'user.email', 'fixture@example.invalid']);
+  git(root, ['add', '.']); git(root, ['commit', '-qm', 'Package']);
   return { root, install: resolve(root, 'skills/geppetto-adopt/scripts/install.mjs') };
 }
 
@@ -102,7 +107,7 @@ test('installation ignores local authorizations while preserving grants and exis
   assert.equal(get(cwd, '.geppetto/.gitignore'), ignored);
   for (let i = 0; i < 2; i++) { r = invoke(install, args, { cwd }); assert.equal(r.status, 0, r.stderr); }
   assert.equal(get(cwd, '.geppetto/authorizations'), grant);
-  assert.equal(get(cwd, '.geppetto/.gitignore'), `${ignored}/authorizations\n`);
+  assert.equal(get(cwd, '.geppetto/.gitignore'), `${ignored}/authorizations\n/install.json\n`);
   assert.equal(git(cwd, ['check-ignore', '.geppetto/authorizations']).status, 0);
   assert.equal(git(cwd, ['check-ignore', '.geppetto/config.json']).status, 1);
 });
@@ -111,7 +116,7 @@ test('installation ships the reusable Codex hook approval command and its resolv
   const cwd = fixture(t); const { install } = source(t);
   const r = invoke(install, ['--target', 'codex', '--project', cwd], { cwd });
   assert.equal(r.status, 0, r.stderr);
-  for (const path of ['.geppetto/bin/codex-hook-trust.mjs', '.agents/skills/geppetto-adopt/scripts/codex-hook-trust.mjs']) {
+  for (const path of ['.agents/skills/geppetto-adopt/scripts/codex-hook-trust.mjs']) {
     const help = invoke(resolve(cwd, path), ['--help'], { cwd });
     assert.equal(help.status, 0, help.stderr); assert.match(help.stdout, /--approve/);
   }
@@ -132,14 +137,14 @@ test('reinstallation tolerates an absent machine-local grant previously recorded
   r = invoke(install, [...args, '--record-generated', '.geppetto/authorizations'], { cwd }); assert.equal(r.status, 1);
 });
 
-test('dry run is read-only, installation ships standalone gates, update reconciles hashes, uninstall preserves foreign files', t => {
-  const cwd = fixture(t); const { root, install } = source(t); const args = ['--target', 'codex', '--project', cwd];
+test('dry run is read-only, installation uses skill scripts, update reconciles hashes, uninstall preserves foreign files', t => {
+  const cwd = fixture(t), home = fixture(t); const { root, install } = source(t); const args = ['--target', 'codex', '--project', cwd];
   let r = invoke(install, [...args, '--dry-run'], { cwd }); assert.equal(r.status, 0, r.stderr); assert.equal(existsSync(resolve(cwd, '.geppetto')), false);
   r = invoke(install, args, { cwd }); assert.equal(r.status, 0, r.stderr); assert.match(get(cwd, '.agents/skills/geppetto-example/SKILL.md'), /Original$/);
-  assert.equal(get(cwd, '.geppetto/bin/message-context.cjs'), get(root, 'skills/requirements-blast-radius/scripts/message-context.cjs'));
-  const prompt = invoke(resolve(cwd, '.geppetto/bin/hook.mjs'), [], { cwd, input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'Review this feedback', cwd }) });
+  assert.equal(existsSync(resolve(cwd, '.geppetto/bin/pr-event.mjs')), false);
+  const prompt = invoke(resolve(cwd, '.agents/skills/geppetto-adopt/scripts/hook.mjs'), [], { cwd, input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'Review this feedback', cwd }) });
   assert.equal(prompt.status, 0, prompt.stderr); assert.match(JSON.parse(prompt.stdout).hookSpecificOutput.additionalContext, /\$receive-work-feedback/);
-  r = invoke(resolve(cwd, '.geppetto/bin/gate-sections.mjs'), ['--pr', '-'], { cwd, input: '## Observability\nLogs' }); assert.equal(r.status, 0, r.stderr);
+  r = invoke(resolve(cwd, '.agents/skills/geppetto-adopt/scripts/gate-sections.mjs'), ['--pr', '-'], { cwd, input: '## Observability\nLogs' }); assert.equal(r.status, 0, r.stderr);
   put(cwd, '.agents/skills/foreign/SKILL.md', 'Keep'); put(root, 'skills/geppetto-example/SKILL.md', 'Updated');
   assert.equal(invoke(install, args, { cwd }).status, 0); assert.equal(get(cwd, '.agents/skills/geppetto-example/SKILL.md'), 'Updated');
   assert.equal(invoke(install, [...args, '--uninstall'], { cwd }).status, 0); assert.equal(existsSync(resolve(cwd, '.agents/skills/geppetto-example/SKILL.md')), false); assert.equal(get(cwd, '.agents/skills/foreign/SKILL.md'), 'Keep');
@@ -153,15 +158,15 @@ test('local modifications block update and uninstall before any file is changed'
   assert.match(get(cwd, '.claude/skills/geppetto-adopt/SKILL.md'), /Adopt$/); assert.equal(get(cwd, '.claude/skills/geppetto-example/SKILL.md'), 'My local edits');
 });
 
-test('user install selects the user home and multiple targets retain shared gates until the last owner uninstalls', t => {
+test('user install selects the user home and multiple targets retain shared skills until the last owner uninstalls', t => {
   const cwd = fixture(t); const home = fixture(t); const { root, install } = source(t);
   for (const target of ['codex', 'agents']) { const r = invoke(install, ['--target', target, '--user'], { cwd, home }); assert.equal(r.status, 0, r.stderr); }
   assert.equal(existsSync(resolve(cwd, '.agents')), false); assert.match(get(home, '.agents/skills/geppetto-example/SKILL.md'), /Original$/);
   put(root, 'skills/geppetto-adopt/scripts/gate-sections.mjs', `${get(root, 'skills/geppetto-adopt/scripts/gate-sections.mjs')}\n// Updated shared gate\n`);
   const update = invoke(install, ['--target', 'agents', '--user'], { cwd, home }); assert.equal(update.status, 0, update.stderr);
   assert.match(get(home, '.agents/skills/geppetto-adopt/scripts/gate-sections.mjs'), /Updated shared gate/);
-  assert.equal(invoke(install, ['--target', 'codex', '--user', '--uninstall'], { cwd, home }).status, 0); assert.equal(existsSync(resolve(home, '.geppetto/bin/gate-sections.mjs')), true);
-  assert.equal(invoke(install, ['--target', 'agents', '--user', '--uninstall'], { cwd, home }).status, 0); assert.equal(existsSync(resolve(home, '.geppetto/bin/gate-sections.mjs')), false);
+  assert.equal(invoke(install, ['--target', 'codex', '--user', '--uninstall'], { cwd, home }).status, 0); assert.equal(existsSync(resolve(home, '.agents/skills/geppetto-adopt/scripts/gate-sections.mjs')), true);
+  assert.equal(invoke(install, ['--target', 'agents', '--user', '--uninstall'], { cwd, home }).status, 0); assert.equal(existsSync(resolve(home, '.agents/skills/geppetto-adopt/scripts/gate-sections.mjs')), false);
   assert.equal(invoke(install, ['--target', 'codex', '--user', '--project', cwd], { cwd, home }).status, 2);
 });
 
@@ -175,17 +180,17 @@ test('unowned conflicts and forged ownership paths cannot overwrite or remove ou
   const r = invoke(install, [...args, '--uninstall'], { cwd }); assert.equal(r.status, 1); assert.match(r.stderr, /escapes its root/);
 });
 
-test('relocated bin and installed skill installers resolve recorded source and fail safely without provenance', t => {
+test('installed skill installers resolve recorded source and fail safely without provenance', t => {
   const cwd = fixture(t); const { root, install } = source(t); const args = ['--target', 'codex', '--project', cwd];
   assert.equal(invoke(install, args, { cwd }).status, 0);
   const manifest = JSON.parse(get(cwd, '.geppetto/install.json'));
   assert.deepEqual(manifest.source, { path: root, version: '0.1.0' });
-  for (const copy of ['.geppetto/bin/install.mjs', '.agents/skills/geppetto-adopt/scripts/install.mjs']) {
+  for (const copy of ['.agents/skills/geppetto-adopt/scripts/install.mjs']) {
     const r = invoke(resolve(cwd, copy), [...args, '--dry-run'], { cwd });
     assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /0 file changes/); assert.doesNotMatch(r.stdout, /remove /);
   }
   delete manifest.source; put(cwd, '.geppetto/install.json', manifest);
-  const r = invoke(resolve(cwd, '.geppetto/bin/install.mjs'), [...args, '--dry-run'], { cwd });
+  const r = invoke(resolve(cwd, '.agents/skills/geppetto-adopt/scripts/install.mjs'), [...args, '--dry-run'], { cwd });
   assert.equal(r.status, 1); assert.match(r.stderr, /No recorded package source/); assert.doesNotMatch(r.stdout, /remove /);
   assert.match(get(cwd, '.agents/skills/geppetto-example/SKILL.md'), /Original$/);
 });
@@ -221,7 +226,7 @@ test('generated adoption files are owned, retained on update and protected durin
   const cwd = fixture(t); const { install } = source(t); const args = ['--target', 'codex', '--project', cwd];
   args.push('--plugin-hooks');
   const generated = ['AGENTS.md', 'CLAUDE.md', '.geppetto/config.json', '.geppetto/authorizations', '.claude/settings.json', '.codex/hooks.json', '.github/workflows/pr-gate.yml'];
-  for (const path of generated) put(cwd, path, path === '.geppetto/config.json' ? '{}' : `Owned ${path}`);
+  for (const path of generated.filter(path => !path.endsWith('.yml'))) put(cwd, path, path === '.geppetto/config.json' ? '{}' : `Owned ${path}`);
   let r = invoke(install, [...args, '--record-generated', ...generated], { cwd }); assert.equal(r.status, 0, r.stderr);
   const state = JSON.parse(get(cwd, '.geppetto/install.json')).installations.codex;
   assert.deepEqual(state.generated, [...generated].sort()); for (const path of generated) assert.match(state.files[path], /^[a-f\d]{64}$/);
@@ -229,4 +234,71 @@ test('generated adoption files are owned, retained on update and protected durin
   put(cwd, '.codex/hooks.json', 'Host edit'); r = invoke(install, [...args, '--uninstall'], { cwd }); assert.equal(r.status, 1); assert.match(r.stderr, /Local edits/);
   assert.equal(get(cwd, 'AGENTS.md'), 'Owned AGENTS.md'); put(cwd, '.codex/hooks.json', 'Owned .codex/hooks.json');
   r = invoke(install, [...args, '--uninstall'], { cwd }); assert.equal(r.status, 0, r.stderr); for (const path of generated) assert.equal(existsSync(resolve(cwd, path)), false);
+});
+
+for (const action of ['update', 'uninstall']) test(`${action} removes owned legacy bin scripts and preserves foreign files`, t => {
+  const cwd = fixture(t), home = fixture(t); const { install } = source(t);
+  const args = ['--target', 'codex', '--project', cwd, '--plugin-hooks'];
+  assert.equal(invoke(install, args, { cwd, home }).status, 0);
+  const legacy = '.geppetto/bin/pr-event.mjs', bytes = 'Legacy owned gate';
+  put(cwd, legacy, bytes); put(cwd, '.geppetto/bin/foreign.mjs', 'Keep foreign');
+  const state = JSON.parse(get(cwd, '.geppetto/install.json'));
+  state.installations.codex.files[legacy] = createHash('sha256').update(bytes).digest('hex');
+  put(cwd, '.geppetto/install.json', state);
+  put(cwd, legacy, 'Local edits');
+  let result = invoke(install, [...args, ...(action === 'uninstall' ? ['--uninstall'] : [])], { cwd, home });
+  assert.equal(result.status, 1); assert.match(result.stderr, /Local edits/);
+  put(cwd, legacy, bytes);
+  result = invoke(install, [...args, ...(action === 'uninstall' ? ['--uninstall'] : []), '--dry-run'], { cwd, home });
+  assert.equal(result.status, 0, result.stderr); assert.equal(get(cwd, legacy), bytes);
+  result = invoke(install, [...args, ...(action === 'uninstall' ? ['--uninstall'] : [])], { cwd, home });
+  assert.equal(result.status, 0, result.stderr); assert.equal(existsSync(resolve(cwd, legacy)), false);
+  assert.equal(get(cwd, '.geppetto/bin/foreign.mjs'), 'Keep foreign');
+});
+
+test('fresh adoption pins the package gate in CI and rerun changes only its SHA', t => {
+  const cwd = fixture(t), home = fixture(t); const { root, install } = source(t);
+  const args = ['--target', 'codex', '--project', cwd, '--plugin-hooks'];
+  let result = invoke(install, args, { cwd, home }); assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);
+  const workflow = get(cwd, '.github/workflows/pr-gate.yml');
+  const initial = git(root, ['rev-parse', 'HEAD']).stdout.trim();
+  assert.ok(workflow.includes(`ref: ${initial}`)); assert.match(workflow, /repository: immagiov4\/Geppetto/);
+  assert.doesNotMatch(workflow, /vars\.|\.geppetto\/bin|\{\{GEPPETTO_SHA\}\}/);
+  put(root, 'revision.txt', 'Updated package'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'Update package']);
+  const next = git(root, ['rev-parse', 'HEAD']).stdout.trim();
+  result = invoke(install, [...args, '--dry-run'], { cwd, home }); assert.equal(result.status, 0, result.stderr); assert.equal(get(cwd, '.github/workflows/pr-gate.yml'), workflow);
+  result = invoke(install, args, { cwd, home }); assert.equal(result.status, 0, result.stderr);
+  assert.equal(get(cwd, '.github/workflows/pr-gate.yml'), workflow.replace(initial, next));
+  put(cwd, '.github/workflows/pr-gate.yml', workflow + '# owner edit\n');
+  result = invoke(install, args, { cwd, home }); assert.equal(result.status, 1); assert.match(result.stderr, /Local edits/);
+});
+
+test('a cached plugin needs an explicit immutable gate SHA and preserves it on repeat installation', t => {
+  const cwd = fixture(t), home = fixture(t); const { root, install } = source(t);
+  renameSync(resolve(root, '.git'), resolve(root, 'git-metadata'));
+  const args = ['--target', 'codex', '--project', cwd, '--plugin-hooks'];
+  for (const extra of [[], ['--gate-sha', 'main'], ['--gate-sha', 'a'.repeat(39)]]) {
+    const result = invoke(install, [...args, ...extra], { cwd, home });
+    assert.equal(result.status, 2); assert.match(result.stderr, /immutable|reviewed SHA/);
+    assert.equal(existsSync(resolve(cwd, '.geppetto')), false);
+  }
+  const pinned = [...args, '--gate-sha', 'b'.repeat(40)];
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const result = invoke(install, pinned, { cwd, home }); assert.equal(result.status, 0, result.stderr);
+    assert.ok(get(cwd, '.github/workflows/pr-gate.yml').includes(`ref: ${'b'.repeat(40)}`));
+    assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);
+  }
+});
+
+test('rerunning one target retires legacy bin scripts shared by multiple owned targets', t => {
+  const cwd = fixture(t), home = fixture(t); const { install } = source(t);
+  for (const target of ['claude', 'codex']) assert.equal(invoke(install, ['--target', target, '--project', cwd, '--plugin-hooks'], { cwd, home }).status, 0);
+  const state = JSON.parse(get(cwd, '.geppetto/install.json')), path = '.geppetto/bin/common.mjs', bytes = 'Shared legacy script';
+  put(cwd, path, bytes);
+  for (const entry of Object.values(state.installations)) entry.files[path] = createHash('sha256').update(bytes).digest('hex');
+  put(cwd, '.geppetto/install.json', state);
+  const result = invoke(install, ['--target', 'codex', '--project', cwd, '--plugin-hooks'], { cwd, home }); assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);
+  for (const entry of Object.values(JSON.parse(get(cwd, '.geppetto/install.json')).installations)) assert.equal(entry.files[path], undefined);
 });

@@ -2,7 +2,7 @@
 
 ## Requirements map
 
-The installer and skill curator need one reusable command to inspect and approve Codex hooks after the owner accepts their scope. Source: the owner's request. The source owner is `skills/geppetto-adopt/scripts/codex-hook-trust.mjs`; the project installer distributes it to `.geppetto/bin/` and installed adoption skills.
+The installer and skill curator need one reusable command to inspect and approve Codex hooks after the owner accepts their scope. Source: the owner's request. The source owner is `skills/geppetto-adopt/scripts/codex-hook-trust.mjs`; agents resolve it from the installed plugin or adoption skill.
 
 The command inventories current hook keys and hashes, writes only selected enabled definitions with `config/batchWrite`, and verifies their trust afterward. Explicit plugin, source or key selection keeps unrelated and managed hooks intact. Transport errors and changing definitions fail the operation.
 

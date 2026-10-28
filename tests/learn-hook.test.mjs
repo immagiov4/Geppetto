@@ -107,3 +107,16 @@ test('Stop supplies the reminder when the qualifying turn has no tool-completion
   assert.match(result.hookSpecificOutput.additionalContext, /\$geppetto-learn/);
   assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop' }), {});
 });
+
+test('plugin reminder signal command runs from a project with no vendored scripts', async t => {
+  const cwd = fixture(t);
+  put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 1 } } });
+  const event = { cwd, session_id: 'plugin-signal', tool_name: 'Read', tool_input: {} };
+  await handleEvent({ ...event, hook_event_name: 'PreToolUse' });
+  const context = (await handleEvent({ ...event, hook_event_name: 'PostToolUse' })).hookSpecificOutput.additionalContext;
+  const script = context.match(/node "([^"]+signal\.mjs)"/)?.[1]; assert.ok(script, context);
+  const result = invoke(script, ['Use the existing owner', '--metric', 'complexity'], { cwd });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(get(cwd, '.geppetto/signals.jsonl')).text, 'Use the existing owner');
+  assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);
+});

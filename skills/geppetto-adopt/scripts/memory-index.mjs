@@ -1,7 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { exists, contained } from './common.mjs';
-
+import { exists } from './common.mjs';
 const bucketName = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
 /** Parse only the root Bucket | Scope | Holds table; descriptions remain data. */
@@ -23,24 +22,14 @@ export function bucketCatalog(text) {
   return buckets;
 }
 
-/** Resolve an indexed document inside its real bucket, including nested indexes. */
-export async function memoryPath(memory, bucket, document = 'index.md') {
+/** Read a bucket root index only after resolving its ownership boundary. */
+export async function memoryIndex(memory, bucket) {
   if (bucket.toLowerCase() === 'private') throw new Error('The private bucket index is excluded from hooks');
-  const root = await realpath(memory.localPath);
-  const expected = resolve(root, 'buckets', bucket);
-  const owner = await realpath(expected);
-  const same = process.platform === 'win32' ? owner.toLowerCase() === expected.toLowerCase() : owner === expected;
-  const target = resolve(expected, document);
-  if (!same || !contained(expected, target)) throw new Error(`Bucket index resolves outside its configured owner: ${bucket}`);
-  const canonical = await realpath(target);
-  if (!contained(owner, canonical)) throw new Error(`Memory document resolves outside its bucket owner: ${bucket}`);
-  const sameTarget = process.platform === 'win32' ? canonical.toLowerCase() === target.toLowerCase() : canonical === target;
-  if (document === 'index.md' && !sameTarget) throw new Error(`Bucket index resolves outside its configured index owner: ${bucket}`);
-  return canonical;
-}
-
-export async function memoryIndex(memory, bucket, document = 'index.md') {
-  return readFile(await memoryPath(memory, bucket, document), 'utf8');
+  const expected = resolve(await realpath(memory.localPath), 'buckets', bucket, 'index.md');
+  const canonical = await realpath(expected);
+  const same = process.platform === 'win32' ? canonical.toLowerCase() === expected.toLowerCase() : canonical === expected;
+  if (!same) throw new Error(`Bucket index resolves outside its configured owner: ${bucket}`);
+  return readFile(canonical, 'utf8');
 }
 
 export async function memoryCatalog(memory) {
@@ -51,4 +40,3 @@ export async function memoryCatalog(memory) {
   if (canonical !== expected) throw new Error('Root memory index resolves outside its configured owner');
   return bucketCatalog(await readFile(canonical, 'utf8'));
 }
-

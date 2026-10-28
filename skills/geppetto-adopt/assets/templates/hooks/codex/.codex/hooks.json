@@ -5,12 +5,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/hook.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed hook.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/hook.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/hook.mjs\"",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/skill-hook.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed skill-hook.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/skill-hook.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/skill-hook.mjs\"",
             "timeout": 30
           }
         ]
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/hook.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed hook.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/hook.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/hook.mjs\"",
             "timeout": 30
           }
         ]
@@ -33,7 +33,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/hook.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed hook.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/hook.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/hook.mjs\"",
             "timeout": 30
           }
         ]
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/learn-runner.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed learn-runner.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/learn-runner.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-runner.mjs\"",
             "async": true
           }
         ]
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/memory-hook.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed memory-hook.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/memory-hook.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/memory-hook.mjs\"",
             "timeout": 30
           }
         ]
@@ -64,11 +64,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const fs=require('node:fs'),p=require('node:path'),cp=require('node:child_process');let r=process.cwd();while(!fs.existsSync(p.join(r,'.geppetto/bin/hook.mjs'))){const parent=p.dirname(r);if(parent===r){console.error('Geppetto hook: installed hook.mjs was not found');process.exit(1);}r=parent;}const result=cp.spawnSync(process.execPath,[p.join(r,'.geppetto/bin/hook.mjs')],{stdio:'inherit',windowsHide:true});if(result.error){console.error(result.error.message);process.exit(1);}process.exit(result.status??1);\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/hook.mjs\"",
             "timeout": 30
           }
         ]
       }
     ]
-  }
+  },
+  "description": "PR feedback, memory indexes, skill suggestions, and learning."
 }

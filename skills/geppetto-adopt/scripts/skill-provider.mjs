@@ -1,5 +1,3 @@
-import { openRouterDecisions } from './memory-provider.mjs';
-
 /** Mercury's existing per-skill relevance question, adapted to the shared Node transport. */
 export function skillSelectionPayload({ model, prompt, candidates }) {
   const criteria = {
@@ -10,6 +8,13 @@ export function skillSelectionPayload({ model, prompt, candidates }) {
 }
 
 /** Decisions endpoint used by the existing Mercury selector; no transcript or memory is sent. */
-export async function openRouterSelectSkills(request, options = {}) {
-  return openRouterDecisions(request, { ...options, payload: skillSelectionPayload, reason: 'Matches the skill purpose and triggers.' });
+export async function openRouterSelectSkills(request, { fetchImpl = fetch } = {}) {
+  const response = await fetchImpl('https://openrouter.ai/api/alpha/decisions', { method: 'POST', headers: { Authorization: `Bearer ${request.apiKey}`, 'Content-Type': 'application/json' }, signal: request.signal, body: JSON.stringify(skillSelectionPayload(request)) });
+  if (!response.ok) throw new Error(`OpenRouter decision request failed (HTTP ${response.status})`);
+  const result = await response.json(); const answers = result?.answers;
+  const expected = new Set(request.candidates.map(candidate => candidate.id));
+  const cost = result?.usage?.cost;
+  const costUsd = typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : null;
+  if (result?.error || !answers || typeof answers !== 'object' || Array.isArray(answers) || Object.keys(answers).length !== expected.size || Object.keys(answers).some(id => !expected.has(id) || !Number.isFinite(answers[id]?.noul) || answers[id].noul < 0 || answers[id].noul > 1)) throw Object.assign(new Error('Decision classifier returned invalid candidate answers'), { costUsd });
+  return { selections: request.candidates.map(candidate => ({ id: candidate.id, score: answers[candidate.id].noul, reason: 'Matches the skill purpose and triggers.' })), costUsd };
 }

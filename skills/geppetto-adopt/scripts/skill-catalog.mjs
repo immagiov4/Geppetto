@@ -2,7 +2,6 @@ import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-
 function field(frontmatter, key) {
   const lines = frontmatter.split(/\r?\n/); const index = lines.findIndex(line => line.startsWith(`${key}:`));
   if (index < 0) return '';
@@ -52,10 +51,8 @@ export function validateSkillSelectorSettings(settings) {
   if (['key', 'apiKey', 'api_key', 'secret'].some(field => field in settings)) throw new Error('Skill selector credentials belong in the environment or secret store');
 }
 
-export async function suggestSkills(classify, candidates, settings) {
-  const batches = [];
-  for (let start = 0; start < candidates.length; start += settings.batchSize) batches.push(candidates.slice(start, start + settings.batchSize));
-  const selected = (await Promise.all(batches.map(batch => classify('skills', batch)))).flat().sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+export function suggestSkills(selected, candidates, settings) {
+  selected.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
   const chosen = settings.maxSkills == null ? selected : selected.slice(0, settings.maxSkills);
   const owners = new Map(candidates.map(candidate => [candidate.id, candidate]));
   return chosen.length ? `Skills suggested for this message. Read the relevant SKILL.md before acting; also discover other useful skills when needed:\n${chosen.map(entry => { const skill = owners.get(entry.id); return `- ${skill.name}: ${skill.path}`; }).join('\n')}` : '';

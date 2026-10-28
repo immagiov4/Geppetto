@@ -16,7 +16,7 @@ Context is a budget: load the relevant owner through the map below. This file an
 
 ## Mandatory
 
-- Every PR/ticket contains a meaningful `## Observability` section, checked by `node .geppetto/bin/gate-sections.mjs --pr <body-file>` and CI.
+- Every PR/ticket contains a meaningful `## Observability` section, checked by `node <adopt>/scripts/gate-sections.mjs --pr <body-file>` and CI.
 - Each feature document declares its own observability. Follow `.geppetto/config.json` for significant test declarations and required sections.
 - Substantial changes start with a Requirements map through `$geppetto-spec`.
 - Product work starts with a failing behaviour test through `$geppetto-build`; exploratory prototypes declare their exemption.
@@ -54,7 +54,7 @@ Keep project context to durable orientation and pointers. Resolve unfamiliar fac
 
 The project gate and CI configuration are named in the commands owner above. Local hooks provide early feedback; CI enforces required sections. Run the configured checks on the revision being delivered.
 
-Use `node .geppetto/bin/gate-agents.mjs --file AGENTS.md` after instruction changes. Keep this file a small router; move detailed rules to their existing owners and preserve their authority.
+Use `node <adopt>/scripts/gate-agents.mjs --file AGENTS.md` after instruction changes. Keep this file a small router; move detailed rules to their existing owners and preserve their authority.
 
 ## Decisions
 
