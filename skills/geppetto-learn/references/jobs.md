@@ -8,7 +8,7 @@ Last-project uninstall stops owned OS jobs before removing this machine's rows. 
 
 Pass native registrations in an external JSON file to installation's `--scheduler-jobs`: each job name maps to `scheduler`, `id`, `cadence`, `nextRun` and `disable` strings. Otherwise installation uses Windows Task Scheduler (hidden launcher) or weekly cron with the subscription CLI; other cron cadences require native registration. Machine registration retains shared identities. Only an absent scheduler produces `needs-scheduler`; registration errors remain blockers. OS run output is retained in `~/.geppetto/<job>.log`. Report cadence, next run and controls in the recap.
 
-OS jobs invoke `~/.geppetto/bin/maintenance-launcher.mjs`. Each installation refreshes that entrypoint and the registered prompt sources to the selected package. Windows retains the hidden `maintenance.vbs` launcher and task names; cron reconciles its marked entries in place while preserving their cadence and unrelated jobs. Native scheduler registrations retain their identities.
+OS jobs invoke the shared maintenance launcher recorded on the machine. Each installation refreshes that entrypoint and the registered prompt sources to the selected package. Windows retains the hidden `maintenance.vbs` launcher and task names; cron reconciles its marked entries in place while preserving their cadence and unrelated jobs. Native scheduler registrations retain their identities.
 
 Exercise new jobs on synthetic inputs before enabling them. OS jobs reuse the [bounded learning CLI](ingestion.md), receiving machine context as input; private buckets and shell/delegation/publication tools stay excluded. Read [process execution](../../geppetto-adopt/references/processes.md) before launching tools.
 
