@@ -7,7 +7,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Project installation and ownership | `install.mjs` |
 | Shared hooks, job identities and memory | `machine.mjs` |
 | OS maintenance attachment and subscription CLI execution | `maintenance.mjs` |
-| PR feedback, turn decisions and combined completion/review gate | `hook.mjs` |
+| PR feedback, pre-edit decisions and completion review | `hook.mjs`, `turn-checks.mjs` |
 | Learning activity, background launch and transcript reduction | `learn-nudge.mjs` |
 | Background subscription run and machine lock | `learn-runner.mjs` |
 | Current project capture through an isolated Git index | `learning-context.mjs` |

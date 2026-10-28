@@ -1,7 +1,7 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
-import { cli, isMain, parseArgs, UsageError, jsonFile, exists } from './common.mjs';
+import { resolve, sep, matchesGlob } from 'node:path';
+import { cli, isMain, parseArgs, UsageError, jsonFile, exists, filesUnder } from './common.mjs';
 // Preserve line numbers while removing fenced examples and HTML comments.
 export function markdownLines(text, { keepCode = false } = {}) {
   let fence = null;
@@ -54,32 +54,12 @@ export function checkSections(text, required, file = '<stdin>') {
   }
   return errors;
 }
-function globRegex(pattern) {
-  let regex = '';
-  for (let i = 0; i < pattern.length; i++) {
-    const char = pattern[i];
-    if (char === '*' && pattern[i + 1] === '*') { i++; if (pattern[i + 1] === '/') { regex += '(?:.*/)?'; i++; } else regex += '.*'; }
-    else if (char === '*') regex += '[^/]*';
-    else if (char === '?') regex += '[^/]';
-    else regex += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-  return new RegExp(`^${regex}$`);
-}
 async function expand(pattern) {
   const absolute = resolve(pattern).split(sep).join('/');
   if (!/[?*]/.test(absolute)) return [resolve(pattern)];
   const prefix = absolute.slice(0, absolute.search(/[?*]/));
   const root = prefix.slice(0, prefix.lastIndexOf('/')) || '/';
-  const regex = globRegex(absolute);
-  const found = [];
-  async function walk(dir) {
-    for (const entry of await readdir(dir, { withFileTypes: true })) {
-      const path = resolve(dir, entry.name);
-      if (entry.isDirectory() && !['.git', 'node_modules'].includes(entry.name)) await walk(path);
-      else if (entry.isFile() && regex.test(path.split(sep).join('/'))) found.push(path);
-    }
-  }
-  await walk(root);
+  const found = filesUnder(root, { skipLinks: true, excludeDirs: ['.git', 'node_modules'] }).filter(path => matchesGlob(path.split(sep).join('/'), absolute));
   if (!found.length) throw new Error(`${pattern}:1: No documents match`);
   return found.sort();
 }

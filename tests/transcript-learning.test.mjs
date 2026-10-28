@@ -65,9 +65,9 @@ test('explicit signals still start learning when the reminder is disabled', asyn
   put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: false }, reviewGate: { enabled: false } } });
   put(cwd, '.geppetto/signals.jsonl', '{"id":"explicit","text":"A verified correction"}\n');
   const event = { cwd, session_id: 'explicit', turn_id: 'one', hook_event_name: 'Stop' };
-  assert.equal((await handleEvent(event)).decision, 'block');
-  await recordTurn(cwd, 'explicit', 'one', { continuation: true });
-  await handleEvent({ ...event, stop_hook_active: true }, { launchLearning: async event => { starts.push(event); } });
+  const options = { launchLearning: async event => { starts.push(event); } };
+  assert.deepEqual(await handleEvent(event, options), {});
+  await handleEvent({ ...event, stop_hook_active: true }, options);
   assert.equal(starts.length, 1); assert.equal(starts[0].learning_qualified, false);
   assert.equal(git(cwd, ['check-ignore', '.geppetto/hook-state/test']).status, 0);
 });

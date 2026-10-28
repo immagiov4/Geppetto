@@ -1,13 +1,13 @@
 # Semantic screen
 
-Use the screen to prioritize source reading for a requirements map. Run it after checking the repository's data-sharing rules. Its provider modes send every committed non-test source file to OpenRouter; review the source inventory and authorization first. Keep credentials in `OPENROUTER_API_KEY` in the child process environment. Supply it through the shell that launches the screen or a local secret manager. A repository may document that setup in an ignored environment file and explicitly export it before launch; the program reads only the process environment. Without the variable, provider modes report a skipped screen and return to lexical search and caller tracing. Inventory-only and grep modes work without it.
+Semantic screening is on by default for substantial changes, always alongside lexical search and caller reading. Use the screen to prioritize source reading for a requirements map. Run it after checking the repository's data-sharing rules. Its provider modes send every committed non-test source file to OpenRouter; review the source inventory and authorization first. Keep credentials in `OPENROUTER_API_KEY` in the child process environment. Supply it through the shell that launches the screen or a local secret manager. A repository may document that setup in an ignored environment file and explicitly export it before launch; the program reads only the process environment. Without the variable, provider modes report a skipped screen and return to lexical search and caller tracing. Inventory-only and grep modes work without it.
 
 ## Run
 
 Python 3.10+ and Git are sufficient. Supply a plain-text request, the public repository/revision, an external cache directory and an external output path:
 
 ```sh
-python <skill>/scripts/screen.py --repo <repo> --ref HEAD --request-file <request.txt> --mode decisions --model perplexity/pplx-decider-flash-v1.2 --public-code --cache <cache-dir> --output <ranked.json>
+python <skill>/scripts/screen.py --repo <repo> --ref HEAD --request-file <request.txt> --mode decisions --model liquid/d1.1 --public-code --cache <cache-dir> --output <ranked.json>
 ```
 
 `--public-code` records the caller's verification that the committed source is authorized for transmission. Only regular Git blobs from the selected commit are read; review current uncommitted work separately. Source suffixes and test-directory exclusions are explicit in `SOURCE_SUFFIXES` and `TEST_PARTS`. Run once with `--inventory-only` to inspect the manifest, including excluded paths, before provider calls. Add `--source-suffix .ext` for another source language; adjust the test layout classifier when needed. Completeness is relative to this explicitly enumerated source inventory. Submodules require a separate authorized scan. Private repositories require a separately authorized transmission workflow.
@@ -22,7 +22,7 @@ The JSON result contains the revision, complete file/chunk counts, ranking, reas
 
 The cache identity includes the versioned screening contract, model, complete request, path, chunk offset and chunk content. Increment `VERSION` when changing the scoring contract. Cache records contain scores, reasons and usage, so keep them outside the repository. `charged_usd` counts reported charges for requests issued in this run, including validation/cache failures with available usage; `uncached_equivalent_usd` sums recorded successful-request costs including reused entries. Aliases can change behind an unchanged model ID: pin a versioned catalog model and inspect the returned model build before reusing its cache.
 
-Tune transport workers and character-window size against the provider's documented context and admission limits. The defaults are execution settings, not product policy. The script makes one attempt per uncached window; inspect errors and explicitly complete missing work at suitable parallelism. Retain each run's report before replacing an output file.
+Tune transport workers and character-window size against the provider's documented context and admission limits. The defaults are execution settings, not product policy. HTTP 503 receives up to two additional transport attempts with exponential backoff; --retries configures that count, and zero selects one attempt. Other HTTP failures remain terminal. Retried 503 responses count as unknown-charge errors because they provide no billing data; inspect errors and explicitly complete missing work at suitable parallelism. Retain each run's report before replacing an output file.
 
 ## Decide whether to keep it
 

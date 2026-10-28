@@ -1,9 +1,10 @@
-import { readFile, lstat, mkdir, rename, writeFile, appendFile } from 'node:fs/promises';
+import { readFile, lstat, mkdir, rename, writeFile, appendFile, open } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { turnPolicy, defaultTurnChecks } from './turn-checks.mjs';
 export class UsageError extends Error {}
 export const userHome = () => homedir();
 export const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 15000, ...options, windowsHide: true, shell: false });
@@ -26,21 +27,17 @@ export async function hookMain(args, name, handler) {
 export function parseArgs(args, { values = [], flags = [], repeat = [] } = {}) {
   const result = { _: [] };
   for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (flags.includes(arg)) { result[arg] = true; continue; }
-    if (values.includes(arg) || repeat.includes(arg)) {
-      if (!args[i + 1] || args[i + 1].startsWith('--')) throw new UsageError(`Missing value for ${arg}`);
-      if (repeat.includes(arg)) {
-        result[arg] ??= [];
-        do { result[arg].push(args[++i]); } while (args[i + 1] && !args[i + 1].startsWith('--'));
-      } else {
-        if (arg in result) throw new UsageError(`Repeated option: ${arg}`);
-        result[arg] = args[++i];
-      }
-      continue;
+    const arg = args[i]; if (flags.includes(arg)) { result[arg] = true; continue; }
+    if (!values.includes(arg) && !repeat.includes(arg)) {
+      if (arg.startsWith('--')) throw new UsageError(`Unknown option: ${arg}`);
+      result._.push(arg); continue;
     }
-    if (arg.startsWith('--')) throw new UsageError(`Unknown option: ${arg}`);
-    result._.push(arg);
+    if (!args[i + 1] || args[i + 1].startsWith('--')) throw new UsageError(`Missing value for ${arg}`);
+    if (repeat.includes(arg)) {
+      result[arg] ??= [];
+      do { result[arg].push(args[++i]); } while (args[i + 1] && !args[i + 1].startsWith('--'));
+    } else if (arg in result) throw new UsageError(`Repeated option: ${arg}`);
+    else result[arg] = args[++i];
   }
   return result;
 }
@@ -51,9 +48,7 @@ export async function rejectSymlinks(path, { ancestors = true } = {}) {
     if (!ancestors || current === dirname(current)) break;
   }
 }
-export async function exists(path) {
-  try { await lstat(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
-}
+export async function exists(path) { try { await lstat(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 export async function projectRoot(cwd) {
   // The home directory's .geppetto/ holds user-level config, so it never marks a project root.
   const home = resolve(userHome());
@@ -71,22 +66,26 @@ export async function jsonFile(path, fallback) {
 }
 export async function atomicJson(path, value, { mode } = {}) {
   await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', mode });
+  const temp = `${path}.${process.pid}.tmp`; await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', mode });
   await rename(temp, path);
+}
+/** Claim an exclusive marker and close it before returning, including on write failure. */
+export async function claimFile(path, text = '') {
+  let claim;
+  try { claim = await open(path, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return false; throw error; }
+  try { await claim.writeFile(text); } finally { await claim.close(); } return true;
 }
 export function contained(root, path) {
   const rel = relative(resolve(root), resolve(path));
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel));
 }
-export function filesUnder(root, { skipLinks = false } = {}) {
+export function filesUnder(root, { skipLinks = false, excludeDirs = [] } = {}) {
   return readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en')).flatMap(entry => {
-    const path = resolve(root, entry.name);
-    if (entry.isSymbolicLink()) {
+    const path = resolve(root, entry.name); if (entry.isSymbolicLink()) {
       if (skipLinks) return [];
       throw new Error(`${path}:1: Symbolic links require manual reconciliation`);
     }
-    return entry.isDirectory() ? filesUnder(path, { skipLinks }) : entry.isFile() ? [path] : [];
+    return entry.isDirectory() ? excludeDirs.includes(entry.name) ? [] : filesUnder(path, { skipLinks, excludeDirs }) : entry.isFile() ? [path] : [];
   });
 }
 /** Preserve hook groups and foreign handlers while removing owned commands. */
@@ -97,14 +96,11 @@ export function filterHooks(settings, keep) {
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
 export const reviewGateDefaults = { enabled: true, benchmark: null, threshold: 30, docGlobs: ['**/*.md', '**/*.mdx', '**/*.rst', '**/docs/**'], testGlobs: ['**/tests/**', '**/test/**', '**/fixtures/**', '**/*.test.*', '**/*.spec.*', '**/__tests__/**'] };
 export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, writeApproval: false });
-export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { reviewGate: { ...reviewGateDefaults }, learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults() } });
-
+export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, turnChecks: structuredClone(defaultTurnChecks), hooks: { reviewGate: { ...reviewGateDefaults }, learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults() } });
 export async function ignoreLocalFiles(project, paths) {
-  const ignorePath = resolve(project, '.geppetto/.gitignore');
-  for (const path of [dirname(ignorePath), ignorePath]) await rejectSymlinks(path, { ancestors: false });
+  const ignorePath = resolve(project, '.geppetto/.gitignore'); for (const path of [dirname(ignorePath), ignorePath]) await rejectSymlinks(path, { ancestors: false });
   await mkdir(dirname(ignorePath), { recursive: true });
-  let ignored = '';
-  try { ignored = await readFile(ignorePath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  let ignored = ''; try { ignored = await readFile(ignorePath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const lines = ignored.split(/\r?\n/);
   // A later negation can reinclude a local file; restore its exclusion after it.
   const lastNegation = lines.findLastIndex(line => line.startsWith('!'));
@@ -125,11 +121,11 @@ export function validateConfig(config, file) {
   if (!Number.isSafeInteger(review.threshold) || review.threshold <= 0 || ![review.docGlobs, review.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string' && glob))) fail('hooks.reviewGate needs a positive threshold and arrays of nonempty globs');
   if (learning?.writeApproval !== undefined && typeof learning.writeApproval !== 'boolean') fail('hooks.signalLearning.writeApproval must be boolean');
   validateMemory(config.memory, file);
+  turnPolicy(config);
   return config;
 }
 export function validateMemory(memory, file) {
-  if (memory === undefined) return;
-  if (!memory || typeof memory !== 'object' || Array.isArray(memory)) throw new Error(`${file}:1: memory must be an object`);
+  if (memory === undefined) return; if (!memory || typeof memory !== 'object' || Array.isArray(memory)) throw new Error(`${file}:1: memory must be an object`);
   if (memory.choice !== undefined && !['local', 'github', 'native', 'none'].includes(memory.choice)) throw new Error(`${file}:1: memory.choice must be local, github, native or none`);
   for (const key of ['repo', 'localPath', 'projectBucket']) if (key in memory && (typeof memory[key] !== 'string' || !memory[key].trim())) throw new Error(`${file}:1: memory.${key} must be a nonempty string`);
   if (memory.projectBucket && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(memory.projectBucket)) throw new Error(`${file}:1: memory.projectBucket must be a single directory name`);

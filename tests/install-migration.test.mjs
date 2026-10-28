@@ -21,8 +21,8 @@ function legacy(t, targets = ['codex']) {
     const path = `${prefix}/geppetto-verify/SKILL.md`;
     const content = 'Run `node .geppetto/bin/gate-sections.mjs --pr -`';
     put(cwd, path, content); state.installations[target].files[path] = digest(content);
-    for (const name of ['common', 'gate-agents', 'gate-sections', 'pr-event']) {
-      const path = `.geppetto/bin/${name}.mjs`, content = get(repo, `skills/geppetto-adopt/scripts/${name}.mjs`);
+    for (const name of ['common.mjs', 'gate-agents.mjs', 'gate-sections.mjs', 'pr-event.mjs', 'turn-checks.mjs', 'turn-checks.json']) {
+      const path = `.geppetto/bin/${name}`, content = get(repo, `skills/geppetto-adopt/scripts/${name}`);
       put(cwd, path, content); state.installations[target].files[path] = digest(content);
     }
   }

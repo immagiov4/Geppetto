@@ -144,7 +144,7 @@ test('SessionStart supplies a resolved command and minimal schema once, so an or
   const result = start(); assert.equal(result.status, 0, result.stderr);
   const text = JSON.parse(result.stdout).hookSpecificOutput?.additionalContext; assert.ok(text);
   assert.match(text, /--record-turn/); assert.match(text, /requirements.*changes.*feedback.*applies.*frustration.*applies/);
-  assert.match(text, /what.*on.*action.*cause.*prevention/); assert.match(text, /startup/);
+  assert.match(text, /what[\s\S]*on.*action[\s\S]*cause.*prevention/); assert.match(text, /startup/);
   assert.doesNotMatch(JSON.stringify(JSON.parse(start().stdout)), /--record-turn/);
   assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'UserPromptSubmit' }), {});
   const recordScript = text.match(/node "([^"]+hook\.mjs)"/)?.[1]; assert.equal(resolve(recordScript), resolve(repo, 'skills/geppetto-adopt/scripts/hook.mjs'));

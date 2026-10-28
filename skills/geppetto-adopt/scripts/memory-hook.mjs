@@ -1,7 +1,7 @@
-import { mkdir, open, unlink } from 'node:fs/promises';
+import { mkdir, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { cli, isMain, hookMain, UsageError, projectRoot, userHome, jsonFile, atomicJson, ignoreLocalFiles, contained } from './common.mjs';
+import { cli, isMain, hookMain, UsageError, projectRoot, userHome, jsonFile, atomicJson, ignoreLocalFiles, contained, claimFile } from './common.mjs';
 import { memorySettings } from './memory-config.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { redact } from './signal.mjs';
@@ -43,9 +43,7 @@ export async function nativeMemoryEvent(event, { home = userHome() } = {}) {
   const marker = resolve(state, `native-${createHash('sha256').update(turn).digest('hex')}`);
   await mkdir(state, { recursive: true });
   await ignoreLocalFiles(project, ['/hook-state/', '/hook-events.jsonl']);
-  let lock;
-  try { lock = await open(marker, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return {}; throw error; }
-  await lock.close();
+  if (!await claimFile(marker)) return {};
   const inBucket = directory && contained(resolve(memory.localPath, 'buckets'), directory) && touched.some(path => contained(directory, path));
   const text = inBucket ? 'You saved to native memory inside bucket memory; keep the bucket index in step through $geppetto-memory.' : 'You saved to native memory. If it is a durable, generalizable lesson, also save it to bucket memory through $geppetto-memory.';
   try { await logHookEvent(project, { hook: 'nativeMemory', event: 'PostToolUse', session, turn, inBucket: Boolean(inBucket), injectedBytes: Buffer.byteLength(text), modelCalls: 0, costUsd: 0 }, event); }

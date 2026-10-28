@@ -1,0 +1,40 @@
+{
+  "checks": [
+    {
+      "id": "requirements",
+      "question": "Does this request change the agreed requirements?",
+      "skill": "requirements-blast-radius"
+    },
+    {
+      "id": "feedback",
+      "question": "Is this feedback from the user, a reviewer, CI or a delegated agent?",
+      "skill": "receive-work-feedback"
+    },
+    {
+      "id": "frustration",
+      "question": "Does this message express frustration caused by the work?",
+      "skill": "geppetto-learn"
+    }
+  ],
+  "rearmOn": [
+    {
+      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "command": "^gh\\s+api\\s+(?:--[\\w-]+\\s+)*[\"\\']?/?repos/[^/\\s]+/[^/\\s]+/pulls/\\d+/(comments|reviews)(?:[?\"\\'\\s].*)?$"
+    },
+    {
+      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "command": "^gh\\s+pr\\s+view(?:\\s+[^;|&\\r\\n]+)?\\s+--comments(?:\\s+[^;|&\\r\\n]+)?$"
+    },
+    {
+      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "command": "^(?:python(?:3|\\.exe)?|py)\\s+[\"\\']?(?:[^\"\\'\\r\\n]*[/\\\\])?code-review[/\\\\]scripts[/\\\\]run_review\\.py(?:[\"\\'\\s].*)?$"
+    },
+    {
+      "tool": "^(wait_agent|Task|Agent|task_result)$"
+    },
+    {
+      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "command": "^gh\\s+run\\s+view(?:\\s+[^;|&\\r\\n]+)?\\s+--log-failed(?:\\s+[^;|&\\r\\n]+)?$"
+    }
+  ]
+}

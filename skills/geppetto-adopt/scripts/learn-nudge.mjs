@@ -1,8 +1,8 @@
-import { appendFile, mkdir, readFile, open, unlink, stat } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, unlink, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
-import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults, projectRoot } from './common.mjs';
+import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults, projectRoot, claimFile } from './common.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { createReadStream } from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -46,16 +46,13 @@ export async function learningEvent(event, now, launch = launchLearning) {
   const fired = resolve(state, `fired-${turnHash}`);
   if (kind === 'Stop' && (event.transcript_path || signals || launch !== launchLearning) && (await jsonFile(configPath, {})).hooks?.signalLearning?.enabled !== false) {
     await mkdir(state, { recursive: true }); await ignoreLocalFiles(root, ['/hook-state/']);
-    const started = resolve(state, `started-${turnHash}`); let claim;
-    try { claim = await open(started, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return {}; throw error; }
-    await claim.close();
+    const started = resolve(state, `started-${turnHash}`);
+    if (!await claimFile(started)) return {};
     try { await launch({ ...event, learning_qualified: qualified }); }
     catch (error) { await unlink(started); throw error; }
   }
   if (!qualified) return {};
-  let marker;
-  try { marker = await open(fired, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return {}; throw error; }
-  await marker.close();
+  if (!await claimFile(fired)) return {};
   const entry = { hook: 'learnNudge', event: kind, session, turn, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
   try { await logHookEvent(root, entry, event); }
   catch (error) { await unlink(fired); throw error; }

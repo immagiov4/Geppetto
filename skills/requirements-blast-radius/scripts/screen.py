@@ -81,21 +81,34 @@ def inventory(repo, ref, chunk_chars, extra_suffixes=(), exclusions=None):
     return files, chunks
 
 
-def api(endpoint, payload):
+def api(endpoint, payload, retries=2):
     key = os.environ.get('OPENROUTER_API_KEY')
     if not key:
         raise ValueError('Set OPENROUTER_API_KEY in the environment.')
     request = urllib.request.Request('https://openrouter.ai' + endpoint,
         data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            result = json.load(response)
-    except urllib.error.HTTPError as error:
-        # Keep credentials, provider bodies and source out of diagnostics.
-        raise RuntimeError(f'OpenRouter HTTP {error.code}') from None
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                result = json.load(response)
+            break
+        except urllib.error.HTTPError as error:
+            status = error.code
+            error.close()
+            if status != 503 or attempt == retries:
+                # Keep credentials, provider bodies and source out of diagnostics.
+                failure = RuntimeError(f'OpenRouter HTTP {status}')
+                failure.retry503s = attempt
+                raise failure from None
+            time.sleep(2 ** attempt)
+        except Exception as error:
+            error.retry503s = attempt
+            raise
     if 'error' in result:
-        raise RuntimeError('OpenRouter returned an error object')
-    return result
+        failure = RuntimeError('OpenRouter returned an error object')
+        failure.retry503s = attempt
+        raise failure
+    return {**result, 'retry503s': attempt}
 
 
 def cache_key(mode, model, request, chunk):
@@ -115,19 +128,19 @@ class ScoringFailure(RuntimeError):
         self.charged_usd = charged_usd
 
 
-def score_chunk(mode, model, request, chunk, cache):
+def score_chunk(mode, model, request, chunk, cache, retries=2):
     dest = cache / (cache_key(mode, model, request, chunk) + '.json')
     if dest.exists():
         result = json.loads(dest.read_text(encoding='utf-8'))
         check_score(result['score'])
-        return {**result, 'cached': True, 'charged_usd': 0}
+        return {**result, 'cached': True, 'charged_usd': 0, 'retry503s': 0}
     start = time.perf_counter()
     response = None
     try:
         if mode == 'decisions':
             response = api('/api/alpha/decisions', {'model': model, 'state': {'request': request, 'file': chunk},
                 'questions': {'relevant': {'type': 'noul', 'instructions': QUESTION},
-                              'reason': {'type': 'choice', 'instructions': 'Select the strongest behavioral connection between this file and the request.', 'criteria': REASONS}}})
+                              'reason': {'type': 'choice', 'instructions': 'Select the strongest behavioral connection between this file and the request.', 'criteria': REASONS}}}, retries=retries)
             answer = response['answers']['relevant']
             if answer['type'] != 'noul' or response['answers']['reason']['type'] != 'choice':
                 raise ValueError('Unexpected decision answer type')
@@ -137,7 +150,7 @@ def score_chunk(mode, model, request, chunk, cache):
             response = api('/api/v1/chat/completions', {'model': model, 'temperature': 0,
                 'messages': [{'role': 'system', 'content': QUESTION + ' Return JSON with score (0..1) and reason (one concise sentence).'},
                              {'role': 'user', 'content': json.dumps({'request': request, 'file': chunk})}],
-                'response_format': {'type': 'json_object'}, 'max_tokens': 180})
+                'response_format': {'type': 'json_object'}, 'max_tokens': 180}, retries=retries)
             answer = json.loads(response['choices'][0]['message']['content'])
             score, reason = check_score(answer['score']), answer['reason']
             if not isinstance(reason, str) or not reason.strip():
@@ -147,7 +160,7 @@ def score_chunk(mode, model, request, chunk, cache):
         if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0:
             raise ValueError('Missing reported usage.cost; preserve cost accountability')
         result = {'path': chunk['path'], 'line': chunk['line'], 'offset': chunk['offset'], 'score': score,
-                  'reason': reason, 'model': response.get('model'), 'cost_usd': cost, 'seconds': time.perf_counter() - start}
+                  'reason': reason, 'model': response.get('model'), 'cost_usd': cost, 'seconds': time.perf_counter() - start, 'retry503s': response.get('retry503s', 0)}
         temp = dest.with_suffix('.tmp')
         temp.write_text(json.dumps(result), encoding='utf-8')
         temp.replace(dest)
@@ -156,7 +169,9 @@ def score_chunk(mode, model, request, chunk, cache):
         reported = response.get('usage', {}).get('cost') if isinstance(response, dict) else None
         known = isinstance(reported, (int, float)) and not isinstance(reported, bool) and math.isfinite(reported) and reported >= 0
         detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
-        raise ScoringFailure(detail, reported if known else None) from None
+        failure = ScoringFailure(detail, reported if known else None)
+        failure.retry503s = response.get('retry503s', 0) if isinstance(response, dict) else getattr(error, 'retry503s', 0)
+        raise failure from None
 
 
 def rank(rows):
@@ -200,19 +215,19 @@ def run(args):
             rows.append({'path': chunk['path'], 'line': chunk['line'], 'score': len(hits) / max(1, len(terms)), 'reason': ', '.join(hits), 'cost_usd': 0, 'charged_usd': 0})
     else:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futures = {pool.submit(score_chunk, args.mode, args.model, request, chunk, cache): chunk for chunk in chunks}
+            futures = {pool.submit(score_chunk, args.mode, args.model, request, chunk, cache, args.retries): chunk for chunk in chunks}
             for index, future in enumerate(concurrent.futures.as_completed(futures), 1):
                 try:
                     rows.append(future.result())
                 except Exception as error:
-                    errors.append({'path': futures[future]['path'], 'offset': futures[future]['offset'], 'error': str(error) if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__, 'charged_usd': getattr(error, 'charged_usd', None)})
+                    errors.append({'path': futures[future]['path'], 'offset': futures[future]['offset'], 'error': str(error) if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__, 'charged_usd': getattr(error, 'charged_usd', None), 'retry503s': getattr(error, 'retry503s', 0)})
                 if index % 100 == 0:
                     print(json.dumps({'completed': index, 'total': len(chunks), 'errors': len(errors)}), flush=True)
     result = {'revision': revision, 'mode': args.mode, 'model': args.model if args.mode != 'grep' else None,
               'file_count': len(files), 'chunk_count': len(chunks), 'completed_chunks': len(rows), 'errors': errors,
               'complete': len(rows) == len(chunks), 'wall_seconds': time.perf_counter() - start,
               'charged_usd': sum(row.get('charged_usd', 0) for row in rows) + sum(error['charged_usd'] or 0 for error in errors),
-              'unknown_charge_errors': sum(error['charged_usd'] is None for error in errors),
+              'unknown_charge_errors': sum(error['charged_usd'] is None for error in errors) + sum(row.get('retry503s', 0) for row in [*rows, *errors]),
               'uncached_equivalent_usd': sum(row['cost_usd'] for row in rows),
               'cached_chunks': sum(row.get('cached', False) for row in rows), 'ranking': rank(rows)}
     output.write_text(json.dumps(result, indent=2), encoding='utf-8')
@@ -233,10 +248,11 @@ def main():
     parser.add_argument('--mode', choices=['decisions', 'chat', 'grep'], required=True)
     parser.add_argument('--model', default='')
     parser.add_argument('--workers', type=int, default=24, help='Transport parallelism; lower when the provider rejects admission.')
+    parser.add_argument('--retries', type=int, default=2, help='Additional transport attempts for HTTP 503 only; use zero for a single attempt.')
     parser.add_argument('--chunk-chars', type=int, default=24000, help='Full-coverage character windows, sized below candidate context limits.')
     args = parser.parse_args()
-    if args.workers < 1 or args.chunk_chars < 1 or (args.mode != 'grep' and not args.model):
-        parser.error('Use positive workers/chunk size and supply --model for provider modes.')
+    if args.workers < 1 or args.chunk_chars < 1 or args.retries < 0 or (args.mode != 'grep' and not args.model):
+        parser.error('Use positive workers/chunk size, nonnegative retries and supply --model for provider modes.')
     return run(args)
 
 

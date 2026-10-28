@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, stat, realpath, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -6,6 +6,7 @@ import { cli, isMain, parseArgs, UsageError, jsonFile, validateConfig, userHome,
 import { hostLintReport } from './host-lint.mjs';
 import { memorySettings, memoryConfiguration } from './memory-config.mjs';
 import { learningReadiness } from './learn-runner.mjs';
+import { turnMetrics } from './turn-checks.mjs';
 const status = value => value ? 'present' : 'absent';
 const repositoryIdentity = value => /^https?:\/\//.test(value) ? value.replace(/\.git$/, '') : value;
 async function directory(path) { try { return (await stat(path)).isDirectory(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
@@ -13,8 +14,7 @@ async function file(path) { try { return (await stat(path)).isFile(); } catch (e
 async function memoryReport(project) {
   const merged = await memorySettings(project);
   if (!merged) return { status: 'absent', ...(await memoryConfiguration(project)), reason: 'No bucket memory configured' };
-  const localPath = merged.localPath;
-  const rootIndex = localPath ? resolve(localPath, 'index.md') : null;
+  const localPath = merged.localPath; const rootIndex = localPath ? resolve(localPath, 'index.md') : null;
   const bucketIndex = localPath && merged.buckets.length === 1 ? resolve(localPath, 'buckets', merged.buckets[0], 'index.md') : null;
   const bucketIndexes = await Promise.all(merged.buckets.map(async bucket => ({ bucket, path: localPath ? resolve(localPath, 'buckets', bucket, 'index.md') : null, status: status(localPath && await file(resolve(localPath, 'buckets', bucket, 'index.md'))) })));
   const root = localPath && await directory(localPath) ? run('git', ['rev-parse', '--show-toplevel'], { cwd: localPath }) : null;
@@ -22,20 +22,15 @@ async function memoryReport(project) {
   const remote = cloneExists ? run('git', ['remote'], { cwd: localPath }) : null;
   const names = remote?.status === 0 ? remote.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
   const selected = names.includes('origin') ? 'origin' : names.length === 1 ? names[0] : null;
-  const url = selected ? run('git', ['remote', 'get-url', '--all', selected], { cwd: localPath }) : null;
-  const push = selected ? run('git', ['remote', 'get-url', '--push', '--all', selected], { cwd: localPath }) : null;
-  const urls = url?.status === 0 ? url.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
-  const pushUrls = push?.status === 0 ? push.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
+  const url = selected ? run('git', ['remote', 'get-url', '--all', selected], { cwd: localPath }) : null; const push = selected ? run('git', ['remote', 'get-url', '--push', '--all', selected], { cwd: localPath }) : null;
+  const urls = url?.status === 0 ? url.stdout.trim().split(/\r?\n/).filter(Boolean) : []; const pushUrls = push?.status === 0 ? push.stdout.trim().split(/\r?\n/).filter(Boolean) : [];
   const matchesConfigured = Boolean(merged.repo && (urls.length && pushUrls.length ? [...urls, ...pushUrls].every(value => repositoryIdentity(value) === repositoryIdentity(merged.repo)) : cloneExists && !names.length && resolve(merged.repo) === resolve(localPath)));
   return { status: 'configured', ...merged, localPath, clone: status(cloneExists), rootIndex: { path: rootIndex, status: status(rootIndex && await file(rootIndex)) }, projectBucketIndex: { path: bucketIndex, status: status(bucketIndex && await file(bucketIndex)) }, bucketIndexes, remote: { status: remote ? remote.status === 0 ? status(Boolean(remote.stdout.trim())) : 'unverifiable' : 'absent', names, selected, urls, pushUrls, matchesConfigured } };
 }
 async function verify(project) {
-  const checks = [];
-  const configPath = resolve(project, '.geppetto/config.json');
-  try { validateConfig(await jsonFile(configPath), configPath); checks.push({ name: 'config', pass: true }); }
+  const checks = []; const configPath = resolve(project, '.geppetto/config.json'); try { validateConfig(await jsonFile(configPath), configPath); checks.push({ name: 'config', pass: true }); }
   catch (error) { checks.push({ name: 'config', pass: false, reason: error.message }); }
-  const agentGate = fileURLToPath(new URL('./gate-agents.mjs', import.meta.url));
-  const sectionGate = fileURLToPath(new URL('./gate-sections.mjs', import.meta.url));
+  const agentGate = fileURLToPath(new URL('./gate-agents.mjs', import.meta.url)); const sectionGate = fileURLToPath(new URL('./gate-sections.mjs', import.meta.url));
   const temp = await mkdtemp(resolve(tmpdir(), 'geppetto-audit-'));
   try {
     await writeFile(resolve(temp, 'AGENTS.md'), '# Router\n');
@@ -61,9 +56,10 @@ export async function main(args) {
   if (opts._.length) throw new UsageError('Usage: audit.mjs [--project <dir>] [--json] [--verify]');
   const project = resolve(opts['--project'] ?? '.');
   if (!await directory(project)) throw new Error(`${project}:1: Project directory does not exist`);
-  const config = await jsonFile(resolve(project, '.geppetto/config.json'), {});
-  const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
+  const config = await jsonFile(resolve(project, '.geppetto/config.json'), {}); const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
+  let turns = ''; try { turns = await readFile(resolve(project, '.geppetto/turns.jsonl'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const report = { project, node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: learningReadiness(project, config.hooks?.signalLearning) };
+  report.turnChecks = turnMetrics(turns.split('\n').filter(Boolean).map(JSON.parse));
   if (opts['--verify']) {
     report.verification = await verify(project);
     if (report.memory.status === 'configured') report.verification.push({ name: 'memory-remote-url', pass: report.memory.remote.matchesConfigured, reason: report.memory.remote.matchesConfigured ? undefined : 'Memory fetch/push remote URL does not equal configured memory.repo' });
@@ -75,6 +71,7 @@ export async function main(args) {
     console.log(`Installed: ${report.installed.join(', ') || 'run adoption'}`);
     console.log(`Hooks: ${Object.keys(machine.hooks ?? {}).join(', ') || 'run adoption'}`);
     console.log(`Memory: ${report.memory.status}`);
+    console.log(`Turn checks: ${report.turnChecks.editedTurns} edited turns; median added ${report.turnChecks.medianAddedSeconds ?? 'unknown'} s; next-message corrections ${report.turnChecks.correctedNextMessage}/${report.turnChecks.classifiedNextMessages} classified, ${report.turnChecks.unclassifiedNextMessages} unknown.`);
     for (const [name, job] of Object.entries(machine.jobs ?? {})) console.log(`Job ${name}: ${job.status}${job.status === 'needs-scheduler' ? '; attach an available scheduler' : ''}`);
     console.log(`Signal learning: ${report.learning.enabled ? 'enabled' : report.learning.action ? 'not ready' : 'disabled'}${report.learning.action ? `; ${report.learning.action}` : ''}`);
     for (const configuration of report.hostLint.configurations) console.log(`Host ${configuration.tool}: ${configuration.path}:1: ${configuration.registration}; ${configuration.patterns.join(', ')}`);

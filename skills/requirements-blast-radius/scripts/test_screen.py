@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('screen', Path(__file__).with_name('screen.py'))
@@ -12,6 +13,27 @@ screen = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(screen)
 
 class ScreenChecks(unittest.TestCase):
+    def test_503_is_retried_but_other_http_errors_are_terminal(self):
+        from io import BytesIO
+        response = BytesIO(b'{"model":"fixture"}')
+        unavailable = urllib.error.HTTPError('https://example.invalid', 503, 'unavailable', {}, None)
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'synthetic'}), patch.object(screen.urllib.request, 'urlopen', side_effect=[unavailable, response]) as transport, patch.object(screen.time, 'sleep'):
+            self.assertEqual(screen.api('/fixture', {}, retries=1)['model'], 'fixture')
+            self.assertEqual(transport.call_count, 2)
+        for status in [401, 429, 503]:
+            error = urllib.error.HTTPError('https://example.invalid', status, 'failure', {}, None)
+            with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'synthetic'}), patch.object(screen.urllib.request, 'urlopen', side_effect=error) as transport, patch.object(screen.time, 'sleep'):
+                with self.assertRaisesRegex(RuntimeError, f'HTTP {status}'):
+                    screen.api('/fixture', {}, retries=1)
+                self.assertEqual(transport.call_count, 2 if status == 503 else 1)
+
+    def test_retried_503_cost_gaps_survive_a_later_transport_failure(self):
+        unavailable = urllib.error.HTTPError('https://example.invalid', 503, 'unavailable', {}, None)
+        with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'synthetic'}), patch.object(screen.urllib.request, 'urlopen', side_effect=[unavailable, urllib.error.URLError('synthetic')]), patch.object(screen.time, 'sleep'):
+            with self.assertRaises(urllib.error.URLError) as raised:
+                screen.api('/fixture', {}, retries=1)
+            self.assertEqual(raised.exception.retry503s, 1)
+
     def test_inventory_covers_committed_source_only_and_every_character(self):
         with tempfile.TemporaryDirectory() as folder:
             repo = Path(folder)
