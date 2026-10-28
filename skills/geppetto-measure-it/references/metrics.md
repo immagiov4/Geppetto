@@ -2,6 +2,8 @@
 
 Choose the smallest set that can decide the current hypothesis. These defaults are editable; name the improved metric and the one at risk. Define units, observation method, cases, baseline revision and decision rationale. Seek approval for a new decision metric.
 
+Learning signals choose one primary problem category from project `categories`, whose ordered entries contain `id`, `definition` and `score` (the measurement method). Category counts identify observed keys and sessions; normalized scores require confirmed episodes and the denominator stated by their method. Preserve false positives, false negatives, pre-release findings and post-release regressions where applicable. Missing denominators, baseline minutes or token/cost observations stay unknown. Secondary effects belong in signal attributes; existing free-form metric fields remain legacy evidence without an inferred category mapping.
+
 - **Cognitive complexity:** identify hard-to-follow control flow at the owning functions; compare maintainability with any abstraction or file-navigation cost. A numeric limit comes from the project, not this list.
 - **Test usefulness:** behaviours and design choices protected, observed regressions caught, false confidence and meaningful red/green evidence. Coverage percentage alone is not proof of usefulness.
 - **Task time:** measure elapsed time and break down tests, tool calls, machine/CPU, hooks and reasoning. Show overlapping intervals; never sum parallel durations as elapsed time. Identify the limiting component before optimising.

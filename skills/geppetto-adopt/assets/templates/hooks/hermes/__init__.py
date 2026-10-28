@@ -34,9 +34,9 @@ def _reminder(reason):
             'valuta se il lavoro ha evidenziato attriti o lezioni riutilizzabili '
             'con la skill geppetto/geppetto-learn. '
             'Registra un segnale solo se utile; preserva il perimetro e le autorizzazioni. '
-            f'Per il segnale usa {command} "<attrito>" --metric <metrica> '
+            f'Per il segnale usa {command} "<attrito>" --key <chiave> --session <sessione> --category <categoria> '
             f'--scope hermes-default dalla cartella {_SETTINGS["projectRoot"]}. '
-            'Aggiungi --episode <episodio-osservato> --source <riferimento-progetto> insieme solo se noti; '
+            'Usa --list per le sole chiavi aperte e --evidence <riferimento> per other; '
             'non inventare provenienza o indipendenza.')
 
 

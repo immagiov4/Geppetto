@@ -25,7 +25,7 @@ test('private reads relative to tool or session cwd skip the entire turn without
       ? { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input }] } }
       : { type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify(host === 'nested' ? { code: `await tools.exec_command(${JSON.stringify(input)})` } : input) } };
     put(home, 'transcript.jsonl', jsonl([{ type: 'session_meta', payload: { cwd: ['session', 'relative-cwd'].includes(host) ? cwd : root } }, { type: 'user', message: { content: 'No, fix this.' } }, call, { type: 'assistant', message: { content: 'A paraphrase with no private path.' } }]));
-    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
     const result = await runLearning(root, { home, context: { learning_qualified: true, session_id: host, transcript_path: resolve(home, 'transcript.jsonl'), cwd: root }, execute: async () => assert.fail('private turn reached execute') });
     assert.equal(result.status, 'idle'); assert.equal(result.skipped, 'private-memory');
     const event = JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim());
@@ -37,7 +37,7 @@ test('private reads relative to tool or session cwd skip the entire turn without
 test('unreadable private configuration blocks and discards proposed changes', async t => {
   const { root, home, memory } = setup(t);
   put(memory, 'buckets/private', 'Synthetic invalid bucket directory');
-  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
     put(cwd, 'new-lesson.md', 'A proposed correction.\n');
     return { decision: 'applied', reason: 'Retained a correction.', owner: 'new-lesson.md' };
@@ -52,7 +52,7 @@ test('learning rejects added private lines and paths before staging or committin
     assert.equal(git(root, ['config', 'color.ui', 'always']).status, 0);
     assert.equal(git(root, ['config', 'diff.outputIndicatorNew', '>']).status, 0);
     put(memory, 'buckets/private/nested/facts.md', 'Synthetic confidential detail with spaces.\n1234567890123456789 0\n');
-    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
     const before = git(root, ['rev-parse', 'HEAD']).stdout.trim();
     let output;
     const result = await runLearning(root, { home, execute: async ({ cwd }) => {
@@ -75,7 +75,7 @@ test('private output is discarded even when execution fails or returns an invali
   for (const throws of [false, true]) {
     const { root, home, memory } = setup(t);
     put(memory, 'buckets/private/facts.md', 'Synthetic confidential detail with spaces.\n');
-    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
     const result = await runLearning(root, { home, execute: async ({ cwd }) => {
       put(cwd, 'new-lesson.md', 'Synthetic confidential detail with spaces.\n');
       if (throws) throw new Error('Synthetic execution failure');
@@ -87,7 +87,7 @@ test('private output is discarded even when execution fails or returns an invali
 test('public additions remain eligible when private text is unchanged or shorter than the content threshold', async t => {
   const { root, home, memory } = setup(t);
   put(memory, 'buckets/private/facts.md', 'Keep the existing owner.\nshort private\n');
-  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
     put(cwd, 'skills/example/SKILL.md', get(cwd, 'skills/example/SKILL.md') + 'Public correction. short private\n');
     return { decision: 'applied', reason: 'Retained a public correction.', owner: 'skills/example/SKILL.md' };
@@ -153,7 +153,7 @@ test('normalized private text is blocked across added lines in tracked and new f
     const { root, home, memory } = setup(t);
     const secret = 'SYNTHETIC confidential appointment is Tuesday at the blue observatory.';
     put(memory, 'buckets/private/facts.md', variant === 'whitespace' ? secret.replaceAll(' ', '\t  ') + '\r\n' : secret + '\n');
-    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
     const addition = variant === 'split' ? secret.replace('at the', 'at\nthe') : variant === 'case' ? secret.toLowerCase() : secret.toLowerCase().replaceAll(' ', '  \t');
     const target = untracked ? 'lessons/public.md' : 'skills/example/SKILL.md';
     const result = await runLearning(root, { home, execute: async ({ cwd }) => {
@@ -172,7 +172,7 @@ test('normalized private text is checked across separate diff hunks and new file
     const { root, home, memory } = setup(t), target = 'skills/example/SKILL.md';
     put(memory, 'buckets/private/facts.md', 'Synthetic confidential appointment is Tuesday.\n');
     put(root, target, 'first\nunchanged\nlast\n');
-    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
     const result = await runLearning(root, { home, execute: async ({ cwd }) => {
       await learningFileTool(cwd, 'Write', { path: target, content: 'first\nSYNTHETIC confidential\nunchanged\nlast\n' + (acrossFiles ? '' : 'appointment is Tuesday.\n') });
       if (acrossFiles) await learningFileTool(cwd, 'Write', { path: 'lessons/public.md', content: 'appointment is Tuesday.\n' });
@@ -194,7 +194,7 @@ test('removed private files retain lexical provenance matching', async t => {
 test('large public learning changes commit their complete content beyond the default diff buffer', async t => {
   const { root, home, memory } = setup(t), target = 'skills/example/SKILL.md';
   put(memory, 'buckets/private/facts.md', 'Synthetic confidential detail with spaces.\n');
-  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', text: 'Fix the existing owner.' }]));
+  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
   const content = get(root, target) + 'A public correction with no private data.\n'.repeat(40000);
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
     await learningFileTool(cwd, 'Write', { path: target, content });

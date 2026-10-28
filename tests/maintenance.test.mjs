@@ -35,7 +35,7 @@ for (const host of ['claude', 'codex']) test(`${host} jobs run after the install
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.source, resolve(newSource, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`));
     assert.equal(plan.host, host);
-    if (name === 'curate-skills') assert.deepEqual(plan.roots, [newSource]);
+    if (name === 'curate-skills') assert.deepEqual(plan.roots, [project, newSource]);
   }
   assert.equal(get(home, '.geppetto/machine.json'), registered);
   rmSync(cache, { recursive: true, force: true });

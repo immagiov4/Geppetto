@@ -1,18 +1,20 @@
 import { readFile, lstat, mkdir, rename, writeFile, appendFile, open } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { validateTurnPolicy, defaultTurnChecks } from './turn-checks.mjs';
+export async function launchLearning(event) {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('./learn-runner.mjs', import.meta.url))], { cwd: event.cwd, windowsHide: true, detached: true, shell: false, stdio: ['pipe', 'ignore', 'ignore'] }); await new Promise((done, reject) => { child.once('error', reject); child.once('spawn', done); });
+  child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(event)); child.unref(); }
 export class UsageError extends Error {}
 export const userHome = () => homedir();
 export const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 15000, ...options, windowsHide: true, shell: false });
 export function gitOutput(root, args, { execute = run, prefix = [], trim = true, label = 'Git operation', detail = true, ...options } = {}) {
   const result = execute('git', [...prefix, ...args], { cwd: root, timeout: 0, ...options });
   if (result.status !== 0) throw new Error(`${label} failed${detail ? `: ${result.stderr?.trim() || result.error?.message || 'unknown error'}` : '.'}`);
-  return trim ? result.stdout?.trim() ?? '' : result.stdout;
-}
+  return trim ? result.stdout?.trim() ?? '' : result.stdout; }
 export const isMain = url => process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === url;
 export async function cli(main) {
   try { process.exitCode = (await main(process.argv.slice(2))) ?? 0; }
@@ -39,8 +41,7 @@ export function parseArgs(args, { values = [], flags = [], repeat = [] } = {}) {
     } else if (arg in result) throw new UsageError(`Repeated option: ${arg}`);
     else result[arg] = args[++i];
   }
-  return result;
-}
+  return result; }
 export async function rejectSymlinks(path, { ancestors = true } = {}) {
   for (let current = resolve(path); ; current = dirname(current)) {
     try { if ((await lstat(current)).isSymbolicLink()) throw new Error(`${current}:1: Reconcile symbolic link before writing`); }
@@ -77,16 +78,14 @@ export async function claimFile(path, text = '') {
 }
 export function contained(root, path) {
   const rel = relative(resolve(root), resolve(path));
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel));
-}
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel)); }
 export function filesUnder(root, { skipLinks = false, excludeDirs = [] } = {}) {
   return readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en')).flatMap(entry => {
     const path = resolve(root, entry.name); if (entry.isSymbolicLink()) {
       if (skipLinks) return [];
       throw new Error(`${path}:1: Symbolic links require manual reconciliation`);
     }
-    return entry.isDirectory() ? excludeDirs.includes(entry.name) ? [] : filesUnder(path, { skipLinks, excludeDirs }) : entry.isFile() ? [path] : [];
-  });
+    return entry.isDirectory() ? excludeDirs.includes(entry.name) ? [] : filesUnder(path, { skipLinks, excludeDirs }) : entry.isFile() ? [path] : [];   });
 }
 /** Preserve hook groups and foreign handlers while removing owned commands. */
 export function filterHooks(settings, keep) {
@@ -95,17 +94,30 @@ export function filterHooks(settings, keep) {
 // Twenty calls catches tool-heavy work; five minutes also catches long single-command turns.
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
 export const reviewGateDefaults = { enabled: true, benchmark: null, threshold: 30, docGlobs: ['**/*.md', '**/*.mdx', '**/*.rst', '**/docs/**'], testGlobs: ['**/tests/**', '**/test/**', '**/fixtures/**', '**/*.test.*', '**/*.spec.*', '**/__tests__/**'] };
-export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, writeApproval: false });
-export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, turnChecks: structuredClone(defaultTurnChecks), hooks: { reviewGate: { ...reviewGateDefaults }, learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults() } });
+export const learningDefaults = JSON.parse(readFileSync(new URL('./learning-defaults.json', import.meta.url), 'utf8'));
+export function learningPolicy(config) {
+  const policy = { ...learningDefaults, ...config.hooks?.signalLearning, categories: config.categories ?? learningDefaults.categories };
+  if (!['minSessions', 'maxOpenKeys'].every(key => Number.isSafeInteger(policy[key]) && policy[key] > 0) || policy.outcomeWeeks !== undefined && (!Number.isSafeInteger(policy.outcomeWeeks) || policy.outcomeWeeks <= 0)) throw new UsageError('signalLearning needs positive minSessions, maxOpenKeys and optional outcomeWeeks.');
+  if (!Array.isArray(policy.categories) || !policy.categories.length || policy.categories.some(row => !row || !/^[a-z][a-z0-9-]*$/.test(row.id) || row.id === 'other' || ['definition', 'score'].some(key => typeof row[key] !== 'string' || !row[key].trim() || /[\r\n]/.test(row[key]))) || new Set(policy.categories.map(row => row.id)).size !== policy.categories.length) throw new UsageError('categories need unique {id, definition, score} entries on one line; other is reserved.');
+  return policy; }
+export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, writeApproval: false, minSessions: learningDefaults.minSessions, maxOpenKeys: learningDefaults.maxOpenKeys });
+export function foundationReport(config) {
+  const choices = { documentation: null, observability: null, ...config.foundations };
+  if (config.foundations !== undefined && (!config.foundations || typeof config.foundations !== 'object' || Array.isArray(config.foundations)) || Object.entries(choices).some(([name, value]) => !['documentation', 'observability'].includes(name) || value !== null && (typeof value !== 'string' || !value.trim()))) throw new UsageError('foundations needs documentation/observability choices as nonempty strings or null.');
+  return { ...choices, unset: Object.keys(choices).filter(name => choices[name] === null) }; }
+export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, foundations: { documentation: null, observability: null }, categories: structuredClone(learningDefaults.categories), turnChecks: structuredClone(defaultTurnChecks), hooks: { reviewGate: { ...reviewGateDefaults }, learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults() } });
 export async function ignoreLocalFiles(project, paths) {
   const ignorePath = resolve(project, '.geppetto/.gitignore'); for (const path of [dirname(ignorePath), ignorePath]) await rejectSymlinks(path, { ancestors: false });
   await mkdir(dirname(ignorePath), { recursive: true });
   let ignored = ''; try { ignored = await readFile(ignorePath, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const lines = ignored.split(/\r?\n/);
   // A later negation can reinclude a local file; restore its exclusion after it.
-  const lastNegation = lines.findLastIndex(line => line.startsWith('!'));
-  const missing = paths.filter(path => lines.lastIndexOf(path) <= lastNegation);
+  const lastNegation = lines.findLastIndex(line => line.startsWith('!')); const missing = paths.filter(path => lines.lastIndexOf(path) <= lastNegation);
   if (missing.length) await appendFile(ignorePath, `${ignored && !ignored.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+}
+export async function appendRecord(root, name, row) {
+  const path = resolve(root, `.geppetto/${name}.jsonl`); await ignoreLocalFiles(root, [`/${name}.jsonl`]); await rejectSymlinks(path);
+  await appendFile(path, JSON.stringify(row) + '\n', { mode: 0o600 });
 }
 export function validateConfig(config, file) {
   const fail = reason => { throw new Error(`${file}:1: Invalid Geppetto config: ${reason}`); };
@@ -116,14 +128,11 @@ export function validateConfig(config, file) {
   if (!config.pillars || Array.isArray(config.pillars) || Object.values(config.pillars).some(s => !['installed', 'declined', 'n/a'].includes(s))) fail('pillars must use installed, declined or n/a');
   if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks) || Object.entries(config.hooks).filter(([name]) => name in defaultConfig().hooks).some(([, h]) => !h || typeof h.enabled !== 'boolean' || !('benchmark' in h))) fail('hooks need enabled and benchmark');
   for (const key of ['minToolCalls', 'minDurationMs']) if (config.hooks.learnNudge?.[key] !== undefined && (!Number.isSafeInteger(config.hooks.learnNudge[key]) || config.hooks.learnNudge[key] <= 0)) fail(`hooks.learnNudge.${key} must be a positive integer`);
-  const learning = config.hooks.signalLearning;
-  const review = { ...reviewGateDefaults, ...config.hooks.reviewGate };
+  const learning = config.hooks.signalLearning; const review = { ...reviewGateDefaults, ...config.hooks.reviewGate };
   if (!Number.isSafeInteger(review.threshold) || review.threshold <= 0 || ![review.docGlobs, review.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string' && glob))) fail('hooks.reviewGate needs a positive threshold and arrays of nonempty globs');
   if (learning?.writeApproval !== undefined && typeof learning.writeApproval !== 'boolean') fail('hooks.signalLearning.writeApproval must be boolean');
-  validateMemory(config.memory, file);
-  validateTurnPolicy(config);
-  return config;
-}
+  validateMemory(config.memory, file); validateTurnPolicy(config); learningPolicy(config); foundationReport(config);
+  return config; }
 export function validateMemory(memory, file) {
   if (memory === undefined) return; if (!memory || typeof memory !== 'object' || Array.isArray(memory)) throw new Error(`${file}:1: memory must be an object`);
   if (memory.choice !== undefined && !['local', 'github', 'native', 'none'].includes(memory.choice)) throw new Error(`${file}:1: memory.choice must be local, github, native or none`);

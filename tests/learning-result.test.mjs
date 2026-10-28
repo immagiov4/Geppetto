@@ -12,7 +12,7 @@ test('a successful CLI reporting an inaccessible owner leaves the signal pending
   git(root, ['config', 'user.email', 'fixture@example.invalid']);
   put(root, 'README.md', '# Current project\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
   put(root, '.geppetto/config.json', { hooks: { signalLearning: { host: 'codex' } } });
-  put(root, '.geppetto/signals.jsonl', '{"id":"unresolved","text":"Communication owner is outside the project"}\n');
+  put(root, '.geppetto/signals.jsonl', '{"id":"unresolved","key":"unresolved","session":"fixture","source":"user","category":"workflow","status":"open","text":"Communication owner is outside the project"}\n');
   put(root, 'node_modules/@openai/codex/bin/codex.js', `
     const fs = require('node:fs');
     process.stdin.resume();
@@ -47,7 +47,7 @@ test('missing, malformed and contradictory assessments never consume pending evi
   git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']);
   git(root, ['config', 'user.email', 'fixture@example.invalid']);
   put(root, 'README.md', '# Project\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
-  put(root, '.geppetto/signals.jsonl', '{"id":"pending","text":"Assess this correction"}\n');
+  put(root, '.geppetto/signals.jsonl', '{"id":"pending","key":"pending","session":"fixture","source":"user","category":"workflow","status":"open","text":"Assess this correction"}\n');
   for (const assessment of [undefined, 0, { decision: 'no_change', reason: '', owner: 'README.md' },
     { decision: 'unknown', reason: 'Unknown.', owner: 'README.md' },
     { decision: 'applied', reason: 'Claims an edit that does not exist.', owner: 'README.md' }]) {

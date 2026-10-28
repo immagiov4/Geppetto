@@ -5,6 +5,8 @@ description: "Reuse existing primitives before adding machinery. Use before a ne
 
 # Reuse
 
+If `~/.geppetto/integrations.md` has a section for this skill, read it.
+
 Before adding a capability, prompt path or exception, inspect the existing skills, scripts, hooks, Git and harness tools that could compose it. Prefer a few reusable capabilities: a correction in their shared owner improves every caller. Search the current repository and trace actual callers before deciding that a new owner is needed. Keep established behaviour and validation when reusing or moving code.
 
 

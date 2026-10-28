@@ -19,10 +19,10 @@ test('every long turn receives internal learning context after a tool and Stop s
   await send('PreToolUse', 'first', 600); const nudge = await send('PostToolUse', 'first', 700);
   assert.deepEqual(Object.keys(nudge), ['hookSpecificOutput']);
   assert.equal(nudge.hookSpecificOutput.hookEventName, 'PostToolUse');
-  assert.match(nudge.hookSpecificOutput.additionalContext, /recurring friction.*signal\.mjs/);
-  assert.match(nudge.hookSpecificOutput.additionalContext, /reusable workflow.*verified fix.*user correction/);
-  assert.match(nudge.hookSpecificOutput.additionalContext, /before.*final reply/i);
-  assert.match(nudge.hookSpecificOutput.additionalContext, /lesson or decision rationale with no other owner.*bucket memory/);
+  assert.match(nudge.hookSpecificOutput.additionalContext, /Open keys:.*signal\.mjs/);
+  assert.match(nudge.hookSpecificOutput.additionalContext, /Use \$geppetto-learn/);
+  assert.match(nudge.hookSpecificOutput.additionalContext, /record once per session/);
+  assert.match(nudge.hookSpecificOutput.additionalContext, /configured order: security > verification > workflow > efficiency > communication > behavior/);
   assert.deepEqual(await send('PostToolUse', 'first', 750), {}, 'only duplicate reminders in this turn are suppressed');
   assert.deepEqual(await send('Stop', 'first', 800), {});
   await send('UserPromptSubmit', 'first', 900); await send('PreToolUse', 'first', 1000); await send('PreToolUse', 'first', 1100);
@@ -117,7 +117,7 @@ test('plugin reminder signal command runs from a project with no vendored script
   await handleEvent({ ...event, hook_event_name: 'PreToolUse' });
   const context = (await handleEvent({ ...event, hook_event_name: 'PostToolUse' })).hookSpecificOutput.additionalContext;
   const script = context.match(/node "([^"]+signal\.mjs)"/)?.[1]; assert.ok(script, context);
-  const result = invoke(script, ['Use the existing owner', '--metric', 'complexity'], { cwd });
+  const result = invoke(script, ['Use the existing owner', '--category', 'workflow', '--key', 'existing-owner', '--session', 'plugin-signal'], { cwd });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(get(cwd, '.geppetto/signals.jsonl')).text, 'Use the existing owner');
   assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);

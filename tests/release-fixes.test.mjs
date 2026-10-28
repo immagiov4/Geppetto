@@ -21,7 +21,7 @@ function project(t) {
 test('learner provider input redacts untruncated secrets in transcripts, signals and turn evidence', async t => {
   const root = project(t), home = fixture(t), secret = 'sk-proj-SYNTHETIC0123456789ABCDEF';
   put(root, '.geppetto/config.json', config());
-  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'secret', text: `No, fix api_key=${secret}` }]));
+  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'secret', key: 'secret', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: `No, fix api_key=${secret}` }]));
   put(root, '.geppetto/turns.jsonl', jsonl([{ ...decision, feedback: { applies: true, on: secret, action: 'Correct the credential owner.' }, sessionId: 'privacy', transcriptOffset: 0 }]));
   const transcript = resolve(home, 'transcript.jsonl');
   put(home, 'transcript.jsonl', jsonl([user(`No, fix api_key=${secret}`), { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: `echo ${secret}` } }, { type: 'tool_result', is_error: true, content: `Error: ${secret}` }] } }, { type: 'response_item', payload: { type: 'function_call_output', output: `Error: ${secret}` } }, user('No, keep this correction.')]));
@@ -38,7 +38,7 @@ test('private memory provenance excludes calls, unattributed outputs and summari
   for (const host of ['claude', 'codex']) {
     const root = project(t), home = fixture(t), marker = 'SYNTHETIC_PRIVATE_MEMORY_DETAIL';
     put(root, '.geppetto/config.json', config());
-    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'public', text: 'No, correct the public owner.' }, { id: 'private', text: `From buckets/private/facts.md: ${marker}` }]));
+    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'public', key: 'public', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'No, correct the public owner.' }, { id: 'private', key: 'private', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: `From buckets/private/facts.md: ${marker}` }]));
     put(root, '.geppetto/turns.jsonl', jsonl([{ ...decision, feedback: { applies: true, on: `buckets/private/facts.md: ${marker}`, action: 'Read the private fact.' }, sessionId: 'private', transcriptOffset: 0 }]));
     const before = jsonl([user('No, fix the public owner.')]);
     const calls = host === 'claude' ? [

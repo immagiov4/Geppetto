@@ -5,7 +5,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile } from './common.mjs';
-import { logHookEvent } from './hook-events.mjs';
+import { logHookEvent, logReads } from './hook-events.mjs';
+import { compileIntegrations } from './maintenance.mjs';
 import { redact } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
@@ -14,35 +15,30 @@ import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, c
 function sectionFeedback(body, cwd, runCommand) {
   const result = runCommand(process.execPath, [fileURLToPath(new URL('./gate-sections.mjs', import.meta.url)), '--pr', '-'], { cwd, input: body });
   if (result.status === 0) return 'Geppetto: PR sections pass.';
-  return `Geppetto PR feedback: ${redact(result.stderr?.trim() || result.error?.message || 'Section check failed')}. Update the PR body before publishing; CI repeats this check.`;
-}
+  return `Geppetto PR feedback: ${redact(result.stderr?.trim() || result.error?.message || 'Section check failed')}. Update the PR body before publishing; CI repeats this check.`; }
 const digest = text => createHash('sha256').update(text).digest('hex');
 const turnStatePath = (root, session) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}.json`);
 const decisionPath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `decision-${digest(session)}-${digest(turn)}.json`);
 const currentState = state => state && typeof state.turn === 'string' && typeof state.epoch === 'string' && typeof state.worktree === 'string' && typeof state.base === 'string' && typeof state.snapshot === 'string' ? state : null;
 const currentDecision = decision => decision && typeof decision.epoch === 'string' && decision.value && Array.isArray(decision.decisions) && decision.decisions.length ? decision : null;
 async function worktreeFingerprint(root) {
-  const status = gitOutput(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).geppetto/.gitignore'], { trim: false });
-  const gitRoot = gitOutput(root, ['rev-parse', '--show-toplevel']), hash = createHash('sha256').update(status), entries = status.split('\0').filter(Boolean);
+  const status = gitOutput(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).geppetto/.gitignore'], { trim: false }); const gitRoot = gitOutput(root, ['rev-parse', '--show-toplevel']), hash = createHash('sha256').update(status), entries = status.split('\0').filter(Boolean);
   for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i], name = entry.slice(3); if (/[RC]/.test(entry.slice(0, 2))) i++;
-    const stat = await lstat(resolve(gitRoot, name), { bigint: true }).catch(error => { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; });
+    const entry = entries[i], name = entry.slice(3); if (/[RC]/.test(entry.slice(0, 2))) i++; const stat = await lstat(resolve(gitRoot, name), { bigint: true }).catch(error => { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; });
     if (stat) hash.update(`${name}\0${stat.size}\0${stat.mtimeNs}\0${stat.ctimeNs}\n`);
   } return hash.digest('hex');
 }
 async function sessionStart(event, options) {
-  const memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory;
-  const root = await projectRoot(event.cwd ?? '.');
+  const memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
+  await compileIntegrations(root, options);
   if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return memory;
   const policy = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); if (!policy.checks.length) return memory;
   await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
   if (!await claimFile(`${turnStatePath(root, event.session_id)}.startup`)) return memory;
-  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }]));
-  const text = `Before the first file-modifying tool call of a turn, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\nJudge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
+  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }])); const text = `Before the first file-modifying tool call of a turn, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\nJudge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
   try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
   catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; }
-  return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } };
-}
+  return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
 const recordCommand = (session, turn) => `node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-turn '<json>' --session ${JSON.stringify(session)}${turn ? ` --turn ${JSON.stringify(turn)}` : ''}`;
 function turnDecision(value, checks) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new UsageError('Turn decision must be an object.');
@@ -54,20 +50,16 @@ function turnDecision(value, checks) {
     if (!section || typeof section[flag] !== 'boolean' || Object.keys(section).some(name => ![flag, ...reasons].includes(name))) throw new UsageError(`Turn ${id}.${flag} must be boolean with its declared fields.`);
     for (const name of reasons) if ((section[flag] || name in section) && (typeof section[name] !== 'string' || /[\r\n]/.test(section[name]) || section[flag] && placeholderReason(section[name]))) throw new UsageError(`Turn ${id}.${name} needs a meaningful one-line reason.`);
   }
-  return value;
-}
+  return value; }
 export async function recordTurn(root, session, turn, value) {
   const state = currentState(await jsonFile(turnStatePath(root, session), null)); turn ??= state?.turn;
   if (!state || state.turn !== turn) throw new UsageError('No matching active session and turn; use the command supplied by PreToolUse.');
-  const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && previous !== null;
-  const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
+  const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && previous !== null; const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
   if (renewed && value?.continuation) throw new UsageError('Renewed feedback requires an explicit decision.');
   turnDecision(value, renewed && value && Object.keys(value).every(key => ['feedback', 'userCorrection'].includes(key)) ? required : checks);
   const decidedAt = new Date().toISOString(); let requestedAt = decidedAt;
   try { requestedAt = await readFile(`${path}.${state.epoch}.requested`, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const merged = renewed ? { ...previous?.value, ...value } : value; if (renewed) delete merged.continuation;
-  const history = previous?.epoch === state.epoch ? previous.decisions.slice(0, -1) : previous?.decisions ?? [];
-  const decisions = [...history, { requestedAt, decidedAt, decision: merged }];
+  const merged = renewed ? { ...previous?.value, ...value } : value; if (renewed) delete merged.continuation; const history = previous?.epoch === state.epoch ? previous.decisions.slice(0, -1) : previous?.decisions ?? []; const decisions = [...history, { requestedAt, decidedAt, decision: merged }];
   await atomicJson(path, { value: merged, epoch: state.epoch, decisions }, { mode: 0o600 }); return merged;
 }
 async function editingEvent(root, state, statePath, event, policy) {
@@ -86,8 +78,7 @@ async function editingEvent(root, state, statePath, event, policy) {
   if (policy.checks.length && staged?.epoch !== state.epoch && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString())) {
     const needed = !staged || state.epoch === 'initial' ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
     await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: needed.map(check => check.id) }, event);
-    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };
-  }
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };   }
   await claimFile(`${path}.edited`); return {};
 }
 const reviewPolicy = async root => ({ ...reviewGateDefaults, ...(await jsonFile(resolve(root, '.geppetto/config.json'), {})).hooks?.reviewGate });
@@ -98,14 +89,10 @@ async function diffDigest(root, args, suffix) {
     child.stdout.on('data', chunk => hash.update(chunk)); child.stderr.on('data', chunk => { stderr += chunk; });
     child.once('error', reject); child.once('close', code => code === 0 ? done() : reject(new Error(`Git diff failed: ${stderr.trim() || code}`)));
   });
-  return hash.update(suffix).digest('hex');
-}
+  return hash.update(suffix).digest('hex'); }
 /** Only hashes leave this function: line fingerprints permit later comparisons without retaining source. */
 async function reviewSnapshot(root, base, policy) {
-  const git = args => gitOutput(root, args, { trim: false }); const excluded = [...policy.docGlobs, ...policy.testGlobs, '.geppetto/**', '.git/**'];
-  const files = [...new Set(git(['ls-files', '-c', '-o', '--exclude-standard', '-z']).split('\0').filter(Boolean))].sort();
-  const snapshot = [], changedPaths = []; let patch = '';
-  const changed = new Set(git(['diff', '--name-only', '--no-renames', '-z', base, '--']).split('\0').filter(Boolean)); const untracked = new Set(git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean));
+  const git = args => gitOutput(root, args, { trim: false }); const excluded = [...policy.docGlobs, ...policy.testGlobs, '.geppetto/**', '.git/**']; const files = [...new Set(git(['ls-files', '-c', '-o', '--exclude-standard', '-z']).split('\0').filter(Boolean))].sort(); const snapshot = [], changedPaths = []; let patch = ''; const changed = new Set(git(['diff', '--name-only', '--no-renames', '-z', base, '--']).split('\0').filter(Boolean)); const untracked = new Set(git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean));
   for (const name of new Set([...files, ...changed])) {
     if (name.startsWith('.geppetto/') || name.startsWith('.git/') || excluded.some(glob => matchesGlob(name, glob))) continue;
     if (changed.has(name)) changedPaths.push(name);
@@ -117,8 +104,7 @@ async function reviewSnapshot(root, base, policy) {
     for (const line of text.match(/[^\n]*\n|[^\n]+$/g) ?? []) snapshot.push(digest(`${name}\0${line}`));
     if (untracked.has(name)) patch += `${name}\0${digest(contents)}\n`;
   }
-  return { hash: changedPaths.length ? await diffDigest(root, ['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-renames', base, '--', ...changedPaths], patch) : digest(patch), snapshot: snapshot.length ? `${snapshot.join('\n')}\n` : '' };
-}
+  return { hash: changedPaths.length ? await diffDigest(root, ['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-renames', base, '--', ...changedPaths], patch) : digest(patch), snapshot: snapshot.length ? `${snapshot.join('\n')}\n` : '' }; }
 async function changedLines(root, before, after) {
   if (before === after) return 0;
   const prefix = resolve(root, '.geppetto/hook-state', randomUUID());
@@ -147,15 +133,14 @@ async function completionEvent(event) {
   if (kind === 'UserPromptSubmit' || !state || event.turn_id && state.turn !== event.turn_id) {
     await ignoreLocalFiles(root, ['/turns.jsonl', '/reviews.jsonl', '/hook-state/', '/hook-events.jsonl']);
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
-    state = { turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: 'initial', base, worktree: await worktreeFingerprint(root), ...(await reviewSnapshot(root, base, policy)) };
+    state = { transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: 'initial', base, worktree: await worktreeFingerprint(root), ...(await reviewSnapshot(root, base, policy)) };
     await atomicJson(statePath, state); if (kind === 'UserPromptSubmit') return {};
   }
+  if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
   if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})));
   if (kind !== 'Stop') return {};
   let reviews = ''; try { reviews = await readFile(resolve(root, '.geppetto/reviews.jsonl'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const records = reviews.trim().split('\n').filter(Boolean).map(JSON.parse), last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy);
-  const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null);
-  const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);
+  const records = reviews.trim().split('\n').filter(Boolean).map(JSON.parse), last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy); const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null); const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);
   let status = 'below-threshold';
   if (records.some(record => record.base === last.base && record.hash === current.hash)) status = 'reviewed';
   else if (policy.enabled && lines >= policy.threshold && sinceReview >= policy.threshold) status = 'block';
@@ -170,26 +155,23 @@ async function completionEvent(event) {
   await logHookEvent(root, { hook: 'reviewGate', status, lines, sinceReview, hash: current.hash }, event);
   if (staged && !block) {
     const marker = `${decisionPath(root, event.session_id, state.turn)}.recorded`; if (await claimFile(marker)) try {
-      const transcriptOffset = event.transcript_path ? (await lstat(event.transcript_path)).size : null; const decisions = staged.decisions, first = decisions[0];
-      const edited = await lstat(`${decisionPath(root, event.session_id, state.turn)}.edited`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
+      const transcriptOffset = event.transcript_path ? (await lstat(event.transcript_path)).size : null; const decisions = staged.decisions, first = decisions[0]; const edited = await lstat(`${decisionPath(root, event.session_id, state.turn)}.edited`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
       await appendFile(resolve(root, '.geppetto/turns.jsonl'), `${JSON.stringify({ ...staged.value, requestedAt: first.requestedAt, decidedAt: first.decidedAt, decisions, edited, addedSeconds: decisions.reduce((sum, d) => sum + Math.max(0, Date.parse(d.decidedAt) - Date.parse(d.requestedAt)) / 1000, 0), review: { status, lines, sinceReview, hash: current.hash }, sessionId: event.session_id, turnId: state.turn, previousTurnId: state.previousTurnId, ts: new Date().toISOString(), transcriptOffset })}\n`, { mode: 0o600 });
       await logHookEvent(root, { hook: 'turnGate', status: 'recorded' }, event);
     } catch (error) { await unlink(marker); throw error; }
   }
   let review_blocked = false; try { review_blocked = (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked };
-}
+  return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked }; }
 async function dispatch(event, { runCommand = run, now = Date.now, home, launchLearning } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
+  if (process.env.GEPPETTO_LEARNING_CHILD !== '1') await logReads(event, { home });
   if (event.hook_event_name === 'SessionStart') return process.env.GEPPETTO_LEARNING_CHILD === '1' ? {} : sessionStart(event, { home });
   const { review_blocked, ...review } = await completionEvent(event);
   if (review.hookSpecificOutput?.permissionDecision === 'deny') return review;
-  const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now, launchLearning);
-  const native = await nativeMemoryEvent(event, { home }); if (event.hook_event_name === 'UserPromptSubmit') return {};
+  const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now, launchLearning); const native = await nativeMemoryEvent(event, { home }); if (event.hook_event_name === 'UserPromptSubmit') return {};
   if (native.hookSpecificOutput) {
     if (learning.hookSpecificOutput) native.hookSpecificOutput.additionalContext += `\n${learning.hookSpecificOutput.additionalContext}`;
-    return native;
-  }
+    return native;   }
   if (['PostToolUse', 'Stop'].includes(event.hook_event_name)) return review.decision ? review : learning;
   if (typeof event.tool_name !== 'string' || !event.tool_input) throw new UsageError('Hook input needs tool_name and tool_input');
   const input = event.tool_input, eventName = event.hook_event_name ?? 'PreToolUse'; const command = toolCommand(event); const cwd = resolve(input.cwd ?? input.workdir ?? event.cwd ?? '.');
@@ -201,8 +183,7 @@ async function dispatch(event, { runCommand = run, now = Date.now, home, launchL
       catch (error) { feedback = `Geppetto: PR body file could not be checked (${error.code ?? 'read error'}). Run gate-sections.mjs --pr <file> before creating the PR.`; }
     } else if (body !== undefined) feedback = sectionFeedback(body, cwd, runCommand);
     else feedback = 'Geppetto: provide --body-file <file> and run gate-sections.mjs --pr <file> before creating the PR. CI checks the final PR body.';
-    return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };
-  }
+    return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };   }
   if (/\bgit\s+(?:-[^\s]+\s+)*push\b/.test(command)) {
     const pr = runCommand('gh', ['pr', 'view', '--json', 'body'], { cwd });
     let feedback = 'Geppetto: current PR body is unavailable. Run gate-sections.mjs --pr <body-file> before pushing; CI checks the final PR body.';
@@ -210,10 +191,8 @@ async function dispatch(event, { runCommand = run, now = Date.now, home, launchL
       try { const body = JSON.parse(pr.stdout).body; if (typeof body === 'string') feedback = sectionFeedback(body, cwd, runCommand); }
       catch { feedback = 'Geppetto: gh returned an unreadable PR body; run gate-sections.mjs --pr <body-file>. CI checks the final PR body.'; }
     }
-    return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };
-  }
-  return {};
-}
+    return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };   }
+  return {}; }
 export async function handleEvent(event, options) {
   try { return await dispatch(event, options); }
   catch (error) {
@@ -226,8 +205,7 @@ export async function handleEvent(event, options) {
       const marker = `${statePath}.${digest(event.turn_id ?? state?.turn ?? 'unknown')}.error`; if (await claimFile(marker)) try { await logHookEvent(root, { hook: 'completion', status: 'error', error: redact(error.message) }, event); }
       catch (cause) { await unlink(marker); throw cause; }
     } catch (cause) { console.error(`Stop diagnostic failed: ${redact(cause.message)}; original error: ${redact(error.message)}`); }
-    return {};
-  }
+    return {};   }
 }
 export const main = async args => {
   if (!args.length) try { return await hookMain(args, 'Hook', handleEvent); } catch (error) { console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); console.log('{}'); return 0; }

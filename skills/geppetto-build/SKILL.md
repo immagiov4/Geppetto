@@ -5,6 +5,8 @@ description: "Build product behaviour test-first at its existing owner. Use to i
 
 # Build
 
+If `~/.geppetto/integrations.md` has a section for this skill, read it.
+
 **Local fix.** For a qualified [local fix](../geppetto-spec/references/local-fix.md), follow its red → owner correction → green path, focused checks and PR/ticket Observability record, then hand off to `$geppetto-verify`. Load principle skills only for an unresolved concern. Otherwise follow the full path below.
 
 1. **Contract and red proof.** Fix the unit's approved contract and current source identity. Read `$geppetto-behaviour-tests`; write a behaviour test before product code and run it to establish failure for the intended reason. Reuse installed `tdd` when appropriate. An exploratory prototype may omit this step, with that status declared; promotion to product requires tests and refactoring. Complete when the observed failure proves the missing behaviour or the explicit prototype exemption is recorded.

@@ -22,7 +22,7 @@ test('learning sees current permitted project files without changing the user in
   put(root, 'private/fact.md', 'changed private value\n');
   put(root, '.env', 'OPENROUTER_API_KEY=synthetic-excluded\n');
   put(root, 'ignored/cache.txt', 'ignored material\n');
-  put(root, '.geppetto/signals.jsonl', '{"id":"current","text":"Use the owner of current behavior"}\n');
+  put(root, '.geppetto/signals.jsonl', '{"id":"current","key":"current","session":"fixture","source":"user","category":"workflow","status":"open","text":"Use the owner of current behavior"}\n');
   const stagedBefore = command(['diff', '--cached', '--binary']);
   const indexBefore = readFileSync(resolve(root, '.git/index'));
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
@@ -62,7 +62,7 @@ test('learning captures file-directory replacements in either direction, includi
     put(root, directoryFirst ? 'owner' : 'owner/new.mjs', 'current owner\n');
     command(['add', '-A']);
     const indexBefore = readFileSync(resolve(root, '.git/index'));
-    put(root, '.geppetto/signals.jsonl', '{"id":"replacement","text":"Check the current owner"}\n');
+    put(root, '.geppetto/signals.jsonl', '{"id":"replacement","key":"replacement","session":"fixture","source":"user","category":"workflow","status":"open","text":"Check the current owner"}\n');
     const result = await runLearning(root, { home, execute: async ({ cwd }) => {
       assert.equal(get(cwd, directoryFirst ? 'owner' : 'owner/new.mjs'), 'current owner\n');
       if (directoryFirst) assert.equal(existsSync(resolve(cwd, 'owner/old.mjs')), false);
@@ -83,7 +83,7 @@ test('Git text normalization in captured files does not become a false learning 
   put(root, 'app.mjs', 'export const behavior = "old";\n');
   command(['add', '.']); command(['commit', '-qm', 'baseline']);
   put(root, 'app.mjs', 'export const behavior = "current";\r\n');
-  put(root, '.geppetto/signals.jsonl', '{"id":"normalized","text":"Current behavior already covers the signal"}\n');
+  put(root, '.geppetto/signals.jsonl', '{"id":"normalized","key":"normalized","session":"fixture","source":"user","category":"workflow","status":"open","text":"Current behavior already covers the signal"}\n');
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
     assert.match(get(cwd, 'app.mjs'), /behavior = "current"/);
     return { decision: 'no_change', reason: 'Current behavior covers the signal.', owner: 'app.mjs' };
@@ -108,7 +108,7 @@ test('a dirty submodule is reported as excluded while ordinary current files rem
   command(root, ['update-index', '--add', '--cacheinfo', `160000,${dependencyHead},dependency`]);
   command(root, ['commit', '-qm', 'baseline']);
   put(root, 'dependency/lib.txt', 'dirty dependency\n'); put(root, 'app.mjs', 'current\n');
-  put(root, '.geppetto/signals.jsonl', '{"id":"submodule","text":"Inspect the current application"}\n');
+  put(root, '.geppetto/signals.jsonl', '{"id":"submodule","key":"submodule","session":"fixture","source":"user","category":"workflow","status":"open","text":"Inspect the current application"}\n');
   const indexBefore = readFileSync(resolve(root, '.git/index'));
   const result = await runLearning(root, { home, execute: async ({ cwd }) => {
     assert.equal(get(cwd, 'app.mjs'), 'current\n');

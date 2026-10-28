@@ -14,6 +14,7 @@ export function validateTurnPolicy(config) {
   }
 }
 export const decisionFields = id => ({ requirements: ['changes', 'what'], feedback: ['applies', 'on', 'action'], frustration: ['applies', 'cause', 'prevention'] })[id] ?? ['applies', 'reason'];
+export const userTurnDecision = row => row?.decisions?.[0]?.decision ?? row;
 export const toolName = event => typeof event.tool_name === 'string' ? event.tool_name.split(/[.:/]/).at(-1) : '';
 export const toolCommand = event => typeof event.tool_input === 'string' ? event.tool_input : event.tool_input?.command ?? event.tool_input?.cmd ?? '';
 export const modifyingTool = event => /^(write|edit|multiedit|apply_patch|(?:mcp__\w+__)?(?:write_file|write_text_file|append_file|edit_file|patch_file|create_file|delete_file|move_file))$/i.test(toolName(event));

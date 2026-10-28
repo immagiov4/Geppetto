@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Record documentation and observability foundations with the user, report unset choices and preserve agreed structure and realistic collection controls.
+
+- Group learning evidence by stable keys and distinct sessions, with immediate action on flagged user feedback and configurable agent thresholds.
+- Record one ordered, configurable problem category per episode, preserve secondary effects as attributes and retain legacy metric values as historical evidence.
+- Link learning changes to evidence, retain unresolved occurrences and report recurrence and changed pages without observed reads.
+- Log local skill/memory reads and compile installed companion guidance for each Geppetto skill, with a portable catalog and evidence-backed maintenance proposals.
+
+
 ## 0.4.0
 
 - Decide requirements, incoming feedback and frustration before native file edits or after observed shell changes, with configurable questions and skills; edit-free turns close without a decision request.

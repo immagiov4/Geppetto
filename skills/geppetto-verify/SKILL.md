@@ -5,6 +5,8 @@ description: "Verify a candidate proportionately: current-revision checks, indep
 
 # Verify
 
+If `~/.geppetto/integrations.md` has a section for this skill, read it.
+
 **Local fix.** For a qualified [local fix](../geppetto-spec/references/local-fix.md), run its focused affected-file checks and regressions, inspect the diff and validate PR/ticket Observability, then continue with steps 3–7 below. Load principle skills only for an unresolved concern. Otherwise use the full path.
 
 1. **Choose evidence.** State risk, change type and applicable project rules. A typo may need only a light check and no PR. Use the existing requirements map; read `$requirements-blast-radius` when evidence exposes an uncovered surface or changes the agreed outcome. Complete when the selected verification profile and its reasons are recorded.

@@ -63,7 +63,7 @@ test('long Stop starts runner directly after a previous PostToolUse reminder and
 test('explicit signals still start learning when the reminder is disabled', async t => {
   const cwd = project(t), starts = [];
   put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: false }, reviewGate: { enabled: false } } });
-  put(cwd, '.geppetto/signals.jsonl', '{"id":"explicit","text":"A verified correction"}\n');
+  put(cwd, '.geppetto/signals.jsonl', '{"id":"explicit","key":"explicit","session":"fixture","source":"user","category":"workflow","status":"open","text":"A verified correction"}\n');
   const event = { cwd, session_id: 'explicit', turn_id: 'one', hook_event_name: 'Stop' };
   const options = { launchLearning: async event => { starts.push(event); } };
   assert.deepEqual(await handleEvent(event, options), {});
@@ -88,6 +88,7 @@ test('runner processes only new slice, retries blockers, and makes no call for a
   const execute = async request => { calls++; prompt = request.prompt; return { decision: 'no_change', reason: 'The README already covers it.', owner: 'README.md' }; };
   assert.equal((await runLearning(root, { home, context: event, execute })).status, 'no-candidate'); assert.equal(calls, 0);
   const old = get(root, 'chat.jsonl'); put(root, 'chat.jsonl', old + encode([user('No, this correction matters.')]));
+  put(root, '.geppetto/signals.jsonl', encode([{ id: 'explicit-correction', key: 'explicit-correction', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'The user supplied a correction.' }]));
   const blocked = await runLearning(root, { home, context: event, execute: async () => ({ decision: 'blocked', reason: 'Owner inaccessible.', owner: 'external' }) }); assert.equal(blocked.status, 'blocked');
   await runLearning(root, { home, context: event, execute }); assert.equal(calls, 1); assert.match(prompt, /correction matters/); assert.doesNotMatch(prompt, /Please read the file/);
   assert.equal((await runLearning(root, { home, context: event, execute })).status, 'idle'); assert.equal(calls, 1);
@@ -100,6 +101,7 @@ test('learner admits scope and frustration calibration across cursor boundaries 
     put(root, '.geppetto/turns.jsonl', encode([{ sessionId: 'calibration', turnId: 'one', transcriptOffset: Buffer.byteLength(old), requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false }, review: { status: 'below-threshold' } }]));
     assert.equal((await runLearning(root, { home, context: event })).status, 'no-candidate');
     put(root, 'chat.jsonl', old + encode([user(correction), assistant('I will correct it.')]));
+    put(root, '.geppetto/signals.jsonl', encode([{ id: 'explicit-calibration', key: 'explicit-calibration', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: correction }]));
     const result = await runLearning(root, { home, context: event, execute: async request => {
       prompt = request.prompt;
       return { decision: 'no_change', reason: `Evaluated ${field} mismatch against the original request; the existing owner covers it.`, owner: 'README.md' };
@@ -117,11 +119,12 @@ test('turn evidence excludes other sessions and records without a following user
   const result = await runLearning(root, { home, context: { cwd: root, session_id: 'this', transcript_path: path, learning_qualified: true }, execute: async () => { calls++; } });
   assert.equal(result.status, 'no-candidate'); assert.equal(calls, 0);
 });
-test('the shipped Stop dispatch launches a detached worker without a signal and uses the subscription adapter', async t => {
+test('the shipped Stop dispatch launches a detached worker for eligible evidence and uses the subscription adapter', async t => {
   // Windows can retain the exited worker's cwd briefly; retry only this process-owning fixture's removal.
   const cleanup = { maxRetries: 3 }, cwd = project(t, cleanup), home = fixture(t, cleanup), transcript_path = resolve(home, 'chat.jsonl');
   put(home, 'chat.jsonl', encode([user('No, correct the documented owner.'), assistant('The existing README covers it.')]));
   put(home, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs');let prompt='';process.stdin.on('data',d=>prompt+=d);process.stdin.on('end',()=>{const a=process.argv.slice(2);fs.writeFileSync(${JSON.stringify(resolve(home, 'received.json'))},JSON.stringify({prompt,args:a,workerPid:process.ppid}));fs.writeFileSync(a[a.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'README already covers this correction.',owner:'README.md'}));});`);
+  put(cwd, '.geppetto/signals.jsonl', encode([{ id: 'eligible', key: 'owner', session: 'user', source: 'user', category: 'workflow', status: 'open', text: 'Correct the documented owner.' }]));
   const env = { PATH: `${home}${delimiter}${process.env.PATH}` }, event = { cwd, session_id: 'detached', turn_id: 'one', transcript_path, tool_name: 'Read', tool_input: {} };
   for (const name of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) {
     const result = invoke('hook.mjs', [], { cwd, home, env, input: JSON.stringify({ ...event, hook_event_name: name }) }); assert.equal(result.status, 0, result.stderr);
@@ -131,7 +134,7 @@ test('the shipped Stop dispatch launches a detached worker without a signal and 
   while (!existsSync(resolve(cwd, '.geppetto/learning.json')) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
   assert.equal(JSON.parse(get(cwd, '.geppetto/learning.json')).status, 'unchanged');
   assert.match(JSON.parse(get(home, 'received.json')).prompt, /correct the documented owner/);
-  assert.equal(existsSync(resolve(cwd, '.geppetto/signals.jsonl')), false);
+  assert.match(get(cwd, '.geppetto/signals.jsonl'), /resolved/);
   while (existsSync(resolve(home, '.geppetto/learn.lock')) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
   assert.equal(existsSync(resolve(home, '.geppetto/learn.lock')), false);
   const { workerPid } = JSON.parse(get(home, 'received.json'));

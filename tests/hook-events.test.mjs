@@ -33,7 +33,7 @@ test('learning reminders expose native identifiers alongside existing deduplicat
 test('background learning errors retain the triggering session and turn', t => {
   const cwd = fixture(t), home = fixture(t); git(cwd, ['init', '-q']);
   put(cwd, '.geppetto/config.json', { hooks: { signalLearning: { enabled: true } } });
-  put(cwd, '.geppetto/signals.jsonl', '{"id":"pending","text":"Retain the correction"}\n');
+  put(cwd, '.geppetto/signals.jsonl', '{"id":"pending","key":"pending","session":"fixture","source":"user","category":"workflow","status":"open","text":"Retain the correction"}\n');
   const result = invoke('learn-runner.mjs', [], { cwd, home, input: JSON.stringify({ cwd, session_id: 'learning-session', turn_id: 'learning-turn', hook_event_name: 'Stop' }) });
   assert.equal(result.status, 1);
   const [row] = records(cwd);

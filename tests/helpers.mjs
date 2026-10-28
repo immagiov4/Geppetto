@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve, dirname, basename } from 'node:path';
+import { resolve, dirname, basename, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, spawn } from 'node:child_process';
 
@@ -30,8 +30,9 @@ export function invoke(script, args = [], { cwd = repo, home = cwd, input = '', 
     if (temporary) {
       const jobs = Object.fromEntries(['curate-skills', 'maintain-memory'].map(name => [name, { scheduler: 'fixture', id: name, cadence: 'weekly', nextRun: '2026-11-02T09:00:00', disable: `fixture disable ${name}`, ...(args.includes('--uninstall') ? { status: 'disabled' } : {}) }]));
       put(temporary, 'jobs.json', jobs); args = [...args, '--scheduler-jobs', resolve(temporary, 'jobs.json')];
+      for (const [pkg, script] of [['@openai/codex', 'codex.js'], ['@anthropic-ai/claude-code', 'cli.js']]) put(temporary, `node_modules/${pkg}/bin/${script}`, "console.log('[]');");
     }
-    return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, ...env } });
+    return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex'), ...(temporary ? { PATH: `${temporary}${delimiter}${process.env.PATH}` } : {}), ...env } });
   } finally { if (temporary) rmSync(temporary, { recursive: true, force: true }); }
 }
 export function parallel(script, args, { cwd, home = cwd }) {

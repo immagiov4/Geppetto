@@ -5,6 +5,8 @@ description: "Install, update, inspect or remove Geppetto in a project."
 
 # Install Geppetto
 
+If `~/.geppetto/integrations.md` has a section for this skill, read it.
+
 1. **Look.** Run `node <adopt>/scripts/audit.mjs --project <project> --json`. Read project instructions and the machine registry. Inspect plugins, scheduler jobs and memory before adding equivalents. Complete when reusable resources and prerequisites are known.
 2. **Choose.** An installation request is the yes, including a request containing the repository link. Reuse configured machine memory. Otherwise include the four [memory choices](references/installation.md#memory) in the single install question, alongside hooks, learning and maintenance jobs. Only when OpenRouter is missing, offer its key once through private secret entry for semantic screening in `$requirements-blast-radius`. Complete when installation, memory and any key choice are known.
 3. **Install.** Follow [installation](references/installation.md), including plugin reuse, native scheduler attachment and local branch/commit. The install request covers creating `geppetto-install` and committing Geppetto's own files there; nothing is pushed. After plugin bootstrap, read this entry directly from its installed path and continue in the same session. Complete when gates and hook checks pass, jobs are attached or the actual blocker is named, and the local commit exists.

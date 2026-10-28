@@ -1,0 +1,36 @@
+{
+  "minSessions": 2,
+  "maxOpenKeys": 10,
+  "categories": [
+    {
+      "id": "security",
+      "definition": "Exposure, modification or access beyond authorized boundaries, including data loss.",
+      "score": "Confirmed episodes of unauthorized access or disclosure per 100 turns involving protected data or operations."
+    },
+    {
+      "id": "verification",
+      "definition": "Missing, incomplete or misleading checks that prevent a result from being established correctly.",
+      "score": "Confirmed findings about evidence or checks per 100 reviewed deliveries; record false positives and false negatives separately."
+    },
+    {
+      "id": "workflow",
+      "definition": "Work deviates from instructions, authorization or the agreed completion condition.",
+      "score": "Confirmed corrections about instructions or premature stops per 100 tasks; count each episode once."
+    },
+    {
+      "id": "efficiency",
+      "definition": "Work consumes avoidable time, computation or money, with no security violation as the primary problem.",
+      "score": "Attributable additional minutes or cost per comparable task against a measured baseline; also record episodes per 100 tasks."
+    },
+    {
+      "id": "communication",
+      "definition": "Text, updates or interactions make the result difficult to understand or use.",
+      "score": "Explicit corrections about clarity or interaction per 100 deliveries or turns, keeping the two denominators distinct."
+    },
+    {
+      "id": "behavior",
+      "definition": "The delivered product, document or tool produces an incorrect, incomplete or unavailable result.",
+      "score": "Confirmed behavioral defects per 100 reviewed changes or deliveries; distinguish pre-release findings from observed post-release regressions."
+    }
+  ]
+}

@@ -5,6 +5,8 @@ description: "Memory: retrieve durable knowledge and decision rationale, save au
 
 # Memory
 
+If `~/.geppetto/integrations.md` has a section for this skill, read it.
+
 Bucket memory lives in one Git repository of Markdown (private when it holds personal material), cloned locally and declared in `~/.geppetto/config.json`. The memory repository holds knowledge; these update rules live in this skill.
 
 1. **Resolve.** Use an explicit task destination first, then user `~/.geppetto/config.json` defaults overridden by project `.geppetto/config.json`. Resolve `repo`, `localPath` and linked `buckets`; a project bucket array takes precedence over its legacy `projectBucket`. Verify the checkout's remote identity. Complete when destination and linked buckets are known.
