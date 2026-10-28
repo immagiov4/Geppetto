@@ -108,6 +108,6 @@ async function classifyContext(event, { project, home = userHome(), provider, au
     try { await authorization.settle(runId, costUsd); }
     catch (failure) { text = ''; status = 'error'; error = redact(failure.message).replace(/\s+/g, ' '); }
   }
-  await logHookEvent(project, { hook, event: 'UserPromptSubmit', status, modelCalls, costUsd: unknownCosts === 0 ? costUsd : null, reservationId: reserved ? runId : undefined, injectedBytes: Buffer.byteLength(text), durationMs: Date.now() - started, ...(error ? { error } : {}) });
+  await logHookEvent(project, { hook, event: 'UserPromptSubmit', status, modelCalls, costUsd: unknownCosts === 0 ? costUsd : null, reservationId: reserved ? runId : undefined, injectedBytes: Buffer.byteLength(text), durationMs: Date.now() - started, ...(error ? { error } : {}) }, event);
   return text ? { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: text } } : {};
 }

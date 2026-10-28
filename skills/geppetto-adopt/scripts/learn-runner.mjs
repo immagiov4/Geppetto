@@ -73,7 +73,7 @@ export async function executeLearning({ cwd, prompt, host, model, reasoningEffor
 }
 
 /** One machine lock covers the complete signal snapshot, CLI run and local commit. */
-export async function runLearning(root, { home = userHome(), execute = executeLearning } = {}) {
+export async function runLearning(root, { home = userHome(), execute = executeLearning, context: event = {} } = {}) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1') return { status: 'child' };
   const policy = (await jsonFile(resolve(root, '.geppetto/config.json'), {})).hooks?.signalLearning ?? {};
   if (policy.enabled === false) return { status: 'disabled' };
@@ -98,7 +98,7 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
     if (assessment.decision === 'blocked') {
       const result = { status: 'blocked', branch, path, ...context, assessment, lastId: state.lastId ?? null };
       await ignoreLocalFiles(root, ['/learning.json']);
-      await atomicJson(statePath, result); await logHookEvent(root, { hook: 'learning', ...result }); return result;
+      await atomicJson(statePath, result); await logHookEvent(root, { hook: 'learning', ...result }, event); return result;
     }
     if (git(path, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'])) throw new Error('Learning output is ignored by Git; inspect the retained worktree.');
     const paths = git(path, ['ls-files', '--modified', '--deleted', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
@@ -109,7 +109,7 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
     if (status === 'committed') git(path, ['-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'learn: retain reusable improvement']);
     await ignoreLocalFiles(root, ['/learning.json']);
     const result = { status, branch, path, ...context, assessment, lastId: pending.at(-1).id };
-    await atomicJson(statePath, result); await logHookEvent(root, { hook: 'learning', ...result }); return result;
+    await atomicJson(statePath, result); await logHookEvent(root, { hook: 'learning', ...result }, event); return result;
   } finally { await lock.close(); await unlink(lockPath); }
 }
 
@@ -117,8 +117,8 @@ export async function main(args) {
   if (args.length) throw new Error('Usage: learn-runner.mjs < hook-event.json');
   const event = JSON.parse(readFileSync(0, 'utf8'));
   const root = await projectRoot(event.cwd ?? '.');
-  try { await runLearning(root); }
-  catch (error) { await logHookEvent(root, { hook: 'learning', status: 'error', error: error.message }); return 1; }
+  try { await runLearning(root, { context: event }); }
+  catch (error) { await logHookEvent(root, { hook: 'learning', status: 'error', error: error.message }, event); return 1; }
   console.log('{}'); return 0;
 }
 if (isMain(import.meta.url)) await cli(main);

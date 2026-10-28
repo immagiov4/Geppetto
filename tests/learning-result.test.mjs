@@ -22,19 +22,24 @@ test('a successful CLI reporting an inaccessible owner leaves the signal pending
     });
   `);
   process.env.PATH = `${root}${delimiter}${old.PATH}`;
-  const result = await runLearning(root, { home });
+  const context = { session_id: 'origin-session', turn_id: 'origin-turn' };
+  const result = await runLearning(root, { home, context });
   assert.equal(result.status, 'blocked');
   const state = JSON.parse(get(root, '.geppetto/learning.json'));
   assert.notEqual(state.lastId, 'unresolved');
   assert.equal(state.assessment.owner, 'writing-for-humans');
   assert.match(state.assessment.reason, /outside the permitted scope/);
+  const blockedEvent = JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim());
+  assert.equal(blockedEvent.sessionId, context.session_id); assert.equal(blockedEvent.turnId, context.turn_id);
   let prompt;
-  const retry = await runLearning(root, { home, execute: async request => {
+  const retry = await runLearning(root, { home, context: { ...context, turn_id: 'retry-turn' }, execute: async request => {
     prompt = request.prompt;
     return { decision: 'no_change', reason: 'The existing communication procedure already covers this correction.', owner: 'writing-for-humans' };
   } });
   assert.match(prompt, /unresolved/); assert.equal(retry.status, 'unchanged');
   assert.equal(JSON.parse(get(root, '.geppetto/learning.json')).lastId, 'unresolved');
+  const retryEvent = JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim().split('\n').at(-1));
+  assert.equal(retryEvent.sessionId, context.session_id); assert.equal(retryEvent.turnId, 'retry-turn');
 });
 
 test('missing, malformed and contradictory assessments never consume pending evidence', async t => {

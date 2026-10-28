@@ -51,7 +51,7 @@ export async function nativeMemoryEvent(event, { home = userHome() } = {}) {
   await lock.close();
   const inBucket = directory && contained(resolve(memory.localPath, 'buckets'), directory) && touched.some(path => contained(directory, path));
   const text = inBucket ? 'You saved to native memory inside bucket memory; keep the bucket index in step through $geppetto-memory.' : 'You saved to native memory. If it is a durable, generalizable lesson, also save it to bucket memory through $geppetto-memory.';
-  try { await logHookEvent(project, { hook: 'nativeMemory', event: 'PostToolUse', session, turn, inBucket: Boolean(inBucket), injectedBytes: Buffer.byteLength(text), modelCalls: 0, costUsd: 0 }); }
+  try { await logHookEvent(project, { hook: 'nativeMemory', event: 'PostToolUse', session, turn, inBucket: Boolean(inBucket), injectedBytes: Buffer.byteLength(text), modelCalls: 0, costUsd: 0 }, event); }
   catch (error) { await unlink(marker); throw error; }
   return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } };
 }
@@ -82,7 +82,7 @@ export async function handleMemoryEvent(event, options = {}) {
     if (!memory) return {};
     text = await sessionContext(memory);
   } catch (error) { status = 'unavailable'; text = `Memory is configured but unavailable: ${redact(error.message).replace(/\s+/g, ' ')}`; }
-  await logHookEvent(project, { hook: 'memory', event: name, status, injectedBytes: Buffer.byteLength(text), modelCalls: 0, costUsd: 0 });
+  await logHookEvent(project, { hook: 'memory', event: name, status, injectedBytes: Buffer.byteLength(text), modelCalls: 0, costUsd: 0 }, event);
   return { hookSpecificOutput: { hookEventName: name, additionalContext: text } };
 }
 

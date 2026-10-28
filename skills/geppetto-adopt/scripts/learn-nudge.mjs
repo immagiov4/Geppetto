@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile, open, unlink } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults } from './common.mjs';
+import { logHookEvent } from './hook-events.mjs';
 
 async function projectRoot(cwd) {
   for (let root = resolve(cwd); ; root = dirname(root)) {
@@ -45,7 +46,7 @@ export async function learningEvent(event, now) {
   try { marker = await open(fired, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return {}; throw error; }
   await marker.close();
   const entry = { hook: 'learnNudge', event: kind, session, turn, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
-  try { await appendFile(resolve(root, '.geppetto/hook-events.jsonl'), `${JSON.stringify(entry)}\n`, { mode: 0o600 }); }
+  try { await logHookEvent(root, entry, event); }
   catch (error) { await unlink(fired); throw error; }
   return { hookSpecificOutput: { hookEventName: kind, additionalContext: 'Before your final reply, use $geppetto-learn to improve the existing owner when this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node .geppetto/bin/signal.mjs "<lesson>" --metric <affected-metric> from the project root; a reusable lesson or decision rationale with no other owner goes to bucket memory through $geppetto-memory. Keep this routine check internal and continue the requested task. ' } };
 }

@@ -4,13 +4,17 @@ The plugin supplies global hooks. The installer reuses them with `--plugin-hooks
 
 ## Activation
 
-After installing, changing or curating a hook, synchronize every authorized copy and complete activation of the final definition in each affected harness and project. An authorized hook change, including a metric-justified improvement already authorized by the user, includes its activation; do not ask for consent again for that completion. A change to permissions or effects beyond the approved change is a separate decision.
+After installing, changing or curating a hook, synchronize every authorized copy and complete activation of the final definition in each affected harness and project. Finish package refreshes, including a Git-backed plugin cache's revision update, before approving its hashes; a later refresh can invalidate the approval even when hook commands stay the same. An authorized hook change, including a metric-justified improvement already authorized by the user, includes its activation; do not ask for consent again for that completion. A change to permissions or effects beyond the approved change is a separate decision.
 
 - **Codex:** inspect the current definitions with `node <adopt>/scripts/codex-hook-trust.mjs --project <project> --plugin <actual-plugin-id>` (or `--source <hooks-file>` or repeated `--key <key>`). After reviewing the authorized scope, run the same command with `--approve`. The helper approves enabled, non-managed hooks in that scope using current hashes and rereads them; inspect its output for disabled hooks, warnings and trust status. A changed payload, command or configuration can invalidate trust. Verify the final hashes and an actual hook event in the same Codex harness and project that will run it; a separate app-server inventory alone is not proof of execution.
 - **Claude Code:** settings edits are normally picked up by its file watcher. Confirm the intended hook is enabled and observed in the target session; reload the plugin or start a fresh session if that session has not loaded the final definition. Use the native `/hooks` view and debug output when needed.
 - **Hermes:** enable the installed plugin with `hermes plugins enable <name>` in the intended profile, then ensure the serving process has loaded the final version (restart or reload it where required). Verify the hook's effect in that same profile and serving process. A plugin on disk or an enabled flag alone is not proof that its hook is running.
 
 If activation cannot be completed, report the exact blocker and leave the hook's active state unclaimed. Keep changes within the authorized installation and project scope.
+
+## Result attribution
+
+Result records in the project's ignored `.geppetto/hook-events.jsonl` include `sessionId` and `turnId` when the triggering harness supplies them. Match these identifiers to the session being investigated before attributing a result: probes and other sessions can write to the same project log. Historical records and events from harnesses without identifiers remain unattributed. The log records selected Geppetto outcomes; native `hook/started` and `hook/completed` events identify failures before a script starts, including Codex plugin-content approval failures.
 
 ## Suggestions
 
