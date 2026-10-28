@@ -4,11 +4,9 @@ import { tmpdir } from 'node:os';
 import { resolve, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cli, isMain, parseArgs, UsageError, run, jsonFile } from './common.mjs';
-
 const gate = fileURLToPath(new URL('./gate-sections.mjs', import.meta.url));
 const filesPerPage = 100; // GitHub's maximum page size.
 const maxChangedFiles = 3000; // GitHub's PR-files endpoint response limit.
-
 async function githubRequest(path, { raw = false } = {}) {
   const response = await fetch(`${process.env.GITHUB_API_URL ?? 'https://api.github.com'}${path}`, {
     headers: { Accept: raw ? 'application/vnd.github.raw+json' : 'application/vnd.github+json', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) }
@@ -16,12 +14,10 @@ async function githubRequest(path, { raw = false } = {}) {
   if (!response.ok) throw new Error(`GitHub document request failed (HTTP ${response.status})`);
   return raw ? response.text() : response.json();
 }
-
 function safeDocumentPath(path) {
   if (typeof path !== 'string' || !path || /[\\:\x00-\x1f]/.test(path) || posix.isAbsolute(path) || posix.normalize(path) !== path || path === '..' || path.startsWith('../')) throw new Error('Invalid changed document path');
   return path;
 }
-
 async function changedPaths(event, request) {
   const files = [];
   for (let page = 1; ; page++) {
@@ -32,9 +28,7 @@ async function changedPaths(event, request) {
   }
   return files.sort();
 }
-
 const docsRoot = config => safeDocumentPath(posix.normalize(config.docs?.root ?? 'docs').replace(/\/$/, ''));
-
 // A PR that edits the contract is checked against base and incoming contracts; head config is read as data.
 async function contract(base, changed, head, request) {
   if (!changed.includes('.geppetto/config.json')) return { config: base, roots: [docsRoot(base)] };
@@ -44,7 +38,6 @@ async function contract(base, changed, head, request) {
   const featureDocs = [...new Set([...(base.sections?.featureDocs ?? ['Observability']), ...(incoming.sections?.featureDocs ?? [])])];
   return { config: { ...base, sections: { ...base.sections, featureDocs } }, roots: [...new Set([docsRoot(base), docsRoot(incoming)])] };
 }
-
 async function changedDocs(event, { cwd, request, execute }) {
   const repository = event.repository?.full_name, head = event.pull_request.head;
   const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -71,14 +64,12 @@ async function changedDocs(event, { cwd, request, execute }) {
     return report(result);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
-
 function report(result) {
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) console.error(result.error.message);
   return result.status === 0 ? 0 : 1;
 }
-
 export async function main(args, { cwd = process.cwd(), request = githubRequest, execute = run } = {}) {
   const opts = parseArgs(args, { values: ['--event'], flags: ['--docs'] });
   const eventPath = opts['--event'] ?? process.env.GITHUB_EVENT_PATH;
@@ -89,5 +80,4 @@ export async function main(args, { cwd = process.cwd(), request = githubRequest,
   if (opts['--docs']) return changedDocs(event, { cwd, request, execute });
   return report(execute(process.execPath, [gate, '--pr', '-'], { cwd, input: event.pull_request.body ?? '' }));
 }
-
 if (isMain(import.meta.url)) await cli(main);

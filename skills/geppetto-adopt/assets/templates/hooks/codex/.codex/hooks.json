@@ -32,15 +32,6 @@
             "timeout": 30
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/learn-runner.mjs\"",
-            "async": true
-          }
-        ]
       }
     ],
     "SessionStart": [

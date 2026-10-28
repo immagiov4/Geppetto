@@ -1,7 +1,6 @@
 import { appendFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { cli, isMain, parseArgs, UsageError, ignoreLocalFiles } from './common.mjs';
-
 export function redact(text) {
   return text.replace(/\b(?:sk-(?:proj-|or-v1-)?[a-z\d_-]{12,}|gh[pousr]_[a-z\d_]{12,}|github_pat_[a-z\d_]{12,}|AKIA[A-Z\d]{16})\b/gi, '[REDACTED]')
     .replace(/\b(Bearer)\s+[^\s"']+/gi, '$1 [REDACTED]')
@@ -9,7 +8,6 @@ export function redact(text) {
     .replace(/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g, '[REDACTED]')
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[REDACTED]@');
 }
-
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--metric', '--scope', '--kind', '--episode', '--source'] });
   const kind = opts['--kind'] ?? 'friction';
@@ -20,5 +18,4 @@ export async function main(args) {
   await appendFile('.geppetto/signals.jsonl', `${JSON.stringify(entry)}\n`, { mode: 0o600 });
   console.log(`Signal recorded: ${entry.id}`); return 0;
 }
-
 if (isMain(import.meta.url)) await cli(main);

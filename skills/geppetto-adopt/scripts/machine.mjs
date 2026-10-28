@@ -19,7 +19,6 @@ async function stopJobs(machine, path, jobs, unscheduler, execute) {
     await atomicJson(path, machine);
   }
 }
-
 async function attachJobs(machine, path, registry, { home, harness, source, jobs, scheduler, addJobs, machineName }) {
   const previousJobs = { ...machine.jobs };
   const claim = rows => maintenanceJobs.map(name => {
@@ -52,7 +51,6 @@ async function attachJobs(machine, path, registry, { home, harness, source, jobs
     });
   }
 }
-
 /** Reuse machine resources; hook commands point to the recorded package source. */
 export async function reconcileMachine(project, target, source, { pluginHooks = false, uninstall = false, home = userHome(), jobs = {}, scheduler = scheduleMaintenance, unscheduler = disableMaintenance, memoryChoice, addJobs = [], machineName = hostname(), execute = run, uninstallMemory } = {}) {
   for (const [name, job] of Object.entries(jobs)) if (!maintenanceJobs.includes(name) || ['id', 'scheduler', 'cadence', 'nextRun', 'disable'].some(key => typeof job?.[key] !== 'string' || !job[key].trim())) throw new Error('Scheduler registrations need name, id, scheduler, cadence, nextRun and disable command');

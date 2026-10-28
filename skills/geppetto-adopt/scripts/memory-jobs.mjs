@@ -3,16 +3,13 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { exists, run } from './common.mjs';
 import { syncMemory, memoryWritePath, memoryGit } from './memory-setup.mjs';
-
 const header = '# Maintenance jobs\n\n| Machine | Job | Scheduler | Cadence | Registered |\n|---|---|---|---|---|\n';
 const cell = value => {
   const text = String(value);
   if (!text.trim() || /[|\r\n]/.test(text)) throw new Error('Memory job registry fields must be nonempty single-line table cells');
   return text;
 };
-
 const format = rows => header + [...rows].sort((a, b) => `${a.machine}/${a.job}`.localeCompare(`${b.machine}/${b.job}`, 'en')).map(row => `| ${['machine', 'job', 'scheduler', 'cadence', 'registered'].map(key => cell(row[key])).join(' | ')} |\n`).join('');
-
 function parse(text) {
   const rows = [];
   for (const line of text.split(/\r?\n/)) {
@@ -24,7 +21,6 @@ function parse(text) {
   }
   return rows;
 }
-
 function checkPublication({ git, remote, branch }) {
   if (!remote) return;
   const ref = `refs/remotes/${remote}/${branch}`;
@@ -37,7 +33,6 @@ function checkPublication({ git, remote, branch }) {
     if (email !== 'geppetto@localhost' || !files.length || !owned) throw new Error('Memory has local commits requiring separate synchronization before publishing job registrations.');
   }
 }
-
 /** Prepare a registry-only commit without changing the real index or working tree. */
 async function registryCommit(root, parent, text, execute) {
   const directory = await mkdtemp(resolve(tmpdir(), 'geppetto-jobs-index-'));
@@ -50,7 +45,6 @@ async function registryCommit(root, parent, text, execute) {
     return git(['-c', 'user.name=Geppetto', '-c', 'user.email=geppetto@localhost', 'commit-tree', git(['write-tree']), ...(parent ? ['-p', parent] : []), '-m', 'Register memory maintenance\n\nMemory-Event: save']);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
-
 /** Re-evaluate competing registry writes before any scheduler side effect. */
 export async function memoryJobs(memory, execute = run) {
   if (!memory?.localPath) return null;

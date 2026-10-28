@@ -1,10 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { cli, isMain, parseArgs, UsageError, exists, jsonFile, run } from './common.mjs';
-
 const baseVendored = ['.agents/skills/**', '.geppetto/**'];
 const configurations = /^(?:biome\.jsonc?|eslint(?:\..+)?\.config\.[cm]?[jt]s|eslint\.config\.[cm]?[jt]s|\.eslintrc(?:\..+)?|\.eslintignore|\.prettierignore|\.prettierrc(?:\..+)?|prettier\.config\.[cm]?[jt]s)$/;
-
 /** Propose host-owned ignore changes; run the host's affected-file check only during verification. */
 export async function hostLintReport(project, verify = false) {
   const vendored = [...baseVendored, ...(await exists(resolve(project, '.claude/skills')) ? ['.claude/skills/**'] : [])];
@@ -35,7 +33,6 @@ export async function hostLintReport(project, verify = false) {
   }
   return { vendored, configurations: configs, check };
 }
-
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--project'], flags: ['--json', '--verify'] });
   if (opts._.length) throw new UsageError('Usage: host-lint.mjs [--project <dir>] [--json] [--verify]');
@@ -50,5 +47,4 @@ export async function main(args) {
   }
   return report.check.status === 'fail' ? 1 : 0;
 }
-
 if (isMain(import.meta.url)) await cli(main);

@@ -3,10 +3,8 @@ import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { cli, isMain, parseArgs, UsageError, jsonFile, contained } from './common.mjs';
 import { markdownLines, markdownHeadings } from './gate-sections.mjs';
-
 const hash = text => createHash('sha256').update(text).digest('hex');
 const normalize = text => text.replace(/\s+/g, ' ').trim();
-
 /** Snapshot every direct section body, including heading-free introductory content. */
 function inventory(sourceText) {
   const lines = sourceText.replace(/\r\n/g, '\n').split('\n');
@@ -17,7 +15,6 @@ function inventory(sourceText) {
     return { id: `section-${index + 1}`, title: heading.title, line: heading.line + 1, content, sha256: hash(content) };
   });
 }
-
 async function verifyMigration(snapshot, dispositions, root, inventoryPath) {
   if (snapshot.version !== 1 || typeof snapshot.sourceText !== 'string' || snapshot.sha256 !== hash(snapshot.sourceText) || JSON.stringify(snapshot.sections) !== JSON.stringify(inventory(snapshot.sourceText))) throw new Error(`${inventoryPath}:1: Inventory snapshot is incomplete or changed; regenerate from the preserved original`);
   if (!dispositions || typeof dispositions !== 'object' || Array.isArray(dispositions)) throw new Error('Migration map must be an object keyed by section id');
@@ -42,7 +39,6 @@ async function verifyMigration(snapshot, dispositions, root, inventoryPath) {
   }
   return { errors, preserved, dropped };
 }
-
 export async function main(args) {
   if (args.length === 1 && args[0] === '--help') {
     console.log('migrate-agents.mjs inventory --source <preserved-original.md> > inventory.json\nmigrate-agents.mjs verify --inventory <snapshot.json> --map <dispositions.json> [--project <dir>]\nMap each section id to {"owners":["project-relative.md"]} or {"dropped":"owner-approved reason"}. Every original paragraph must appear at a named owner; whitespace and line wrapping are normalized. Keep the snapshot outside the overwritten instruction file.'); return 0;
@@ -58,5 +54,4 @@ export async function main(args) {
   if (result.errors.length) { console.error(result.errors.join('\n')); return 1; }
   console.log(`Migration OK (${result.preserved + result.dropped} sections: ${result.preserved} preserved, ${result.dropped} intentionally dropped)`); return 0;
 }
-
 if (isMain(import.meta.url)) await cli(main);

@@ -27,6 +27,11 @@
     "signalLearning": "installed"
   },
   "hooks": {
+    "reviewGate": {
+      "enabled": true,
+      "benchmark": null,
+      "threshold": 30
+    },
     "learnNudge": {
       "enabled": true,
       "benchmark": null

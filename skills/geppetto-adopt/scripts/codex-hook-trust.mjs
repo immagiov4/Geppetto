@@ -3,10 +3,8 @@ import { createInterface } from 'node:readline';
 import { isAbsolute, resolve } from 'node:path';
 import { cli, isMain, parseArgs, UsageError } from './common.mjs';
 import { learningCommand } from './learn-runner.mjs';
-
 const requestTimeoutMs = 30000;
 const usage = 'Usage: codex-hook-trust.mjs --project <dir> [--plugin <id> | --source <hooks-file> | --key <key>...] [--approve] [--json]';
-
 /** A short-lived Codex protocol connection; it never starts a thread or model turn. */
 export function connectCodex({ cwd, command = learningCommand('codex'), env = process.env, timeoutMs = requestTimeoutMs } = {}) {
   if (!command) throw new Error('Codex CLI is unavailable; install it and retry hook approval.');
@@ -58,9 +56,7 @@ export function connectCodex({ cwd, command = learningCommand('codex'), env = pr
     interrupt() { fail(new Error('Codex hook approval interrupted.')); child.kill(); }
   };
 }
-
 const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
-
 async function inventory(client, project) {
   const response = await client.request('hooks/list', { cwds: [project] });
   if (!Array.isArray(response?.data) || response.data.length !== 1 || !samePath(response.data[0].cwd, project)) throw new Error('Codex hooks/list returned an unexpected project inventory.');
@@ -74,7 +70,6 @@ async function inventory(client, project) {
   }
   return entry;
 }
-
 function select(hooks, { plugin, source, keys }) {
   if (plugin) return hooks.filter(hook => hook.pluginId === plugin);
   if (source) return hooks.filter(hook => samePath(hook.sourcePath, source));
@@ -85,9 +80,7 @@ function select(hooks, { plugin, source, keys }) {
   }
   return hooks;
 }
-
 const fingerprint = hooks => JSON.stringify(hooks.map(({ key, currentHash, enabled, isManaged }) => ({ key, currentHash, enabled, isManaged })).sort((a, b) => a.key.localeCompare(b.key, 'en')));
-
 /** Persist only the selected current definitions, then ask Codex to verify their trust. */
 export async function hookTrust(client, { project, plugin, source, keys, approve = false }) {
   const selectors = [Boolean(plugin), Boolean(source), Boolean(keys?.length)].filter(Boolean).length;
@@ -109,7 +102,6 @@ export async function hookTrust(client, { project, plugin, source, keys, approve
   if (fingerprint(hooks) !== fingerprint(after) || candidates.some(hook => !after.some(check => check.key === hook.key && check.trustStatus === 'trusted'))) throw new Error('Hook approval verification failed; list current hooks before retrying.');
   return { ...result, approved: candidates.length, hooks: after, warnings: [...new Set([...entry.warnings, ...current.warnings, ...verified.warnings])] };
 }
-
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--project', '--plugin', '--source'], repeat: ['--key'], flags: ['--approve', '--json', '--help'] });
   if (opts['--help']) { console.log(usage); return 0; }
@@ -135,5 +127,4 @@ export async function main(args) {
     await client.close();
   }
 }
-
 if (isMain(import.meta.url)) await cli(main);

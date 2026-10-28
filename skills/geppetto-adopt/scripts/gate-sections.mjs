@@ -2,7 +2,6 @@ import { readFile, readdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { cli, isMain, parseArgs, UsageError, jsonFile, exists } from './common.mjs';
-
 // Preserve line numbers while removing fenced examples and HTML comments.
 export function markdownLines(text, { keepCode = false } = {}) {
   let fence = null;
@@ -22,7 +21,6 @@ export function markdownLines(text, { keepCode = false } = {}) {
     return visible;
   });
 }
-
 export function markdownHeadings(lines) {
   const found = [];
   for (let i = 0; i < lines.length; i++) {
@@ -34,7 +32,6 @@ export function markdownHeadings(lines) {
   }
   return found;
 }
-
 export function checkSections(text, required, file = '<stdin>') {
   const lines = markdownLines(text);
   const contentLines = markdownLines(text, { keepCode: true });
@@ -56,7 +53,6 @@ export function checkSections(text, required, file = '<stdin>') {
   }
   return errors;
 }
-
 function globRegex(pattern) {
   let regex = '';
   for (let i = 0; i < pattern.length; i++) {
@@ -68,7 +64,6 @@ function globRegex(pattern) {
   }
   return new RegExp(`^${regex}$`);
 }
-
 async function expand(pattern) {
   const absolute = resolve(pattern).split(sep).join('/');
   if (!/[?*]/.test(absolute)) return [resolve(pattern)];
@@ -87,7 +82,6 @@ async function expand(pattern) {
   if (!found.length) throw new Error(`${pattern}:1: No documents match`);
   return found.sort();
 }
-
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--pr', '--config'], repeat: ['--docs'] });
   if (opts._.length || Boolean(opts['--pr']) === Boolean(opts['--docs'])) throw new UsageError('Usage: gate-sections.mjs (--pr <file|-> | --docs <glob>...) [--config <path>]');
@@ -106,5 +100,4 @@ export async function main(args) {
   console.log(`Sections OK (${files.length} document${files.length === 1 ? '' : 's'})`);
   return 0;
 }
-
 if (isMain(import.meta.url)) await cli(main);

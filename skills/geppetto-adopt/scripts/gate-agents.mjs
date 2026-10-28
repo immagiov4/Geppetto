@@ -2,14 +2,12 @@ import { readFile, realpath } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { cli, isMain, parseArgs, UsageError, exists, userHome } from './common.mjs';
 import { markdownLines } from './gate-sections.mjs';
-
 const localPath = target => !/^(?:[a-z][a-z\d+.-]*:|#|\/\/)/i.test(target) || /^[a-z]:[\\/]/i.test(target);
 function pointerPath(target, base) {
   let path = target.replace(/^<|>$/g, '').split('#')[0];
   try { path = decodeURIComponent(path); } catch { throw new Error(`${base}:1: Invalid path encoding: ${target}`); }
   return path.startsWith('~/') ? resolve(userHome(), path.slice(2)) : resolve(dirname(base), path);
 }
-
 export async function checkAgents(file, { maxLines = 300, maxBytes = 16384 } = {}) {
   const errors = []; const visited = new Set(); let bytes = 0; let lines = 0;
   async function visit(path, stack = []) {
@@ -43,7 +41,6 @@ export async function checkAgents(file, { maxLines = 300, maxBytes = 16384 } = {
   if (bytes > maxBytes) errors.push(`${file}:1: UTF-8 byte budget exceeded (${bytes} > ${maxBytes})`);
   return { errors, lines, bytes, files: visited.size };
 }
-
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--file', '--max-lines', '--max-bytes'] });
   if (opts._.length) throw new UsageError('Usage: gate-agents.mjs [--file AGENTS.md] [--max-lines 300] [--max-bytes 16384]');
@@ -59,5 +56,4 @@ export async function main(args) {
   console.log(`Agents OK (${result.lines} lines, ${result.bytes} bytes, ${result.files} files)`);
   return 0;
 }
-
 if (isMain(import.meta.url)) await cli(main);

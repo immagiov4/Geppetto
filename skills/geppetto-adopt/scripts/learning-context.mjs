@@ -2,7 +2,6 @@ import { readFile, lstat, unlink } from 'node:fs/promises';
 import { gitOutput } from './common.mjs';
 import { learningFilePath, LearningScopeError } from './learner-tools.mjs';
 export const learningGit = (root, args, options = {}) => gitOutput(root, args, { prefix: ['-c', 'core.hooksPath='], trim: false, label: 'Learning Git operation', detail: false, ...options });
-
 /** Capture permitted working files through a private index; never stage or commit the user's checkout. */
 export async function learningContext(root, indexPath) {
   const sourceHead = learningGit(root, ['rev-parse', 'HEAD']).trim();

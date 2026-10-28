@@ -6,9 +6,9 @@ import { spawnSync, spawn } from 'node:child_process';
 
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const scripts = resolve(repo, 'skills/geppetto-adopt/scripts');
-export function fixture(t) {
+export function fixture(t, cleanup = {}) {
   const dir = mkdtempSync(resolve(tmpdir(), 'geppetto-test-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  t.after(() => rmSync(dir, { recursive: true, force: true, ...cleanup }));
   return dir;
 }
 export function put(dir, path, text) { mkdirSync(dirname(resolve(dir, path)), { recursive: true }); writeFileSync(resolve(dir, path), typeof text === 'string' ? text : JSON.stringify(text)); }

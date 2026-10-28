@@ -1,5 +1,4 @@
 import { redact } from './signal.mjs';
-
 export const learningResultSchema = {
   type: 'object', additionalProperties: false,
   properties: {
@@ -8,7 +7,6 @@ export const learningResultSchema = {
   },
   required: ['decision', 'reason', 'owner'],
 };
-
 /** Validate completion independently of the host's successful process exit. */
 export function learningResult(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)

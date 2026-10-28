@@ -4,13 +4,11 @@ import { pathToFileURL } from 'node:url';
 import { cli, isMain, userHome, jsonFile, run } from './common.mjs';
 import { learningCommand, executeLearning } from './learn-runner.mjs';
 import { memorySettings } from './memory-config.mjs';
-
 export const maintenanceJobs = ['curate-skills', 'maintain-memory'];
 const cadence = 'weekly Monday 09:00 (local time)';
 const cronCadence = '0 9 * * 1';
 const psQuote = text => `'${text.replaceAll("'", "''")}'`;
 const shQuote = text => `'${text.replaceAll("'", "'\\''")}'`;
-
 /** Refresh the fixed OS entrypoint while the installer holds the machine lock. */
 export async function refreshMaintenanceLauncher(home, source) {
   const script = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
@@ -19,7 +17,6 @@ export async function refreshMaintenanceLauncher(home, source) {
   await writeFile(script, `import { main } from ${JSON.stringify(pathToFileURL(resolve(scripts, 'maintenance.mjs')).href)};\nimport { cli } from ${JSON.stringify(pathToFileURL(resolve(scripts, 'common.mjs')).href)};\nawait cli(main);\n`);
   return script;
 }
-
 function nextWeeklyRun(expression) {
   const match = /^(\d+) (\d+) \* \* ([0-6])$/.exec(expression);
   if (!match || Number(match[1]) > 59 || Number(match[2]) > 23) throw new Error('Inspect the existing cron cadence and register it through --scheduler-jobs with its next run.');
@@ -29,7 +26,6 @@ function nextWeeklyRun(expression) {
   if (next <= now) next.setDate(next.getDate() + 7);
   return next.toISOString();
 }
-
 /** Inspect or attach one OS job; native harness jobs are supplied by adoption first. */
 export async function scheduleMaintenance(name, { home = userHome(), host, source, platform = process.platform, execute = run, command = learningCommand(host) }) {
   if (!maintenanceJobs.includes(name)) throw new Error('Unknown maintenance job');
@@ -70,7 +66,6 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
   }
   return { scheduler: 'cron', id, cadence: expression, nextRun, disable: `crontab -e (remove ${marker})`, status: 'scheduled', host };
 }
-
 /** Remove only the known OS registration; external schedulers need confirmation from adoption. */
 export async function disableMaintenance(name, job, { execute = run } = {}) {
   if (job.status === 'disabled') return true;
@@ -90,7 +85,6 @@ export async function disableMaintenance(name, job, { execute = run } = {}) {
   }
   return false;
 }
-
 /** Run only active registrations with the subscription CLI, inheriting its model settings. */
 export async function main(args) {
   if (args.length !== 2 || args[0] !== '--run' || !maintenanceJobs.includes(args[1])) throw new Error('Usage: maintenance.mjs --run <curate-skills|maintain-memory>');

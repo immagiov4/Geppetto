@@ -33,7 +33,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     assert.match(learning.hookSpecificOutput.additionalContext, /signal\.mjs/);
     assert.deepEqual(event('PostToolUse'), {});
     assert.equal(hooks.PostToolUse[0].hooks[0].async, undefined, 'context must arrive before the next model request');
-    assert.ok(hooks.Stop.flatMap(group => group.hooks).some(handler => handler.async && handler.command.includes('learn-runner.mjs')));
+    assert.equal(hooks.Stop.flatMap(group => group.hooks).length, 1, 'the shared Stop dispatch starts the existing runner');
     assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).hook, 'learnNudge');
     const memory = fixture(t); git(memory, ['init', '-q']); put(memory, 'index.md', '| Bucket | Scope | Holds |\n|---|---|---|\n| preferences | global | Working preferences. |\n');
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
@@ -42,12 +42,12 @@ test('both shipped hook fragments deliver internal context from nested directori
   }
 });
 
-test('the plugin hook entrypoint requests learning internally while preserving async ingestion', t => {
+test('the plugin hook entrypoint requests learning internally and owns the single Stop dispatch', t => {
   const hooks = JSON.parse(get(repo, 'hooks/hooks.json')).hooks;
   const handler = hooks.PostToolUse[0].hooks[0];
   assert.equal(handler.async, undefined);
   assert.equal(handler.command, 'node "${CLAUDE_PLUGIN_ROOT}/skills/geppetto-adopt/scripts/hook.mjs"');
-  assert.ok(hooks.Stop.flatMap(group => group.hooks).some(hook => hook.async && hook.command.includes('learn-runner.mjs')));
+  assert.equal(hooks.Stop.flatMap(group => group.hooks).length, 1);
   const cwd = fixture(t); put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 1 } } });
   const send = name => invoke('hook.mjs', [], { cwd, input: JSON.stringify({ hook_event_name: name, session_id: 'plugin', cwd, tool_name: 'Read', tool_input: {} }) });
   assert.equal(send('PreToolUse').status, 0);

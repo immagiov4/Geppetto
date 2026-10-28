@@ -59,4 +59,6 @@ Use `report.md`, `findings.json` and `metrics.json`. Report location, severity, 
 
 Check actual reads in events against claimed coverage. Recorded usage measures one run; an empty result describes only the scope and evidence actually reached.
 
+When this procedure is the project's configured review engine and independent review has completed on the current working diff, record it from the project root with `node <adopt>/scripts/hook.mjs --record-review --base <reviewed-base> --outcome <passed|findings>`, resolving `<adopt>` to the sibling `geppetto-adopt` directory. Record after confirming the captured review material still matches the source. The command stores hashes and metadata in ignored runtime state. For a constrained-session self-review, retain `independent review pending` and state `Independent review blocked: <concrete reason>` in the reply.
+
 For Qwen provenance and coverage differences, read [references/qwen-method.md](references/qwen-method.md). The process retains separate search and verification; a small test supports a judgment about that sample.

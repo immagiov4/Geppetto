@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { repo, fixture, invoke } from './helpers.mjs';
-
 import { filesUnder } from '../skills/geppetto-adopt/scripts/common.mjs';
 
 const read = path => JSON.parse(readFileSync(resolve(repo, path), 'utf8'));

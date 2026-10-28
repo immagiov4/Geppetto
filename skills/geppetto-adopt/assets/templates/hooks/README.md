@@ -1,6 +1,6 @@
 # Hook operation
 
-The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit adds requirements, feedback and frustration reminders; PreToolUse checks PR text; PostToolUse and Stop supply internal learning reminders; async Stop runs background signal learning.
+The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit adds requirements, feedback and frustration reminders; PreToolUse checks PR text; PostToolUse supplies internal learning reminders; Stop checks independent review and starts background learning through the same dispatch.
 
 ## Activation
 
@@ -20,8 +20,18 @@ Result records in the project's ignored `.geppetto/hook-events.jsonl` include `s
 
 `learn-nudge.mjs` records tool activity and adds one internal reminder per qualifying turn, using the configured tool-count or elapsed-time threshold. The current agent applies `$geppetto-learn` before replying. The handler uses zero model calls; reflection uses the ordinary session. Events record firings and duplicate suppression state stays under ignored `.geppetto/hook-state/`.
 
-The [background runner](../../../../geppetto-learn/references/ingestion.md) consumes selected signals through the subscription CLI and one machine lock. [Maintenance jobs](../../../../geppetto-learn/references/jobs.md) reuse the existing scheduler.
+The [background runner](../../../../geppetto-learn/references/ingestion.md) receives the new reduced transcript slice and pending signals through the subscription CLI and one machine lock. Stop starts it directly after 20 tool calls or five minutes by default; `hooks.learnNudge` owns those configurable thresholds. [Maintenance jobs](../../../../geppetto-learn/references/jobs.md) reuse the existing scheduler.
 
 PostToolUse also recognizes Write/Edit/MultiEdit and apply_patch paths in Claude's native memory, configured `autoMemoryDirectory` and Codex's `<CODEX_HOME>/memories/`. With bucket memory configured it reminds once per turn to save durable lessons through `$geppetto-memory`; a native directory inside a bucket instead prompts index upkeep. This uses the existing dispatch, an exclusive turn marker and a zero-model-call `nativeMemory` event in the same hook log. Native-only and no-memory choices keep bucket hooks silent. The end-of-turn nudge includes lessons and decision rationale without another owner.
 
 Hermes uses its [plugin template](hermes/plugin.yaml) for read-only memory listings and learning reminders. Copy `settings.example.json` to the profile's `settings.json` and resolve its paths.
+
+## Review gate
+
+`hooks.reviewGate` is enabled by default. Stop blocks once when source changed this turn by at least `threshold` added/deleted lines (default 30), the current diff has no matching independent review, and edits since the latest review also reach that threshold. `docGlobs` and `testGlobs` configure exclusions; defaults exclude Markdown, reStructuredText, docs, tests, fixtures and common test filenames. Prompt or first-tool events capture the turn's initial source state, so pre-existing edits alone do not trigger a block. A second Stop or `stop_hook_active` closes the turn. To explain an unavailable reviewer, state `Independent review blocked: <concrete reason>` in the reply.
+
+Complete `$geppetto-verify` or its configured `code-review` engine to record the reviewed diff. The review record holds a SHA-256, resolved comparison base, timestamp and outcome in ignored `.geppetto/reviews.jsonl`; comparison state under `.geppetto/hook-state/` holds only line hashes. Source and diffs stay out of these files. Tracked and non-ignored untracked text source count; binary files, symlinks and submodule contents are outside this gate's line measure. The gate verifies review identity, while the review procedure owns independence and findings.
+
+## Observability
+
+`hook-events.jsonl` records reviewGate outcomes, changed-line counts and current diff hash, alongside learning launch failures and existing learning events. The gate makes no model calls; local Git and file reads add Stop overhead. Synthetic tests cover matched review, post-review edits, exclusions, turn boundaries and one-block behavior. Real CLI probes establish host continuation separately from review quality. Background admission, cursor and reducer limits belong to the linked learning lifecycle.

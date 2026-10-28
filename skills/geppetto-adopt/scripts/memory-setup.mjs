@@ -14,9 +14,7 @@ export function memoryDescription(memory) {
   if (memory?.choice === 'none') return 'No memory';
   return memory?.localPath ? `${memory.choice === 'github' ? 'Private GitHub repo' : 'Git folder'} ${memory.localPath} (${memory.repo})` : 'choice required';
 }
-
 export const memoryGit = (root, args, execute = run, options = {}) => gitOutput(root, args, { execute, label: `Memory Git ${args[0]}`, ...options });
-
 export async function syncMemory(memory, execute = run) {
   const root = memory.localPath;
   const git = args => memoryGit(root, args, execute);
@@ -38,9 +36,7 @@ export async function syncMemory(memory, execute = run) {
   }
   return { git, remote, branch };
 }
-
 export { memoryWritePath };
-
 async function seed(memory, bucket, execute) {
   await memoryWritePath(memory.localPath);
   await mkdir(memory.localPath, { recursive: true });
@@ -81,7 +77,6 @@ async function seed(memory, bucket, execute) {
   memoryGit(memory.localPath, ['add', '--', ...paths], execute);
   if (memoryGit(memory.localPath, ['diff', '--cached', '--name-only', '--', ...paths], execute)) memoryGit(memory.localPath, ['-c', 'user.name=Geppetto', '-c', 'user.email=geppetto@localhost', 'commit', '--only', '-m', 'Initialize memory\n\nMemory-Event: save', '--', ...paths], execute);
 }
-
 export async function setupMemory(project, machine, { home, memoryChoice, execute = run }) {
   let memory = await memoryConfiguration(project, home);
   const fresh = memoryChoice && (memoryChoice !== memory?.choice || !memory?.localPath);
@@ -128,7 +123,6 @@ export async function setupMemory(project, machine, { home, memoryChoice, execut
   }
   return ['native', 'none'].includes(memory.choice) ? null : { ...memory, buckets: linked };
 }
-
 export async function bridgeNativeMemory(project, machine, memory) {
   const path = resolve(project, '.claude/settings.local.json');
   const owned = machine.nativeMemory?.[project];

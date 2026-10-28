@@ -3,7 +3,6 @@ import { resolve, relative, dirname, sep, matchesGlob } from 'node:path';
 import { createInterface } from 'node:readline';
 import { contained, isMain } from './common.mjs';
 import { redact } from './signal.mjs';
-
 const blocked = part => /^(?:\.git|\.geppetto|\.codex|\.claude|\.agents|node_modules|private|\.env(?:\..*)?|.*\.(?:pem|key))$/i.test(part);
 export class LearningScopeError extends Error {}
 export async function learningFilePath(root, name) {
@@ -26,7 +25,6 @@ async function listFiles(root, directory = root) {
   }
   return names;
 }
-
 /** File-only MCP boundary; neither shell, delegation nor publication is exposed. */
 export async function learningFileTool(root, name, args, readOnly = false, referenceRoot = null) {
   root = await realpath(root);
@@ -62,7 +60,6 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
   await mkdir(dirname(path), { recursive: true }); await writeFile(path, content);
   return 'Saved project file';
 }
-
 const schemas = {
   Read: { path: { type: 'string' } },
   Write: { path: { type: 'string' }, content: { type: 'string' } },

@@ -22,7 +22,6 @@ export async function memoryConfiguration(project, home = userHome()) {
   }
   return { ...memory, localPath, buckets };
 }
-
 export async function memorySettings(project, home = userHome()) {
   const memory = await memoryConfiguration(project, home);
   return ['native', 'none'].includes(memory?.choice) ? null : memory;

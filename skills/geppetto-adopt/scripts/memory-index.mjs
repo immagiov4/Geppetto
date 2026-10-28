@@ -2,7 +2,6 @@ import { readFile, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { exists } from './common.mjs';
 const bucketName = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
-
 /** Parse only the root Bucket | Scope | Holds table; descriptions remain data. */
 export function bucketCatalog(text) {
   const buckets = []; let columns;
@@ -21,7 +20,6 @@ export function bucketCatalog(text) {
   if (!buckets.length) throw new Error('Root memory index needs a Bucket | Scope | Holds table');
   return buckets;
 }
-
 /** Read a bucket root index only after resolving its ownership boundary. */
 export async function memoryIndex(memory, bucket) {
   if (bucket.toLowerCase() === 'private') throw new Error('The private bucket index is excluded from hooks');
@@ -31,7 +29,6 @@ export async function memoryIndex(memory, bucket) {
   if (!same) throw new Error(`Bucket index resolves outside its configured owner: ${bucket}`);
   return readFile(canonical, 'utf8');
 }
-
 export async function memoryCatalog(memory) {
   if (!memory.repo) throw new Error('memory.repo is missing');
   if (!memory.localPath || !await exists(resolve(memory.localPath, '.git'))) throw new Error('The configured memory clone is missing');

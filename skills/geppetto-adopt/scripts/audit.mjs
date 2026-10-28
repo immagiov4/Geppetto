@@ -29,7 +29,6 @@ async function memoryReport(project) {
   const matchesConfigured = Boolean(merged.repo && (urls.length && pushUrls.length ? [...urls, ...pushUrls].every(value => repositoryIdentity(value) === repositoryIdentity(merged.repo)) : cloneExists && !names.length && resolve(merged.repo) === resolve(localPath)));
   return { status: 'configured', ...merged, localPath, clone: status(cloneExists), rootIndex: { path: rootIndex, status: status(rootIndex && await file(rootIndex)) }, projectBucketIndex: { path: bucketIndex, status: status(bucketIndex && await file(bucketIndex)) }, bucketIndexes, remote: { status: remote ? remote.status === 0 ? status(Boolean(remote.stdout.trim())) : 'unverifiable' : 'absent', names, selected, urls, pushUrls, matchesConfigured } };
 }
-
 async function verify(project) {
   const checks = [];
   const configPath = resolve(project, '.geppetto/config.json');
@@ -57,7 +56,6 @@ async function verify(project) {
   } finally { await rm(temp, { recursive: true, force: true }); }
   return checks;
 }
-
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--project'], flags: ['--json', '--verify'] });
   if (opts._.length) throw new UsageError('Usage: audit.mjs [--project <dir>] [--json] [--verify]');

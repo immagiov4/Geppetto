@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-
 const settings = JSON.parse(readFileSync(new URL('./settings.json', import.meta.url), 'utf8'));
 const input = JSON.parse(readFileSync(0, 'utf8'));
 const root = input.projectRoot ?? settings.projectRoot;

@@ -16,7 +16,6 @@ function writtenPaths(event) {
   if (!['write', 'edit', 'multiedit'].includes(tool)) return [];
   return [input?.file_path ?? input?.path, ...(input?.edits ?? []).map(edit => edit.file_path ?? edit.path)].filter(path => typeof path === 'string');
 }
-
 /** Reuse PostToolUse dispatch; native writes need no provider or learning threshold. */
 export async function nativeMemoryEvent(event, { home = userHome() } = {}) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1' || typeof event.session_id !== 'string' || !event.session_id || !['UserPromptSubmit', 'PostToolUse'].includes(event.hook_event_name)) return {};
@@ -53,7 +52,6 @@ export async function nativeMemoryEvent(event, { home = userHome() } = {}) {
   catch (error) { await unlink(marker); throw error; }
   return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: text } };
 }
-
 async function sessionContext(memory) {
   const catalog = await memoryCatalog(memory);
   const global = catalog.filter(bucket => bucket.scope === 'global'); const project = catalog.filter(bucket => bucket.scope !== 'global');
@@ -66,7 +64,6 @@ async function sessionContext(memory) {
   }
   return parts.join('\n');
 }
-
 export async function handleMemoryEvent(event, options = {}) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const { home } = options;
@@ -83,6 +80,5 @@ export async function handleMemoryEvent(event, options = {}) {
   await logHookEvent(project, { hook: 'memory', event: name, status, injectedBytes: Buffer.byteLength(text), modelCalls: 0, costUsd: 0 }, event);
   return { hookSpecificOutput: { hookEventName: name, additionalContext: text } };
 }
-
 export const main = args => hookMain(args, 'Memory hook', handleMemoryEvent);
 if (isMain(import.meta.url)) await cli(main);
