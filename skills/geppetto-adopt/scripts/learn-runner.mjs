@@ -28,6 +28,19 @@ export function learningReadiness(root, policy = {}) {
   if (policy.enabled === false) return { enabled: false, action: null };
   if (!learningGitReady(root)) return { enabled: false, action: initialCommitAction };
   if (!learningCommand('codex') && !learningCommand('claude')) return { enabled: false, action: 'Install a subscription CLI and sign in.' };
+  const lockPath = resolve(userHome(), '.geppetto/learn.lock');
+  let owner;
+  try { owner = readFileSync(lockPath, 'utf8').trim(); }
+  catch (error) {
+    if (error.code === 'ENOENT') return { enabled: true, action: null };
+    return { enabled: false, action: 'Inspect the learning lock; its owner could not be read.' };
+  }
+  if (!/^[1-9]\d*$/.test(owner) || Number(owner) > 2147483647) return { enabled: false, action: 'Inspect the learning lock; its owner is invalid.' };
+  try { process.kill(Number(owner), 0); }
+  catch (error) {
+    if (error.code === 'ESRCH') return { enabled: false, action: 'Verify the learning lock PID has exited before removing the stale lock.' };
+    return { enabled: false, action: 'Inspect the learning lock; its owner status could not be verified.' };
+  }
   return { enabled: true, action: null };
 }
 

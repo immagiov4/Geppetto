@@ -85,7 +85,7 @@ export async function main(args) {
     console.log(`Hooks: ${Object.keys(machine.hooks ?? {}).join(', ') || 'run adoption'}`);
     console.log(`Memory: ${report.memory.status}`);
     for (const [name, job] of Object.entries(machine.jobs ?? {})) console.log(`Job ${name}: ${job.status}${job.status === 'needs-scheduler' ? '; attach an available scheduler' : ''}`);
-    for (const [name, readiness] of [['Signal learning', report.learning], ['Memory classifier', report.memoryClassifier], ['Skill selector', report.skillSelector]]) console.log(`${name}: ${readiness.enabled ? 'enabled' : 'disabled'}${readiness.action ? `; ${readiness.action}` : ''}`);
+    for (const [name, readiness] of [['Signal learning', report.learning], ['Memory classifier', report.memoryClassifier], ['Skill selector', report.skillSelector]]) console.log(`${name}: ${readiness.enabled ? 'enabled' : name === 'Signal learning' && readiness.action ? 'not ready' : 'disabled'}${readiness.action ? `; ${readiness.action}` : ''}`);
     for (const configuration of report.hostLint.configurations) console.log(`Host ${configuration.tool}: ${configuration.path}:1: ${configuration.registration}; ${configuration.patterns.join(', ')}`);
     for (const check of report.verification ?? []) console.log(`${check.pass ? 'PASS' : 'FAIL'} ${check.name}${check.reason ? `: ${check.reason}` : ''}`);
   }

@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, symlinkSync } from 'node:fs';
+import { cpSync, symlinkSync, rmSync, mkdirSync } from 'node:fs';
 import { resolve, delimiter } from 'node:path';
-import { fixture, put, invoke, git, config, scripts } from './helpers.mjs';
+import { fixture, put, get, invoke, git, config, scripts } from './helpers.mjs';
 
 test('learning readiness requires an initial Git commit, not just an available CLI', t => {
   const cwd = fixture(t), home = fixture(t), bin = fixture(t);
@@ -80,4 +80,46 @@ test('memory audit accepts the same HTTPS repository with an optional .git suffi
   put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.com/memory', localPath: memory } });
   const r = invoke('audit.mjs', ['--json'], { cwd, home }); assert.equal(r.status, 0, r.stderr);
   assert.equal(JSON.parse(r.stdout).memory.remote.matchesConfigured, true);
+});
+
+test('audit reports an abandoned learning lock and preserves it', t => {
+  const cwd = fixture(t), home = fixture(t), bin = fixture(t);
+  put(bin, process.platform === 'win32' ? 'codex.exe' : 'codex', 'fixture');
+  git(cwd, ['init', '-q']);
+  git(cwd, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Initial revision']);
+  put(home, '.geppetto/learn.lock', '12345');
+  put(home, 'mock-process.cjs', "process.kill = () => { const error = new Error('no process'); error.code = 'ESRCH'; throw error; };");
+  const result = invoke('audit.mjs', ['--json'], { cwd, home, env: { PATH: `${bin}${delimiter}${process.env.PATH}`, NODE_OPTIONS: `--require=${resolve(home, 'mock-process.cjs')}` } });
+  assert.equal(result.status, 0, result.stderr);
+  const learning = JSON.parse(result.stdout).learning;
+  assert.equal(learning.enabled, false);
+  assert.match(learning.action, /PID.*exited.*remov/i);
+  assert.equal(get(home, '.geppetto/learn.lock'), '12345');
+  const text = invoke('audit.mjs', [], { cwd, home, env: { PATH: `${bin}${delimiter}${process.env.PATH}`, NODE_OPTIONS: `--require=${resolve(home, 'mock-process.cjs')}` } });
+  assert.match(text.stdout, /Signal learning: not ready;.*PID/);
+});
+
+
+test('audit distinguishes live, unverifiable and invalid learning lock owners', t => {
+  const cwd = fixture(t), home = fixture(t), bin = fixture(t);
+  put(bin, process.platform === 'win32' ? 'codex.exe' : 'codex', 'fixture');
+  git(cwd, ['init', '-q']);
+  git(cwd, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--allow-empty', '-qm', 'Initial revision']);
+  const env = { PATH: `${bin}${delimiter}${process.env.PATH}`, NODE_OPTIONS: `--require=${resolve(home, 'mock-process.cjs')}` };
+  const learning = () => { const result = invoke('audit.mjs', ['--json'], { cwd, home, env }); assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout).learning; };
+  put(home, 'mock-process.cjs', 'process.kill = () => true;');
+  assert.deepEqual(learning(), { enabled: true, action: null });
+  put(home, '.geppetto/learn.lock', '12345');
+  assert.deepEqual(learning(), { enabled: true, action: null });
+  put(home, 'mock-process.cjs', "process.kill = () => { const error = new Error('permission'); error.code = 'EPERM'; throw error; };");
+  assert.match(learning().action, /status could not be verified/);
+  assert.equal(learning().enabled, false);
+  for (const owner of ['', '0', '-1', '12abc', '2147483648']) {
+    put(home, '.geppetto/learn.lock', owner);
+    const result = learning(); assert.equal(result.enabled, false); assert.match(result.action, /owner is invalid/);
+    assert.equal(get(home, '.geppetto/learn.lock'), owner);
+  }
+  rmSync(resolve(home, '.geppetto/learn.lock'));
+  mkdirSync(resolve(home, '.geppetto/learn.lock'));
+  const unreadable = learning(); assert.equal(unreadable.enabled, false); assert.match(unreadable.action, /could not be read/);
 });
