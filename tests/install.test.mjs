@@ -78,7 +78,7 @@ test('permission-blocked machine registration prints one retry command and keeps
 
 test('adoption instructions preserve consent, recap and same-session bootstrap while keeping routers generic', () => {
   const adopt = get(repo, 'skills/geppetto-adopt/SKILL.md'), instructions = get(repo, 'skills/geppetto-adopt/references/installation.md');
-  assert.match(adopt, /installation request is the yes/i); assert.match(adopt, /Only when OpenRouter is missing/); assert.match(adopt, /same session/);
+  assert.match(adopt, /installation request is the yes/i); assert.match(adopt, /Only when OpenRouter is missing.*semantic screening/); assert.match(adopt, /same session/);
   assert.match(adopt, /Installed \| Reused from this machine \| Skipped and why \| How to change/);
   assert.match(instructions, /--begin/); assert.match(instructions, /--commit/); assert.match(instructions, /outside the project/);
   assert.doesNotMatch(get(repo, 'skills/geppetto-adopt/assets/templates/AGENTS.md'), /visible Windows windows/);

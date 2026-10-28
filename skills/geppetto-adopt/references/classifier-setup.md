@@ -1,5 +1,0 @@
-# Connect suggestions
-
-Resolve the OpenRouter key through the machine's existing secret launcher. Check availability with `skill-hook.mjs --check-credential` from the actual launcher; these commands print presence only.
-
-Preserve configured models and selection settings. Factory settings live in `common.mjs`; local overrides live in `.geppetto/config.json`. Test requests with synthetic candidates, then inspect `.geppetto/hook-events.jsonl` for model calls, duration, injected bytes and cost. [Hook operation](../assets/templates/hooks/README.md) describes batching and limits.

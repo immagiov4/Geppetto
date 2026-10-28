@@ -2,11 +2,10 @@ import { mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { cli, isMain, parseArgs, UsageError, jsonFile, validateConfig, userHome, run, skillSelectorDefaults } from './common.mjs';
+import { cli, isMain, parseArgs, UsageError, jsonFile, validateConfig, userHome, run } from './common.mjs';
 import { hostLintReport } from './host-lint.mjs';
 import { memorySettings, memoryConfiguration } from './memory-config.mjs';
 import { learningReadiness } from './learn-runner.mjs';
-import { validateSkillSelectorSettings } from './skill-catalog.mjs';
 const status = value => value ? 'present' : 'absent';
 const repositoryIdentity = value => /^https?:\/\//.test(value) ? value.replace(/\.git$/, '') : value;
 async function directory(path) { try { return (await stat(path)).isDirectory(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
@@ -66,13 +65,7 @@ export async function main(args) {
   if (!await directory(project)) throw new Error(`${project}:1: Project directory does not exist`);
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {});
   const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
-  const user = await jsonFile(resolve(userHome(), '.geppetto/config.json'), {});
-  const ready = (settings, validate) => {
-    if (settings.enabled === false) return { enabled: false, action: null };
-    try { validate(settings); } catch { return { enabled: false, action: 'Repair the hook settings in .geppetto/config.json.' }; }
-    return { enabled: Boolean(process.env.OPENROUTER_API_KEY), action: process.env.OPENROUTER_API_KEY ? null : 'Add OPENROUTER_API_KEY for skill suggestions.' };
-  };
-  const report = { project, node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: learningReadiness(project, config.hooks?.signalLearning), skillSelector: ready({ ...skillSelectorDefaults, ...user.hooks?.skillSelector, ...config.hooks?.skillSelector }, validateSkillSelectorSettings) };
+  const report = { project, node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: learningReadiness(project, config.hooks?.signalLearning) };
   if (opts['--verify']) {
     report.verification = await verify(project);
     if (report.memory.status === 'configured') report.verification.push({ name: 'memory-remote-url', pass: report.memory.remote.matchesConfigured, reason: report.memory.remote.matchesConfigured ? undefined : 'Memory fetch/push remote URL does not equal configured memory.repo' });
@@ -85,7 +78,7 @@ export async function main(args) {
     console.log(`Hooks: ${Object.keys(machine.hooks ?? {}).join(', ') || 'run adoption'}`);
     console.log(`Memory: ${report.memory.status}`);
     for (const [name, job] of Object.entries(machine.jobs ?? {})) console.log(`Job ${name}: ${job.status}${job.status === 'needs-scheduler' ? '; attach an available scheduler' : ''}`);
-    for (const [name, readiness] of [['Signal learning', report.learning], ['Skill selector', report.skillSelector]]) console.log(`${name}: ${readiness.enabled ? 'enabled' : name === 'Signal learning' && readiness.action ? 'not ready' : 'disabled'}${readiness.action ? `; ${readiness.action}` : ''}`);
+    console.log(`Signal learning: ${report.learning.enabled ? 'enabled' : report.learning.action ? 'not ready' : 'disabled'}${report.learning.action ? `; ${report.learning.action}` : ''}`);
     for (const configuration of report.hostLint.configurations) console.log(`Host ${configuration.tool}: ${configuration.path}:1: ${configuration.registration}; ${configuration.patterns.join(', ')}`);
     for (const check of report.verification ?? []) console.log(`${check.pass ? 'PASS' : 'FAIL'} ${check.name}${check.reason ? `: ${check.reason}` : ''}`);
   }

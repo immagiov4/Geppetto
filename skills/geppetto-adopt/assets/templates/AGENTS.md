@@ -22,7 +22,6 @@ Context is a budget: load the relevant owner through the map below. This file an
 - Product work starts with a failing behaviour test through `$geppetto-build`; exploratory prototypes declare their exemption.
 - Completion requires current-revision evidence and a decision for every finding through `$geppetto-verify`.
 - At any time, use `$geppetto-learn` to record meaningful recurring friction and its affected metric at the existing owner.
-- Paid OpenRouter requests use `$geppetto-authorize` and the machine key configuration.
 - Memory procedures follow `$geppetto-memory`; retrieval respects bucket privacy.
 - Update each fact's existing owner in the same change. Keep explanations and procedures at their owners.
 
@@ -38,7 +37,6 @@ Load a row when its condition applies. Skill names resolve through the harness's
 | Before a PR, on review findings or checking completion | `$geppetto-verify` |
 | Recurring friction, remembered lessons or skill curation | `$geppetto-learn` |
 | Injected memory listing, page suggestions, durable knowledge or authorized memory changes | `$geppetto-memory` |
-| Paid OpenRouter call | `$geppetto-authorize` |
 | Writing skills or project instructions | `$writing-for-agents` |
 | Architecture and feature documentation | {{DOCS_INDEX}} |
 | Code rules and additional principle packs | {{RULES_INDEX}} |

@@ -39,10 +39,6 @@ test('both shipped hook fragments deliver internal context from nested directori
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
     assert.match(event('SessionStart').hookSpecificOutput.additionalContext, /preferences — Working preferences/);
     assert.equal(hooks.UserPromptSubmit.flatMap(group => group.hooks).some(handler => handler.command.includes('memory-hook.mjs')), false);
-    const selector = hooks.UserPromptSubmit.flatMap(group => group.hooks).find(handler => handler.command.includes('skill-hook.mjs'));
-    assert.ok(selector);
-    const selected = spawnSync(process.execPath, [selector.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', repo).slice('node "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd, prompt: ' ' }), encoding: 'utf8', windowsHide: true });
-    assert.equal(selected.status, 0, selected.stderr); assert.deepEqual(JSON.parse(selected.stdout), {});
   }
 });
 

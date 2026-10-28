@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fixture, put, get, invoke, git, repo } from './helpers.mjs';
@@ -29,6 +29,7 @@ function legacy(t, targets = ['codex']) {
   const workflow = '.github/workflows/pr-gate.yml'; put(cwd, workflow, 'legacy workflow\n');
   for (const entry of Object.values(state.installations)) entry.files[workflow] = digest('legacy workflow\n');
   put(cwd, '.geppetto/install.json', state);
+  put(cwd, '.agents/skills/foreign/SKILL.md', 'Unrelated project skill');
   assert.equal(git(cwd, ['add', '-f', '.']).status, 0); assert.equal(git(cwd, ['commit', '-qm', 'Legacy adoption']).status, 0);
   return { cwd, home, source, install };
 }
@@ -62,9 +63,11 @@ test('migration commit retires owned files and registry while preserving unrelat
   assert.equal(git(cwd, ['ls-files', '.geppetto/install.json']).stdout.trim(), '');
   // A repeated update must retain deletions until the installation is finalized.
   result = install(); assert.equal(result.status, 0, result.stderr);
+  unlinkSync(resolve(cwd, '.agents/skills/foreign/SKILL.md'));
+  assert.equal(git(cwd, ['add', '-u']).status, 0);
   result = install('codex', ['--commit']); assert.equal(result.status, 0, result.stderr);
   assert.equal(git(cwd, ['ls-tree', '-r', '--name-only', 'HEAD', '.geppetto/bin', '.geppetto/install.json']).stdout.trim(), '');
-  assert.equal(git(cwd, ['diff', '--cached', '--name-only']).stdout.trim(), 'unrelated.txt');
+  assert.deepEqual(git(cwd, ['diff', '--cached', '--name-only']).stdout.trim().split('\n'), ['.agents/skills/foreign/SKILL.md', 'unrelated.txt']);
   assert.doesNotMatch(git(cwd, ['status', '--short']).stdout, /\.geppetto\/bin/);
   assert.equal(existsSync(resolve(cwd, '.geppetto/install.json')), true);
 });
@@ -75,4 +78,15 @@ test('a fresh clone of the migration commit reinstalls with the same gate revisi
   result = install('codex', ['--commit']); assert.equal(result.status, 0, result.stderr);
   const clone = resolve(fixture(t), 'clone'); assert.equal(git(cwd, ['clone', '--quiet', cwd, clone]).status, 0);
   result = install('codex', ['--plugin-hooks'], clone); assert.equal(result.status, 0, result.stderr);
+});
+
+test('explicitly recorded generated edits update shared ownership across installed targets', t => {
+  const { cwd, install } = legacy(t, ['claude', 'codex']);
+  put(cwd, 'AGENTS.md', '# Generated router');
+  for (const target of ['claude', 'codex']) {
+    const result = install(target, ['--record-generated', 'AGENTS.md']); assert.equal(result.status, 0, result.stderr);
+  }
+  put(cwd, 'AGENTS.md', '# Updated generated router');
+  const result = install('codex', ['--record-generated', 'AGENTS.md']); assert.equal(result.status, 0, result.stderr);
+  for (const entry of Object.values(JSON.parse(get(cwd, '.geppetto/install.json')).installations)) assert.equal(entry.files['AGENTS.md'], digest(get(cwd, 'AGENTS.md')));
 });

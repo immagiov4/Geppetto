@@ -8,7 +8,7 @@ license: MIT
 
 Turn verified experience into instructions that help a future session make a better decision. Prefer a focused correction to the skill that already owns the procedure.
 
-For Geppetto tool execution and optional personal companions, read [process execution](../geppetto-adopt/references/processes.md) and [optional integrations](../geppetto-adopt/references/integrations.md) when that branch applies. Paid or unattended work also follows `$geppetto-authorize`.
+For Geppetto tool execution and optional personal companions, read [process execution](../geppetto-adopt/references/processes.md) and [optional integrations](../geppetto-adopt/references/integrations.md) when that branch applies. Follow the configured authorization for paid or unattended work.
 
 ## Choose the scope
 

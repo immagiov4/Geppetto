@@ -60,7 +60,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
   await mkdir(directory, { recursive: true });
   const lockPath = resolve(directory, 'machine.lock'); const lock = await open(lockPath, 'wx', 0o600);
   try {
-    const path = resolve(directory, 'machine.json'); const machine = await jsonFile(path, { projects: {}, hooks: {}, jobs: {}, keys: {} });
+    const path = resolve(directory, 'machine.json'); const machine = await jsonFile(path, { projects: {}, hooks: {}, jobs: {} });
     const harness = target === 'claude' ? 'claude' : 'codex';
     if (uninstall) {
       if (!machine.projects[project]?.[target]) return machine;
@@ -89,7 +89,6 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
     const local = await jsonFile(configPath, defaultConfig());
     if (!await exists(configPath)) await atomicJson(configPath, local);
     machine.projects[project] = { ...machine.projects[project], [target]: source.path };
-    if (process.env.OPENROUTER_API_KEY) machine.keys.openrouter ??= 'OPENROUTER_API_KEY';
     const memory = await setupMemory(project, machine, { home, memoryChoice, execute });
     await bridgeNativeMemory(project, machine, memory);
     await atomicJson(path, machine);

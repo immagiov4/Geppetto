@@ -1,6 +1,6 @@
 # Hook operation
 
-The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit adds requirements/feedback routing and OpenRouter skill suggestions; PreToolUse checks PR text; PostToolUse and Stop supply internal learning reminders; async Stop runs background signal learning.
+The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit adds requirements, feedback and frustration reminders; PreToolUse checks PR text; PostToolUse and Stop supply internal learning reminders; async Stop runs background signal learning.
 
 ## Activation
 
@@ -15,14 +15,6 @@ If activation cannot be completed, report the exact blocker and leave the hook's
 ## Result attribution
 
 Result records in the project's ignored `.geppetto/hook-events.jsonl` include `sessionId` and `turnId` when the triggering harness supplies them. Match these identifiers to the session being investigated before attributing a result: probes and other sessions can write to the same project log. Historical records and events from harnesses without identifiers remain unattributed. The log records selected Geppetto outcomes; native `hook/started` and `hook/completed` events identify failures before a script starts, including Codex plugin-content approval failures.
-
-## Suggestions
-
-`skill-selector.mjs` coordinates skill selection, validates returned candidate IDs and scores, and logs duration, model calls, injected bytes, errors and API cost. `skill-provider.mjs` owns the typed decision transport. The key enables requests; `authz.mjs` accounts for paid calls and an optional machine spend cap.
-
-SessionStart supplies memory listings and linked project indexes for the agent to navigate through `$geppetto-memory`. Skill selection reads discovered names and descriptions from `skill-catalog.mjs` and points to selected local procedures. The memory hook ignores prompt events.
-
-Settings come from `common.mjs`, then user and project overrides. Optional `maxRequestBytes` splits candidate batches against the serialized request size. Optional `maxConcurrentRequests` controls concurrent provider calls; the default is serial. The configured deadline covers the whole selection and aborts outstanding requests. `maxCostUsd` supplies a per-selection maximum for paid accounting. Keep the deadline inside the enclosing hook timeout.
 
 ## Learning
 

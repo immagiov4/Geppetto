@@ -7,19 +7,18 @@ import { runLearning, executeLearning } from '../skills/geppetto-adopt/scripts/l
 import { learningFileTool } from '../skills/geppetto-adopt/scripts/learner-tools.mjs';
 import { memorySettings } from '../skills/geppetto-adopt/scripts/memory-config.mjs';
 
-test('two repositories reuse one machine hook set, key location, memory and maintenance jobs', t => {
+test('two repositories reuse one machine hook set, memory and maintenance jobs', t => {
   const home = fixture(t), a = fixture(t), b = fixture(t);
   const memory = resolve(home, 'memory'); put(memory, 'index.md', '# Memory'); git(memory, ['init', '-q']);
   put(home, '.geppetto/config.json', { memory: { repo: memory, localPath: memory } });
   for (const cwd of [a, b, a]) {
-    const r = invoke('install.mjs', ['--target', 'codex', '--project', cwd], { cwd, home, env: { OPENROUTER_API_KEY: 'synthetic' } });
+    const r = invoke('install.mjs', ['--target', 'codex', '--project', cwd], { cwd, home });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(existsSync(resolve(cwd, '.codex/hooks.json')), false);
   }
   const machine = JSON.parse(get(home, '.geppetto/machine.json'));
   assert.equal(Object.keys(machine.projects).length, 2);
   assert.equal(Object.keys(machine.jobs).length, 3);
-  assert.equal(machine.keys.openrouter, 'OPENROUTER_API_KEY');
   assert.equal(machine.memory.repo, memory);
   const hooks = JSON.parse(get(home, '.codex/hooks.json')).hooks;
   for (const groups of Object.values(hooks)) {

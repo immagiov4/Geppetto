@@ -5,7 +5,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Concern | Source owner under `skills/geppetto-adopt/scripts/` |
 |---|---|
 | Project installation and ownership | `install.mjs` |
-| Shared hooks, job identities, key location and memory | `machine.mjs` |
+| Shared hooks, job identities and memory | `machine.mjs` |
 | OS maintenance attachment and subscription CLI execution | `maintenance.mjs` |
 | PR feedback and requirements/feedback context | `hook.mjs` |
 | In-session learning reminder | `learn-nudge.mjs` |
@@ -16,11 +16,8 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Memory listing and configuration | `memory-hook.mjs`, `memory-config.mjs` |
 | Memory installation and Claude native directory ownership | `memory-setup.mjs` |
 | Cross-machine maintenance registrations | `memory-jobs.mjs` |
-| Suggestion coordination and telemetry | `skill-selector.mjs`, `hook-events.mjs` |
+| Hook telemetry | `hook-events.mjs` |
 | Memory indexes | `memory-index.mjs` |
-| OpenRouter adapters | `skill-provider.mjs` |
-| Skill catalog and prompt hook | `skill-catalog.mjs`, `skill-hook.mjs`, `skill-batches.mjs` |
-| Paid API accounting | `authz.mjs` |
 | Codex native hook trust | `codex-hook-trust.mjs` |
 | Structural gates and instruction migration | `gate-agents.mjs`, `gate-sections.mjs`, `migrate-agents.mjs` |
 

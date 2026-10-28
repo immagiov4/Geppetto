@@ -108,8 +108,7 @@ export function filterHooks(settings, keep) {
 // Twenty calls catches tool-heavy work; five minutes also catches long single-command turns.
 export const learnNudgeDefaults = { enabled: true, benchmark: null, minToolCalls: 20, minDurationMs: 300000 };
 export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, writeApproval: false });
-export const skillSelectorDefaults = { enabled: true, model: 'perplexity/pplx-decider-v1.2', threshold: 0.75, timeoutMs: 8000, batchSize: 80 };
-export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults(), skillSelector: { enabled: true, benchmark: null } } });
+export const defaultConfig = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: { learnNudge: { ...learnNudgeDefaults }, signalLearning: signalLearningDefaults() } });
 
 export async function ignoreLocalFiles(project, paths) {
   const ignorePath = resolve(project, '.geppetto/.gitignore');
@@ -131,7 +130,7 @@ export function validateConfig(config, file) {
   for (const key of ['pr', 'featureDocs', 'optional']) if (!Array.isArray(config.sections?.[key]) || config.sections[key].some(s => typeof s !== 'string' || !s.trim())) fail(`sections.${key} must be an array of nonempty headings`);
   if (typeof config.review?.engine !== 'string' || !['behaviour', 'full'].includes(config.unitCoverage) || !Array.isArray(config.packs)) fail('review, unitCoverage or packs');
   if (!config.pillars || Array.isArray(config.pillars) || Object.values(config.pillars).some(s => !['installed', 'declined', 'n/a'].includes(s))) fail('pillars must use installed, declined or n/a');
-  if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks) || Object.values(config.hooks).some(h => !h || typeof h.enabled !== 'boolean' || !('benchmark' in h))) fail('hooks need enabled and benchmark');
+  if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks) || Object.entries(config.hooks).filter(([name]) => name in defaultConfig().hooks).some(([, h]) => !h || typeof h.enabled !== 'boolean' || !('benchmark' in h))) fail('hooks need enabled and benchmark');
   for (const key of ['minToolCalls', 'minDurationMs']) if (config.hooks.learnNudge?.[key] !== undefined && (!Number.isSafeInteger(config.hooks.learnNudge[key]) || config.hooks.learnNudge[key] <= 0)) fail(`hooks.learnNudge.${key} must be a positive integer`);
   const learning = config.hooks.signalLearning;
   if (learning?.writeApproval !== undefined && typeof learning.writeApproval !== 'boolean') fail('hooks.signalLearning.writeApproval must be boolean');

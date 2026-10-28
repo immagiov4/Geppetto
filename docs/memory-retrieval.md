@@ -2,8 +2,6 @@
 
 At session start the memory hook lists every configured bucket and supplies the full indexes of the project-linked buckets. The agent follows these links through `$geppetto-memory`, searches the authorized topics and opens relevant pages. Preferences remain global; project selections define the linked indexes. Private page contents require an explicit user request.
 
-Per-message memory classification has been removed from the automatic hooks. A controlled paired evaluation found useful suggestions in individual cases but no improvement in answer correctness or convincing net saving in time or tokens. Direct index navigation remains the retrieval path; the skill selector and learning hooks continue independently.
-
 ## Observability
 
 Session context records its status, injected bytes and zero model calls in the local hook-event log. An unavailable configured memory reports a redacted reason. Prompt events produce no memory-classifier request, spending reservation or suggestion, including when an older configuration still enables that classifier.

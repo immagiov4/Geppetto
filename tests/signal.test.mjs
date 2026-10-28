@@ -18,13 +18,3 @@ test('signals redact quoted JSON secrets, environment keys and embedded URL cred
   const record = JSON.parse(get(cwd, '.geppetto/signals.jsonl')); assert.equal(record.text, '{"api_key=[REDACTED]} OPENROUTER_API_KEY=[REDACTED] https://[REDACTED]@example.com');
 });
 
-test('OpenRouter key is sufficient and an optional machine cap covers both projects', t => {
-  const home = fixture(t), a = fixture(t), b = fixture(t); const env = { OPENROUTER_API_KEY: 'fixture' };
-  assert.match(invoke('authz.mjs', ['check', 'skill-selector', '--cost', 'none'], { cwd: a, home, env }).stdout, /^allow/);
-  assert.match(invoke('authz.mjs', ['check', 'skill-selector', '--cost', '0'], { cwd: a, home, env: { OPENROUTER_API_KEY: '' } }).stdout, /^deny/);
-  put(home, '.geppetto/config.json', { api: { spendCapUsd: 1 } });
-  let r = invoke('authz.mjs', ['reserve', 'skill-selector', '--cost', '0.6', '--id', 'a'], { cwd: a, home, env }); assert.equal(r.status, 0, r.stderr);
-  assert.match(invoke('authz.mjs', ['reserve', 'memory-classifier', '--cost', '0.6', '--id', 'b'], { cwd: b, home, env }).stdout, /^deny/);
-  assert.equal(invoke('authz.mjs', ['settle', '--id', 'a', '--actual', '0.1'], { cwd: a, home, env }).status, 0);
-  assert.equal(invoke('authz.mjs', ['reserve', 'memory-classifier', '--cost', '0.6', '--id', 'b'], { cwd: b, home, env }).status, 0);
-});

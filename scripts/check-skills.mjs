@@ -3,7 +3,7 @@ import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cli, isMain, UsageError, filesUnder } from '../skills/geppetto-adopt/scripts/common.mjs';
 import { markdownLines } from '../skills/geppetto-adopt/scripts/gate-sections.mjs';
-export const ownSkills = ['adopt', 'spec', 'build', 'verify', 'learn', 'memory', 'authorize', 'measure-it', 'x-ray', 'reuse-it', 'living-docs', 'behaviour-tests'].map(name => `geppetto-${name}`);
+export const ownSkills = ['adopt', 'spec', 'build', 'verify', 'learn', 'memory', 'measure-it', 'x-ray', 'reuse-it', 'living-docs', 'behaviour-tests'].map(name => `geppetto-${name}`);
 export const bundledSkills = ['writing-for-agents', 'requirements-blast-radius', 'skill-learning-patterns', 'code-review', 'receive-work-feedback', 'retro'];
 const requiredTemplates = ['AGENTS.md', 'CLAUDE.md', 'pr-ticket.md', 'feature-doc.md', 'jobs/learn.md', 'jobs/curate-skills.md', 'jobs/maintain-memory.md', 'hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json', 'ci/pr-gate.yml'];
 

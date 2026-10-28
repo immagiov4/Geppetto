@@ -21,7 +21,7 @@ async function safePath(root, path) {
 
 function validateManifest(manifest, root, statePath) {
   if (manifest.version !== 1 || !manifest.installations || typeof manifest.installations !== 'object' || Array.isArray(manifest.installations)) throw new Error(`${statePath}:1: Invalid install manifest`);
-  for (const path of manifest.removed ?? []) if (typeof path !== 'string' || !/^(?:\.agents\/skills\/|\.claude\/skills\/|\.geppetto\/bin\/)/.test(path) && !generatedPaths.has(path) || !contained(root, resolve(root, path)) || portable(relative(root, resolve(root, path))) !== path) throw new Error(`${statePath}:1: Invalid retired path`);
+  for (const path of manifest.removed ?? []) if (typeof path !== 'string' || (!/^(?:\.agents\/skills\/|\.claude\/skills\/|\.geppetto\/bin\/)/.test(path) && !generatedPaths.has(path)) || !contained(root, resolve(root, path)) || portable(relative(root, resolve(root, path))) !== path) throw new Error(`${statePath}:1: Invalid retired path`);
   for (const [owner, entry] of Object.entries(manifest.installations)) {
     if (!['claude', 'codex', 'agents'].includes(owner) || !entry || !entry.files || typeof entry.files !== 'object' || Array.isArray(entry.files)) throw new Error(`${statePath}:1: Invalid install owner`);
     const prefix = owner === 'claude' ? '.claude/skills/' : '.agents/skills/';
@@ -184,7 +184,7 @@ export async function main(args) {
     const ownerGenerated = owner === target ? generated : entry.generated ?? [];
     const ownerPlugin = owner === target ? plugin : Boolean(entry.plugin);
     const desired = await desiredFiles({ target: owner, uninstall: opts['--uninstall'], root, source, previous: entry, generated: owner === target ? recorded : [], plugin: ownerPlugin, gateSha });
-    const plan = await planInstallation({ root, manifest, target: owner, desired, acceptedGenerated: owner === target ? recorded : [], retireShared: !opts['--uninstall'] });
+    const plan = await planInstallation({ root, manifest, target: owner, desired, acceptedGenerated: recorded, retireShared: !opts['--uninstall'] });
     plans.push({ target: owner, generated: ownerGenerated, plugin: ownerPlugin, plan });
   }
   const changes = [...new Map(plans.flatMap(({ plan }) => plan.changes.map(change => [change.path, change]))).values()];
@@ -198,7 +198,7 @@ export async function main(args) {
   if (opts['--dry-run']) return 0;
   if (!opts['--uninstall']) await applyInstallation({ root, manifest, statePath, uninstall: false, source, plans });
   let machine;
-  try { machine = await reconcileMachine(root, target, source, { pluginHooks: plugin, uninstall: opts['--uninstall'], uninstallMemory: ['native', 'none'].includes(memory?.choice) ? null : memory, memoryChoice: opts['--memory'], addJobs: opts['--add-job'], jobs: opts['--scheduler-jobs'] ? await jsonFile(opts['--scheduler-jobs']) : {} }); }
+  try { for (const owner of plans) machine = await reconcileMachine(root, owner.target, source, { pluginHooks: owner.plugin, uninstall: opts['--uninstall'], uninstallMemory: ['native', 'none'].includes(memory?.choice) ? null : memory, memoryChoice: opts['--memory'], addJobs: opts['--add-job'], jobs: opts['--scheduler-jobs'] ? await jsonFile(opts['--scheduler-jobs']) : {} }); }
   catch (error) {
     if (!['EACCES', 'EPERM'].includes(error.code ?? error.cause?.code)) throw error;
     const retry = [process.execPath, fileURLToPath(import.meta.url), ...args.map((arg, index) => args[index - 1] === '--project' ? root : arg)].map(arg => `'${arg.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`).join(' ');
@@ -213,7 +213,7 @@ export async function main(args) {
     }
   }
   if (opts['--uninstall']) await applyInstallation({ root, manifest, statePath, uninstall: true, source, plans });
-  console.log(`Machine resources: ${Object.keys(machine.hooks).join(', ')} hooks; ${Object.keys(machine.jobs).join(', ')} jobs; OpenRouter ${process.env.OPENROUTER_API_KEY ? 'available' : 'key missing'}`);
+  console.log(`Machine resources: ${Object.keys(machine.hooks).join(', ')} hooks; ${Object.keys(machine.jobs).join(', ')} jobs; OpenRouter ${process.env.OPENROUTER_API_KEY ? 'available for requirements screening' : 'key missing for requirements screening'}`);
   console.log(`Memory: ${memoryDescription(await memoryConfiguration(root))}; change with --memory <local|github|native|none>.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
@@ -235,14 +235,14 @@ async function installationGit(root, manifest, opts) {
   if (!files.length) throw new Error('No owned installation to commit');
   const removed = (manifest.removed ?? []).filter(path => !files.includes(path));
   for (const path of removed) if (await exists(resolve(root, path))) throw new Error(`${path}:1: Retired file was recreated; reconcile it before committing`);
-  const trackedRemoved = removed.filter(path => git(['ls-files', '--', path]));
+  const head = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status === 0;
+  const trackedRemoved = removed.filter(path => git(['ls-files', '--', path]) || (head && git(['ls-tree', '--name-only', 'HEAD', '--', path])));
   const registry = '.geppetto/install.json';
   const paths = [...files, ...trackedRemoved, '.geppetto/.gitignore'];
   const directory = await mkdtemp(resolve(tmpdir(), 'geppetto-install-'));
   const env = { ...process.env, GIT_INDEX_FILE: resolve(directory, 'index') };
   const isolated = args => gitOutput(root, args, { env, label: 'Installation commit' });
   try {
-    const head = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status === 0;
     isolated(['read-tree', head ? 'HEAD' : '--empty']);
     isolated(['add', '-f', '--', ...paths]);
     isolated(['rm', '--cached', '--ignore-unmatch', '--', registry]);
