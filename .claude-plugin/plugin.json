@@ -1,6 +1,8 @@
 {
   "name": "geppetto",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Small, proven engineering changes with portable skills, gates and owner-controlled spending.",
-  "author": { "name": "immagiov4" }
+  "author": {
+    "name": "immagiov4"
+  }
 }

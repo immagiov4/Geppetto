@@ -1,13 +1,21 @@
 {
   "name": "geppetto",
-  "interface": { "displayName": "Geppetto" },
+  "interface": {
+    "displayName": "Geppetto"
+  },
   "plugins": [
     {
       "name": "geppetto",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "description": "Portable engineering skills and deterministic gates.",
-      "source": { "source": "local", "path": "./" },
-      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
       "category": "Productivity"
     }
   ]

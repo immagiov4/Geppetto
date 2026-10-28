@@ -41,7 +41,7 @@ async function attachJobs(machine, path, registry, { home, harness, source, jobs
     await atomicJson(path, machine);
     const osJob = ['windows-task-scheduler', 'cron'].includes(previous?.scheduler);
     const attached = previous?.status === 'scheduled' && !osJob ? previous : jobs[name] ?? await scheduler(name, { home, host: previous?.host ?? harness, source });
-    machine.jobs[name] = { ...attached, source: resolve(source.path, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`), status: attached ? 'scheduled' : 'needs-scheduler' };
+    machine.jobs[name] = { ...attached, source: `skills/geppetto-adopt/assets/templates/jobs/${name}.md`, status: attached ? 'scheduled' : 'needs-scheduler' };
     await atomicJson(path, machine);
     if (registry) await registry.update(rows => {
       const index = rows.findIndex(row => row.machine === machineName && row.job === name);
@@ -113,7 +113,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
       await atomicJson(hooksPath, settings);
       machine.hooks[harness] = { source: hooksPath, commands: Object.values(template.hooks).flatMap(groups => groups.flatMap(group => group.hooks.map(hook => hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/'))))) };
     }
-    machine.jobs.learn = { source: resolve(source.path, 'skills/geppetto-adopt/assets/templates/jobs/learn.md'), trigger: 'Stop', status: 'installed' };
+    machine.jobs.learn = { source: 'skills/geppetto-adopt/assets/templates/jobs/learn.md', trigger: 'Stop', status: 'installed' };
     await refreshMaintenanceLauncher(home, source);
     await attachJobs(machine, path, registry, { home, harness, source, jobs, scheduler, addJobs, machineName });
     await atomicJson(path, machine);

@@ -1,9 +1,15 @@
 {
   "name": "geppetto",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Small, proven engineering changes with portable skills, gates and owner-controlled spending.",
-  "author": { "name": "immagiov4" },
-  "keywords": ["skills", "engineering", "behaviour-tests"],
+  "author": {
+    "name": "immagiov4"
+  },
+  "keywords": [
+    "skills",
+    "engineering",
+    "behaviour-tests"
+  ],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
   "interface": {
@@ -12,7 +18,14 @@
     "longDescription": "Adopt portable engineering workflows, specify and build small units, verify behaviour, learn from friction and control spending through owner grants.",
     "developerName": "immagiov4",
     "category": "Productivity",
-    "capabilities": ["Interactive", "Read", "Write"],
-    "defaultPrompt": ["Adopt Geppetto on this project", "Verify this change with Geppetto"]
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Adopt Geppetto on this project",
+      "Verify this change with Geppetto"
+    ]
   }
 }

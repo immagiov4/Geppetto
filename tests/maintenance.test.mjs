@@ -2,10 +2,47 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { rmSync, existsSync } from 'node:fs';
+import { rmSync, existsSync, cpSync } from 'node:fs';
 import { fixture, get, put, repo, invoke } from './helpers.mjs';
 import { reconcileMachine } from '../skills/geppetto-adopt/scripts/machine.mjs';
 import { scheduleMaintenance, disableMaintenance } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
+
+for (const host of ['claude', 'codex']) test(`${host} jobs run after the installed plugin cache is deleted without re-registration`, async t => {
+  const home = isolatedMachine(t), project = fixture(t);
+  const cache = resolve(home, host, 'plugins/cache/geppetto/geppetto');
+  const oldSource = resolve(cache, '0.3.1'), newSource = resolve(cache, '0.10.0');
+  const installPackage = (path, version) => {
+    cpSync(resolve(repo, 'skills'), resolve(path, 'skills'), { recursive: true });
+    put(path, 'package.json', { name: 'geppetto', version, type: 'module' });
+  };
+  installPackage(oldSource, '0.3.1');
+  await reconcileMachine(project, host, { path: oldSource, version: '0.3.1' }, {
+    home, pluginHooks: true,
+    scheduler: async name => ({ id: `Geppetto-${name}`, status: 'scheduled', host }),
+  });
+  const registered = get(home, '.geppetto/machine.json');
+  installPackage(newSource, '0.10.0');
+  installPackage(resolve(cache, '0.9.9'), '0.9.9');
+  // An interrupted update must not hide the newest complete installed package.
+  put(resolve(cache, '0.11.0'), 'package.json', { name: 'geppetto', version: '0.11.0' });
+  rmSync(oldSource, { recursive: true, force: true });
+  const launcher = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
+  for (const name of ['curate-skills', 'maintain-memory']) {
+    const result = spawnSync(process.execPath, [launcher, '--run', name, '--dry-run'], {
+      encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const plan = JSON.parse(result.stdout);
+    assert.equal(plan.source, resolve(newSource, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`));
+    assert.equal(plan.host, host);
+    if (name === 'curate-skills') assert.deepEqual(plan.roots, [newSource]);
+  }
+  assert.equal(get(home, '.geppetto/machine.json'), registered);
+  rmSync(cache, { recursive: true, force: true });
+  const missing = spawnSync(process.execPath, [launcher, '--run', 'curate-skills', '--dry-run'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /No installed Geppetto maintenance package/);
+});
 
 function isolatedMachine(t) {
   const home = fixture(t), original = { ...process.env };
@@ -161,7 +198,7 @@ for (const platform of ['win32', 'linux']) test(`${platform} maintenance launche
   const machine = JSON.parse(get(home, '.geppetto/machine.json'));
   for (const name of ['curate-skills', 'maintain-memory']) {
     assert.equal(machine.jobs[name].id, `Geppetto-${name}`);
-    assert.equal(machine.jobs[name].source, resolve(newSource, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`));
+    assert.equal(machine.jobs[name].source, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`);
   }
   if (platform === 'win32') {
     assert.equal(windowsTasks.size, 2); assert.equal(registrations, 6);

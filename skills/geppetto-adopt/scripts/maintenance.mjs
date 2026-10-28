@@ -1,6 +1,6 @@
-import { readFile, writeFile, open, mkdir } from 'node:fs/promises';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { readFile, writeFile, open, mkdir, readdir, access } from 'node:fs/promises';
+import { resolve, basename, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cli, isMain, userHome, jsonFile, run } from './common.mjs';
 import { learningCommand, executeLearning } from './learn-runner.mjs';
 import { memorySettings } from './memory-config.mjs';
@@ -9,12 +9,37 @@ const cadence = 'weekly Monday 09:00 (local time)';
 const cronCadence = '0 9 * * 1';
 const psQuote = text => `'${text.replaceAll("'", "''")}'`;
 const shQuote = text => `'${text.replaceAll("'", "'\\''")}'`;
+/** Resolve disposable version directories while preserving source checkouts. */
+async function maintenanceSource(source) {
+  if (!/^\d+\.\d+\.\d+$/.test(basename(source))) return source;
+  const cache = dirname(source), versions = await readdir(cache).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+  for (const version of versions.filter(name => /^\d+\.\d+\.\d+$/.test(name)).sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))) {
+    const candidate = resolve(cache, version);
+    try {
+      const metadata = JSON.parse(await readFile(resolve(candidate, 'package.json'), 'utf8'));
+      if (metadata.name !== 'geppetto' || metadata.version !== version) continue;
+      await access(resolve(candidate, 'skills/geppetto-adopt/scripts/maintenance.mjs'));
+      await access(resolve(candidate, 'skills/geppetto-adopt/scripts/common.mjs'));
+      return candidate;
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  throw new Error('No installed Geppetto maintenance package in ' + cache + '; reinstall the plugin.');
+}
 /** Refresh the fixed OS entrypoint while the installer holds the machine lock. */
 export async function refreshMaintenanceLauncher(home, source) {
   const script = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
-  const scripts = resolve(source.path, 'skills/geppetto-adopt/scripts');
   await mkdir(resolve(home, '.geppetto/bin'), { recursive: true });
-  await writeFile(script, `import { main } from ${JSON.stringify(pathToFileURL(resolve(scripts, 'maintenance.mjs')).href)};\nimport { cli } from ${JSON.stringify(pathToFileURL(resolve(scripts, 'common.mjs')).href)};\nawait cli(main);\n`);
+  // Embed the resolver so deleting its original plugin cache cannot break this entrypoint.
+  await writeFile(script, `import { readdir, readFile, access } from 'node:fs/promises';
+import { resolve, basename, dirname } from 'node:path';
+import { pathToFileURL } from 'node:url';
+${maintenanceSource.toString()}
+try {
+  const scripts = resolve(await maintenanceSource(${JSON.stringify(source.path)}), 'skills/geppetto-adopt/scripts');
+  const { main } = await import(pathToFileURL(resolve(scripts, 'maintenance.mjs')).href);
+  process.exitCode = (await main(process.argv.slice(2))) ?? 0;
+} catch (error) { console.error(error.message); process.exitCode = 1; }
+`);
   return script;
 }
 function nextWeeklyRun(expression) {
@@ -87,14 +112,17 @@ export async function disableMaintenance(name, job, { execute = run } = {}) {
 }
 /** Run only active registrations with the subscription CLI, inheriting its model settings. */
 export async function main(args) {
-  if (args.length !== 2 || args[0] !== '--run' || !maintenanceJobs.includes(args[1])) throw new Error('Usage: maintenance.mjs --run <curate-skills|maintain-memory>');
+  if (![2, 3].includes(args.length) || args[0] !== '--run' || !maintenanceJobs.includes(args[1]) || (args.length === 3 && args[2] !== '--dry-run')) throw new Error('Usage: maintenance.mjs --run <curate-skills|maintain-memory> [--dry-run]');
   const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'));
   const job = machine.jobs[args[1]];
   if (job?.status !== 'scheduled') return 0;
+  for (const targets of Object.values(machine.projects ?? {})) for (const [target, source] of Object.entries(targets)) targets[target] = await maintenanceSource(source);
   const memory = args[1] === 'maintain-memory' ? await memorySettings(userHome()) : null;
   const procedure = new URL(`../../${args[1] === 'maintain-memory' ? 'geppetto-memory' : 'skill-learning-patterns'}/SKILL.md`, import.meta.url);
-  const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(job.source, 'utf8')}\nResolved machine context: ${JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory })}. Work only within the supplied file tools; private buckets are excluded. Keep changes local for review.\n`;
+  const source = new URL(`../assets/templates/jobs/${args[1]}.md`, import.meta.url);
+  const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(source, 'utf8')}\nResolved machine context: ${JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory })}. Work only within the supplied file tools; private buckets are excluded. Keep changes local for review.\n`;
   const roots = args[1] === 'maintain-memory' ? [memory?.localPath ?? machine.memory?.localPath].filter(Boolean) : [...new Set(Object.values(machine.projects).flatMap(project => Object.values(project)))];
+  if (args[2] === '--dry-run') { console.log(JSON.stringify({ job: args[1], host: job.host ?? 'codex', source: fileURLToPath(source), roots })); return 0; }
   const log = resolve(userHome(), `.geppetto/${args[1]}.log`);
   await writeFile(log, roots.length ? '' : 'No configured maintenance destination.\n');
   const output = await open(log, 'a');
