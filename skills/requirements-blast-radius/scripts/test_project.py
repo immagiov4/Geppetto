@@ -10,94 +10,33 @@ spec = importlib.util.spec_from_file_location('installer', HERE/'install.py')
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 
-def invoke(script, cwd, client, project=False):
-    result = subprocess.run(['bun', str(script), '--client', client] + (['--requirements-project-hook'] if project else []), input=json.dumps({'prompt':'Implement feature', 'cwd':str(cwd)}), text=True, capture_output=True, check=True, creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-    return json.loads(result.stdout) if result.stdout else None
-
 class ProjectChecks(unittest.TestCase):
-    def test_standalone_hook_yields_to_declared_integrated_geppetto_handler(self):
+    def test_install_updates_skills_and_preserves_settings_without_injecting_context(self):
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder); (root/'.git').mkdir()
-            for client,name in [('claude','.claude/settings.json'),('codex','.codex/hooks.json')]:
-                settings=root/name; settings.parent.mkdir(parents=True)
-                settings.write_text(json.dumps({'hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':'node .geppetto/bin/hook.mjs'}]}]}}))
-                self.assertTrue(invoke(HERE/'prompt-hook.cjs',root,client), 'an old Geppetto handler alone is not equivalent')
-                package=root/'plugin with spaces'
-                hook=package/'skills/geppetto-adopt/scripts/hook.mjs'
-                context=package/'skills/requirements-blast-radius/scripts/message-context.cjs'
-                hook.parent.mkdir(parents=True,exist_ok=True); context.parent.mkdir(parents=True,exist_ok=True)
-                settings.write_text(json.dumps({'hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':'node "'+hook.as_posix()+'"'}]}]}}))
-                self.assertTrue(invoke(HERE/'prompt-hook.cjs',root,client), 'missing integrated scripts leave the reminder available')
-                hook.write_text('owned fixture'); context.write_text('owned fixture')
-                self.assertIsNone(invoke(HERE/'prompt-hook.cjs',root,client))
-                self.assertIsNone(invoke(HERE/'prompt-hook.cjs',root,client,project=True))
-                context.unlink()
-                self.assertTrue(invoke(HERE/'prompt-hook.cjs',root,client))
-
-    def test_prompt_routes_requirements_feedback_and_learning_in_three_internal_lines(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder)
-            for client in ['claude','codex']:
-                for prompt in ['Change the required outcome','This part of your work is incorrect']:
-                    result=subprocess.run(['bun',str(HERE/'prompt-hook.cjs'),'--client',client],input=json.dumps({'hook_event_name':'UserPromptSubmit','prompt':prompt,'cwd':str(root)}),text=True,capture_output=True,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-                    output=json.loads(result.stdout)
-                    self.assertEqual(list(output),['hookSpecificOutput'])
-                    self.assertEqual(output['hookSpecificOutput']['hookEventName'],'UserPromptSubmit')
-                    lines=output['hookSpecificOutput']['additionalContext'].splitlines()
-                    self.assertEqual(len(lines),3)
-                    self.assertIn('$requirements-blast-radius',lines[0])
-                    self.assertIn('reuse a supplied map',lines[0])
-                    self.assertIn('$receive-work-feedback',lines[1])
-                for event,prompt in [('UserPromptSubmit',' '),('Stop','Feedback')]:
-                    skipped=subprocess.run(['bun',str(HERE/'prompt-hook.cjs'),'--client',client],input=json.dumps({'hook_event_name':event,'prompt':prompt,'cwd':str(root)}),text=True,capture_output=True,check=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-                    self.assertEqual(skipped.stdout,'')
-
-    def test_install_update_and_combined_hooks(self):
-        with tempfile.TemporaryDirectory(prefix='requirements project ') as folder:
-            root=Path(folder); repo=root/'repo'; repo.mkdir(); (repo/'.git').mkdir()
-            original={'model':'keep','hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':'keep'}]}], 'Stop':[]}}
-            for name in ['.claude/settings.json','.codex/hooks.json']:
-                target=repo/name; target.parent.mkdir(); target.write_text(json.dumps(original))
-            installer.install_project(HERE.parent,repo,root/'backups')
-            dest=repo/'.agents/skills/requirements-blast-radius'
-            (dest/'obsolete').write_text('stale')
-            installer.install_project(HERE.parent,repo,root/'backups')
-            self.assertFalse((dest/'obsolete').exists())
-            self.assertEqual((dest/'SKILL.md').read_bytes(),(HERE.parent/'SKILL.md').read_bytes())
-            self.assertTrue((repo/'.claude/skills/requirements-blast-radius/SKILL.md').is_file())
-            self.assertFalse((repo/'.claude/settings.local.json').exists())
-            nested=repo/'src'; nested.mkdir()
-            for client,name in [('claude','.claude/settings.json'),('codex','.codex/hooks.json')]:
-                settings=json.loads((repo/name).read_text()); groups=settings['hooks']['UserPromptSubmit']
-                self.assertEqual(settings['model'],'keep'); self.assertEqual(settings['hooks']['Stop'],[])
-                self.assertEqual(groups[0],original['hooks']['UserPromptSubmit'][0]); self.assertEqual(len(groups),2)
-                command=groups[1]['hooks'][0]['command']; self.assertNotIn(str(repo),command)
-                result=subprocess.run(command,shell=True,cwd=nested,input=json.dumps({'prompt':'Implement','cwd':str(repo)}),text=True,capture_output=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-                self.assertEqual(result.returncode,0,result.stderr); self.assertTrue(json.loads(result.stdout)['hookSpecificOutput']['additionalContext'])
-                home=root/client; installer.install(HERE.parent,home,client,root/('backup-'+client))
-                global_hook=home/'skills/requirements-blast-radius/scripts/prompt-hook.cjs'
-                local=dest/'scripts/prompt-hook.cjs'
-                self.assertEqual([invoke(global_hook,nested,client),bool(invoke(local,nested,client,project=True))],[None,True])
-                self.assertTrue(invoke(global_hook,root,client))
-                (repo/name).unlink()
-                self.assertTrue(invoke(global_hook,nested,client))
-
-    def test_shared_global_and_project_file_emits_once_and_repo_version_wins(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder); (root/'.git').mkdir()
-            entry=root/'.claude/skills/requirements-blast-radius/SKILL.md'
-            entry.parent.mkdir(parents=True); entry.write_text('Original entry')
+            root = Path(folder); (root/'.git').mkdir()
+            for name in ['.claude/settings.json', '.codex/hooks.json']:
+                target = root/name; target.parent.mkdir(parents=True)
+                target.write_text(json.dumps({'model':'keep','hooks':{'UserPromptSubmit':[{'hooks':[
+                    {'type':'command','command':'keep'},
+                    {'type':'command','command':'bun "C:/fixture/skills/requirements-blast-radius/scripts/prompt-hook.cjs" --client claude'},
+                    {'type':'command','command':'bun -e "fixture" -- --client codex --requirements-project-hook'}
+                ]}],'Stop':[]}}))
             installer.install_project(HERE.parent,root,root/'backups')
-            self.assertEqual((root/'backups/claude-skill.md').read_text(),'Original entry')
-            local=root/'.agents/skills/requirements-blast-radius/scripts/prompt-hook.cjs'
+            installer.install_project(HERE.parent,root,root/'backups')
+            self.assertEqual((root/'.agents/skills/requirements-blast-radius/SKILL.md').read_bytes(),(HERE.parent/'SKILL.md').read_bytes())
+            self.assertTrue((root/'.claude/skills/requirements-blast-radius/SKILL.md').is_file())
+            for name in ['.claude/settings.json', '.codex/hooks.json']:
+                settings = json.loads((root/name).read_text())
+                self.assertEqual(settings['model'],'keep')
+                self.assertEqual(settings['hooks']['Stop'],[])
+                self.assertEqual(settings['hooks']['UserPromptSubmit'],[{'hooks':[{'type':'command','command':'keep'}]}])
             for client in ['claude','codex']:
-                # Invocation identity remains distinct even when both commands share a file.
-                self.assertIsNone(invoke(local,root,client))
-                self.assertTrue(invoke(local,root,client,project=True))
-            local.write_text("process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:'repository version'}}))")
-            for client in ['claude','codex']:
-                self.assertIsNone(invoke(HERE/'prompt-hook.cjs',root,client))
-                self.assertEqual(invoke(local,root,client,project=True)['hookSpecificOutput']['additionalContext'],'repository version')
+                home = root/client; home.mkdir()
+                settings = home/('settings.json' if client=='claude' else 'hooks.json')
+                settings.write_text(json.dumps({'hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':'keep'}]}]}}))
+                installer.install(HERE.parent,home,client,root/('backup-'+client))
+                self.assertEqual(json.loads(settings.read_text())['hooks']['UserPromptSubmit'],[{'hooks':[{'type':'command','command':'keep'}]}])
+                self.assertFalse((home/'skills/requirements-blast-radius/scripts/prompt-hook.cjs').exists())
 
     def test_claude_entry_file_link_preserves_canonical_content(self):
         import os
@@ -137,7 +76,7 @@ class ProjectChecks(unittest.TestCase):
             entry=root/'.claude/skills/requirements-blast-radius/SKILL.md'
             settings=root/'.claude/settings.json'
             original=root/'original.json'; original.write_text('{"preserve":true}')
-            settings.unlink()
+            settings.unlink(missing_ok=True)
             try:
                 os.symlink(canonical,entry.with_name('SKILL.md.requirements-tmp'))
                 os.symlink(original,settings.with_suffix('.json.requirements-tmp'))
@@ -153,18 +92,7 @@ class ProjectChecks(unittest.TestCase):
             root=Path(folder); (root/'.git').mkdir()
             result=subprocess.run([sys.executable,str(HERE/'install.py'),'--project',str(root)],text=True,capture_output=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             self.assertEqual(result.returncode,0,result.stderr)
-            self.assertTrue((root/'.codex/hooks.json').is_file())
-
-    def test_legacy_global_hook_is_updated_without_duplicate(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder); home=root/'claude'; home.mkdir()
-            command='bun "'+(home/'skills/requirements-blast-radius/scripts/prompt-hook.cjs').as_posix()+'"'
-            (home/'settings.json').write_text(json.dumps({'hooks':{'UserPromptSubmit':[{'hooks':[{'type':'command','command':command}]}]}}))
-            installer.install(HERE.parent,home,'claude',root/'backups')
-            installer.install(HERE.parent,home,'claude',root/'backups')
-            groups=json.loads((home/'settings.json').read_text())['hooks']['UserPromptSubmit']
-            self.assertEqual(len(groups),1)
-            self.assertTrue(invoke(home/'skills/requirements-blast-radius/scripts/prompt-hook.cjs',root,'claude'))
+            self.assertFalse((root/'.codex/hooks.json').exists())
 
     def test_provider_screen_without_key_skips_without_network(self):
         from unittest.mock import patch

@@ -90,7 +90,6 @@ function source(t) {
   put(root, 'package.json', { name: 'geppetto', version: '0.1.0' });
   put(root, 'skills/geppetto-adopt/SKILL.md', '---\nname: geppetto-adopt\ndescription: Adopt\n---\nAdopt');
   put(root, 'skills/geppetto-example/SKILL.md', '---\nname: geppetto-example\ndescription: Example\n---\nOriginal');
-  put(root, 'skills/requirements-blast-radius/scripts/message-context.cjs', get(repo, 'skills/requirements-blast-radius/scripts/message-context.cjs'));
   cpSync(resolve(repo, 'skills/geppetto-adopt/assets/templates'), resolve(root, 'skills/geppetto-adopt/assets/templates'), { recursive: true });
   git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']); git(root, ['config', 'user.email', 'fixture@example.invalid']);
   git(root, ['add', '.']); git(root, ['commit', '-qm', 'Package']);
@@ -143,7 +142,7 @@ test('dry run is read-only, installation uses skill scripts, update reconciles h
   r = invoke(install, args, { cwd }); assert.equal(r.status, 0, r.stderr); assert.match(get(cwd, '.agents/skills/geppetto-example/SKILL.md'), /Original$/);
   assert.equal(existsSync(resolve(cwd, '.geppetto/bin/pr-event.mjs')), false);
   const prompt = invoke(resolve(cwd, '.agents/skills/geppetto-adopt/scripts/hook.mjs'), [], { cwd, input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'Review this feedback', cwd }) });
-  assert.equal(prompt.status, 0, prompt.stderr); assert.match(JSON.parse(prompt.stdout).hookSpecificOutput.additionalContext, /\$receive-work-feedback/);
+  assert.equal(prompt.status, 0, prompt.stderr); assert.deepEqual(JSON.parse(prompt.stdout), {});
   r = invoke(resolve(cwd, '.agents/skills/geppetto-adopt/scripts/gate-sections.mjs'), ['--pr', '-'], { cwd, input: '## Observability\nLogs' }); assert.equal(r.status, 0, r.stderr);
   put(cwd, '.agents/skills/foreign/SKILL.md', 'Keep'); put(root, 'skills/geppetto-example/SKILL.md', 'Updated');
   assert.equal(invoke(install, args, { cwd }).status, 0); assert.equal(get(cwd, '.agents/skills/geppetto-example/SKILL.md'), 'Updated');

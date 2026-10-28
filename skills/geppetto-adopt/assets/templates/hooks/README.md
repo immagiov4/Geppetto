@@ -1,6 +1,6 @@
 # Hook operation
 
-The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit adds requirements, feedback and frustration reminders; PreToolUse checks PR text; PostToolUse supplies internal learning reminders; Stop checks independent review and starts background learning through the same dispatch.
+The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings; UserPromptSubmit captures the turn boundary without adding context; PreToolUse checks PR text; PostToolUse supplies internal learning reminders; Stop checks the turn decision and independent review, then starts background learning through the same dispatch.
 
 ## Activation
 
@@ -32,6 +32,16 @@ Hermes uses its [plugin template](hermes/plugin.yaml) for read-only memory listi
 
 Complete `$geppetto-verify` or its configured `code-review` engine to record the reviewed diff. The review record holds a SHA-256, resolved comparison base, timestamp and outcome in ignored `.geppetto/reviews.jsonl`; comparison state under `.geppetto/hook-state/` holds only line hashes. Source and diffs stay out of these files. Tracked and non-ignored untracked text source count; binary files, symlinks and submodule contents are outside this gate's line measure. The gate verifies review identity, while the review procedure owns independence and findings.
 
+## Turn record
+
+Before closing a turn, record your decisions about its user message with `node <adopt>/scripts/hook.mjs --record-turn '<json>' --session <session-id> --turn <turn-id>` from the project root. Stop supplies the exact installed command and identities when the decision is missing; `--record-turn -` reads JSON from stdin. The command validates and stages the decision; the closing Stop appends one line to ignored `.geppetto/turns.jsonl`, including its gate-computed `review` and session/turn identity, timestamp and transcript byte boundary. Concurrent sessions have separate decision files. A turn with a valid record can still need independent review under the gate above; both checks share one block per turn. A repeated Stop closes safely and records a missing-decision diagnostic when applicable.
+
+```json
+{"requirements":{"changes":false},"feedback":{"applies":false},"frustration":{"applies":false}}
+```
+
+Use `requirements.changes: true` when the user changes even one agreed point; run `$requirements-blast-radius` against the original request and agreed changes, and put the changed point in `what`. For feedback on your work, run `$receive-work-feedback` and record `feedback.applies: true`, `on` (what the user judged) and `action` (what you did). For frustration caused by your work, use `$geppetto-learn` and record `frustration.applies: true`, `cause` and `prevention` (the owning improvement or signal). Each positive reason is a meaningful single line; placeholders such as `n/a`, `none`, `-`, `ok` and `no` are rejected. Keep reasons concise and free of secrets. For a pure continuation with no user message content to judge, use `{"continuation":true}`. The gate checks the record's structure; the agent owns the judgments and actions.
+
 ## Observability
 
-`hook-events.jsonl` records reviewGate outcomes, changed-line counts and current diff hash, alongside learning launch failures and existing learning events. The gate makes no model calls; local Git and file reads add Stop overhead. Synthetic tests cover matched review, post-review edits, exclusions, turn boundaries and one-block behavior. Real CLI probes establish host continuation separately from review quality. Background admission, cursor and reducer limits belong to the linked learning lifecycle.
+`hook-events.jsonl` records reviewGate outcomes, changed-line counts and current diff hash, plus turnGate record/block/missing outcomes, learning launch failures and existing learning events. `turns.jsonl` retains the agent's decisions for later calibration. The combined gate makes no model calls; local Git and file reads add Stop overhead. Its intended gain is explicit decision coverage per user turn; the extra command and possible block add interaction cost. Synthetic tests cover decisions, placeholders, continuations, session isolation, concurrent Stops and review identity. Real CLI probes establish host continuation separately from review quality. Background admission, cursor and reducer limits belong to the linked learning lifecycle.

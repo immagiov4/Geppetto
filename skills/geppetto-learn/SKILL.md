@@ -5,6 +5,8 @@ description: "Improve a skill after a reusable workflow, a verified dead-end fix
 
 # Learn
 
+Geppetto records this decision in the [turn record](../geppetto-adopt/assets/templates/hooks/README.md#turn-record).
+
 1. **Recognize.** After a useful workflow, verified fix, user correction or recurring friction, identify what happened and why. Check whether the relevant procedure was actually used; apply a skipped procedure before changing its instructions. The internal tool/Stop reminder calls this procedure in the current session. Complete when the lesson has evidence and an applicability condition, or discard it.
 2. **Place.** Update the first suitable owner: deterministic contract → script or test; procedure → existing skill through `$skill-learning-patterns`; system description → existing documentation; durable fact or decision rationale → `$geppetto-memory`. Prune contradictory or redundant rules while editing. Complete when the lesson has one owner.
 3. **Verify.** Exercise the affected behavior or representative request, check nearby cases and keep the change only when the evidence supports it. When learning changes hooks, complete [hook activation](../geppetto-adopt/assets/templates/hooks/README.md#activation) for each affected harness and project. Complete when the correction and its limits are demonstrated.

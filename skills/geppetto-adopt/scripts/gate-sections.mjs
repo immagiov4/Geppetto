@@ -32,6 +32,7 @@ export function markdownHeadings(lines) {
   }
   return found;
 }
+export const placeholderReason = text => !/[\p{L}\p{N}]/u.test(text.replace(/[*_`#>]/g, '')) || /^(?:not applicable(?:[\s\p{P}]+because)?|n\/a|tbd|none|ok|no)\b[\s\p{P}]*$/iu.test(text.replace(/[*_`#>]/g, '').trim());
 export function checkSections(text, required, file = '<stdin>') {
   const lines = markdownLines(text);
   const contentLines = markdownLines(text, { keepCode: true });
@@ -48,7 +49,7 @@ export function checkSections(text, required, file = '<stdin>') {
       const body = contentLines.slice(heading.start, end).filter((line, index) => !childHeadings.has(index + heading.start) && !/^ {0,3}(?:`{3,}|~{3,})[^\n]*$/.test(line)).join('\n').trim();
       const plain = body.replace(/[*_`#>]/g, '').trim();
       if (!/[\p{L}\p{N}]/u.test(plain)) errors.push(`${file}:${heading.line + 1}: Empty section: ${title}`);
-      else if (/^(?:not applicable(?:[\s\p{P}]+because)?|n\/a|tbd|none)\b[\s\p{P}]*$/iu.test(plain)) errors.push(`${file}:${heading.line + 1}: Not applicable needs a reason: ${title}`);
+      else if (placeholderReason(plain)) errors.push(`${file}:${heading.line + 1}: Not applicable needs a reason: ${title}`);
     }
   }
   return errors;

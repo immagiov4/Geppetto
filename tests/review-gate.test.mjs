@@ -11,14 +11,21 @@ function project(t) {
   for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) assert.equal(git(cwd, args).status, 0);
   put(cwd, 'app.mjs', lines(40)); put(cwd, '.geppetto/config.json', config());
   git(cwd, ['add', '.']); git(cwd, ['commit', '-qm', 'baseline']);
-  const send = (hook_event_name, extra = {}) => handleEvent({ cwd, session_id: 'gate', turn_id: 'one', hook_event_name, ...extra });
+  const send = async (hook_event_name, extra = {}) => {
+    const result = await handleEvent({ cwd, session_id: 'gate', turn_id: 'one', hook_event_name, ...extra });
+    if (hook_event_name === 'UserPromptSubmit') {
+      const recorded = invoke('hook.mjs', ['--record-turn', JSON.stringify({ continuation: true }), '--session', 'gate', '--turn', extra.turn_id ?? 'one'], { cwd });
+      assert.equal(recorded.status, 0, recorded.stderr);
+    }
+    return result;
+  };
   return { cwd, send };
 }
 test('40 new source lines block once, including untracked source, and the next turn can block again', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit');
   put(cwd, 'new.mjs', lines(40, 'new'));
   const blocked = await send('Stop'); assert.equal(blocked.decision, 'block'); assert.match(blocked.reason, /Code changed without an independent review/);
-  assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl').trim()).lines, 40, 'runtime dotfiles must not inflate the source count');
+  assert.equal(get(cwd, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse).find(row => row.hook === 'reviewGate').lines, 40, 'runtime dotfiles must not inflate the source count');
   assert.deepEqual(await send('Stop'), {});
   await send('UserPromptSubmit', { turn_id: 'two' }); put(cwd, 'new.mjs', lines(80, 'new'));
   assert.equal((await send('Stop', { turn_id: 'two' })).decision, 'block');
@@ -39,7 +46,7 @@ test('docs/tests-only changes pass, configurable exclusions and threshold apply'
   const { cwd, send } = project(t); await send('UserPromptSubmit');
   for (const file of ['docs/manual.txt', 'tests/app.mjs', 'app.test.mjs', 'README.md']) put(cwd, file, lines(40));
   assert.deepEqual(await send('Stop'), {});
-  assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl').trim()).lines, 0);
+  assert.equal(get(cwd, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse).find(row => row.hook === 'reviewGate').lines, 0);
   put(cwd, '.geppetto/config.json', { ...config(), hooks: { reviewGate: { enabled: true, threshold: 50, docGlobs: ['generated/**'], testGlobs: ['checks/**'] } } });
   await send('UserPromptSubmit', { turn_id: 'two' }); put(cwd, 'generated/app.mjs', lines(80)); put(cwd, 'checks/app.mjs', lines(80)); put(cwd, 'extra.mjs', lines(40));
   assert.deepEqual(await send('Stop', { turn_id: 'two' }), {});

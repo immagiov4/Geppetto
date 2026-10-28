@@ -5,6 +5,8 @@ description: Evaluate findings from PR reviews, local reviewing agents, self-rev
 
 # Evaluate review findings
 
+Geppetto records this decision in the [turn record](../geppetto-adopt/assets/templates/hooks/README.md#turn-record).
+
 Apply this procedure to human and automated PR reviews, local reviewing agents,
 self-review, and reviews of documents or other artifacts. A PR is optional.
 

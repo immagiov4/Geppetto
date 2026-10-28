@@ -23,8 +23,7 @@ test('native skill discovery installs and runs with stale selector configuration
     const match = handlers[0].command.replaceAll('${CLAUDE_PLUGIN_ROOT}', repo).match(/^node "([^"]+)"$/); assert.ok(match);
     const result = invoke(match[1], [], { cwd, home, input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd, prompt: 'Revise this requirement using the feedback' }) });
     assert.equal(result.status, 0, result.stderr);
-    const lines = JSON.parse(result.stdout).hookSpecificOutput.additionalContext.split('\n');
-    assert.equal(lines.length, 3); assert.match(lines[0], /\$requirements-blast-radius/); assert.match(lines[1], /\$receive-work-feedback/); assert.match(lines[2], /\$geppetto-learn/);
+    assert.deepEqual(JSON.parse(result.stdout), {});
   }
 });
 

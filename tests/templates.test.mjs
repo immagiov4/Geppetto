@@ -22,10 +22,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     };
     assert.deepEqual(event('UserPromptSubmit'), {});
     const routing = event('UserPromptSubmit', { prompt: 'Change the required result and review this feedback' });
-    assert.match(routing.hookSpecificOutput.additionalContext, /\$requirements-blast-radius/);
-    assert.match(routing.hookSpecificOutput.additionalContext, /\$receive-work-feedback/);
-    assert.equal(routing.hookSpecificOutput.additionalContext.split('\n').length, 3);
-    assert.match(routing.hookSpecificOutput.additionalContext, /frustrated.*\$geppetto-learn.*prevent recurrence/);
+    assert.deepEqual(routing, {});
     assert.deepEqual(event('PreToolUse'), {});
     const learning = event('PostToolUse');
     assert.deepEqual(Object.keys(learning), ['hookSpecificOutput']);

@@ -15,7 +15,7 @@ export async function launchLearning(event) {
 export async function learningEvent(event, now, launch = launchLearning) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const kind = event.hook_event_name ?? 'PreToolUse';
-  if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active) return {};
+  if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active && kind !== 'Stop') return {};
   const root = await projectRoot(event.cwd ?? '.');
   const configPath = resolve(root, '.geppetto/config.json');
   if (!await exists(configPath) && !(kind === 'Stop' && await exists(resolve(root, '.geppetto/signals.jsonl')))) return {};
@@ -62,14 +62,18 @@ export async function learningEvent(event, now, launch = launchLearning) {
 const sliceBytes = 40 * 1024;
 const errorOutput = value => /(?:"(?:is_error|isError)"\s*:\s*true|"(?:exit_code|exitCode)"\s*:\s*-?[1-9]\d*|Process exited with code -?[1-9]\d*|(?:^|\n)(?:Exit code:?\s*-?[1-9]\d*|Error:|ERROR\b|Traceback\b))/.test(value);
 /** Reduce complete JSONL records from a byte cursor; partial final records remain pending. */
-export async function transcriptSlice(path, start = 0, reviewBlocked = false) {
+export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = []) {
   if (start > (await stat(path)).size) start = 0;
   const parts = []; let pending = Buffer.alloc(0), offset = start, candidate = reviewBlocked;
+  const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
+  let preceding = decisions.findLast(turn => turn.transcriptOffset <= start);
+  const recent = decisions.filter(turn => turn.transcriptOffset > start), evidence = new Set();
   const add = (role, text) => { if (text) parts.push({ role, text: `${role}: ${text}\n` }); };
   for await (const chunk of createReadStream(path, { start })) {
     pending = Buffer.concat([pending, chunk]); let end;
     while ((end = pending.indexOf(10)) !== -1) {
-      const line = pending.subarray(0, end).toString('utf8'); pending = pending.subarray(end + 1); offset += end + 1;
+      const lineStart = offset, line = pending.subarray(0, end).toString('utf8'); pending = pending.subarray(end + 1); offset += end + 1;
+      while (recent[0]?.transcriptOffset <= lineStart) preceding = recent.shift();
       if (!line.trim()) continue;
       const record = JSON.parse(line), message = record.type === 'response_item' ? record.payload : record.message;
       if (!message) continue;
@@ -77,11 +81,16 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false) {
       if (['function_call', 'custom_tool_call'].includes(message.type)) { add('tool', `${message.name} ${String(message.arguments ?? message.input ?? '').slice(0, 300)}`); continue; }
       if (['function_call_output', 'custom_tool_call_output'].includes(message.type)) { const output = typeof message.output === 'string' ? message.output : JSON.stringify(message.output); if (errorOutput(output ?? '')) { candidate = true; add('error', output.slice(0, 500)); } continue; }
       if (!['user', 'assistant'].includes(role)) continue;
+      const before = parts.length;
       if (typeof message.content === 'string') add(role, message.content);
       else for (const block of message.content ?? []) {
         if (['text', 'input_text', 'output_text'].includes(block.type)) add(role, block.text);
         if (block.type === 'tool_use') add('tool', `${block.name} ${JSON.stringify(block.input ?? {}).slice(0, 300)}`);
         if (block.type === 'tool_result') { const output = typeof block.content === 'string' ? block.content : JSON.stringify(block.content); if (block.is_error || errorOutput(output ?? '')) { candidate = true; add('error', output.slice(0, 500)); } }
+      }
+      if (parts.slice(before).some(part => part.role === 'user') && preceding) {
+        evidence.add(preceding);
+        candidate ||= preceding.requirements?.changes === false || preceding.frustration?.applies === false;
       }
     }
   }
@@ -101,5 +110,5 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false) {
       return decode(bytes.subarray(0, head)) + decode(bytes.subarray(tail));
     }).join('');
   }
-  return { text, offset, candidate };
+  return { text, offset, candidate, turns: [...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])] };
 }

@@ -32,18 +32,14 @@ test('declared plugin hook launches its shipped script with a real event', t => 
   assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout), {});
 });
 
-test('plugin UserPromptSubmit delivers the routing reminders without a standalone hook or project configuration', t => {
+test('plugin UserPromptSubmit keeps message content free of injected reminders', t => {
   const cwd = fixture(t); const handler = read('hooks/hooks.json').hooks.UserPromptSubmit[0].hooks[0];
   const command = handler.command.replace('${CLAUDE_PLUGIN_ROOT}', repo);
   const match = command.match(/^node "([^"]+)"$/); assert.ok(match);
   const event = { hook_event_name: 'UserPromptSubmit', session_id: 'plugin-only', cwd, prompt: 'Revise the result using this feedback' };
   const result = invoke(match[1], [], { cwd, input: JSON.stringify(event) });
   assert.equal(result.status, 0, result.stderr);
-  const output = JSON.parse(result.stdout); assert.deepEqual(Object.keys(output), ['hookSpecificOutput']);
-  assert.equal(output.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
-  const lines = output.hookSpecificOutput.additionalContext.split('\n'); assert.equal(lines.length, 3);
-  assert.match(lines[0], /\$requirements-blast-radius/); assert.match(lines[1], /\$receive-work-feedback/);
-  assert.match(lines[2], /frustrated.*\$geppetto-learn.*prevent recurrence/);
+  assert.deepEqual(JSON.parse(result.stdout), {});
   const blank = invoke(match[1], [], { cwd, input: JSON.stringify({ ...event, prompt: ' ' }) });
   assert.equal(blank.status, 0, blank.stderr); assert.deepEqual(JSON.parse(blank.stdout), {});
   const child = invoke(match[1], [], { cwd, input: JSON.stringify(event), env: { GEPPETTO_LEARNING_CHILD: '1' } });

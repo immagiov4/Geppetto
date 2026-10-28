@@ -109,7 +109,7 @@ class InstallerChecks(unittest.TestCase):
             self.assertEqual(result['model'], settings['model'])
             self.assertEqual(result['permissions'], settings['permissions'])
             self.assertEqual(result['hooks']['Stop'], settings['hooks']['Stop'])
-            self.assertEqual(len(result['hooks']['UserPromptSubmit']), 1)
+            self.assertNotIn('UserPromptSubmit', result['hooks'])
             self.assertEqual((home/'skills'/'requirements-blast-radius'/'SKILL.md').read_text(), 'fixture')
 
 if __name__ == '__main__': unittest.main()
