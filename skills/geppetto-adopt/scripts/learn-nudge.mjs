@@ -1,5 +1,5 @@
 import { appendFile, mkdir, readFile, open, unlink, stat } from 'node:fs/promises';
-import { resolve, posix } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults, projectRoot } from './common.mjs';
@@ -7,6 +7,7 @@ import { logHookEvent } from './hook-events.mjs';
 import { createReadStream } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { redact } from './signal.mjs';
+import { privateEvidence } from './learning-privacy.mjs';
 /** Record tool starts; completion adds learning context once per qualifying turn. */
 export async function launchLearning(event) {
   const child = spawn(process.execPath, [fileURLToPath(new URL('./learn-runner.mjs', import.meta.url))], { cwd: event.cwd, windowsHide: true, detached: true, shell: false, stdio: ['pipe', 'ignore', 'ignore'] });
@@ -61,17 +62,10 @@ export async function learningEvent(event, now, launch = launchLearning) {
   return { hookSpecificOutput: { hookEventName: kind, additionalContext: `Before your final reply, use $geppetto-learn to improve the existing owner when this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node "${fileURLToPath(new URL('./signal.mjs', import.meta.url)).replaceAll('\\', '/')}" "<lesson>" --metric <affected-metric> from the project root; a reusable lesson or decision rationale with no other owner goes to bucket memory through $geppetto-memory. Keep this routine check internal and continue the requested task. ` } };
 }
 const sliceBytes = 40 * 1024;
-function privateEvidence(value) {
-  if (typeof value === 'string') {
-    const text = value.replaceAll('\\', '/'), privatePath = /\bbuckets\/private(?:\/|["'\s]|$)/i;
-    return privatePath.test(text) || privatePath.test(posix.normalize(text));
-  }
-  return value && typeof value === 'object' && Object.entries(value).some(([key, child]) => privateEvidence(key) || privateEvidence(child));
-}
-export const publicLearningRecords = records => records.filter(record => !privateEvidence(record));
+export const publicLearningRecords = (records, privateRoot, cwd) => records.filter(record => !privateEvidence(record, privateRoot, cwd));
 const errorOutput = value => /(?:"(?:is_error|isError)"\s*:\s*true|"(?:exit_code|exitCode)"\s*:\s*-?[1-9]\d*|Process exited with code -?[1-9]\d*|(?:^|\n)(?:Exit code:?\s*-?[1-9]\d*|Error:|ERROR\b|Traceback\b))/.test(value);
 /** Reduce complete JSONL records from a byte cursor; partial final records remain pending. */
-export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = []) {
+export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = [], privateRoot = null, cwd = process.cwd()) {
   if (start > (await stat(path)).size) start = 0;
   const parts = []; let pending = Buffer.alloc(0), offset = 0, candidate = reviewBlocked, privateSeen = false;
   const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
@@ -85,7 +79,9 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       const lineStart = offset, line = pending.subarray(0, end).toString('utf8'); pending = pending.subarray(end + 1); offset += end + 1;
       if (!line.trim()) continue;
       const record = JSON.parse(line);
-      if (privateEvidence(record)) privateSeen = true;
+      const directory = record.cwd ?? (['session_meta', 'turn_context'].includes(record.type) ? record.payload?.cwd : null);
+      if (typeof directory === 'string') cwd = resolve(cwd, directory);
+      if (privateEvidence(record, privateRoot, cwd)) privateSeen = true;
       if (privateSeen || lineStart < start) continue;
       while (recent[0]?.transcriptOffset <= lineStart) preceding = recent.shift();
       const message = record.type === 'response_item' ? record.payload : record.message;
@@ -107,7 +103,7 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       }
     }
   }
-  if (privateSeen) return { text: '', offset, candidate: false, turns: [] };
+  if (privateSeen) return { text: '', offset, candidate: false, turns: [], skipped: 'private-memory' };
   candidate ||= parts.some(part => part.role === 'user' && /\b(?:no|wrong|instead|actually|correction|incorrect|fix|sbagliato|invece|correggi|correzione|errore)\b/i.test(part.text));
   let text = parts.map(part => part.text).join('');
   if (Buffer.byteLength(text) > sliceBytes) {
@@ -124,5 +120,5 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       return decode(bytes.subarray(0, head)) + decode(bytes.subarray(tail));
     }).join('');
   }
-  return { text, offset, candidate, turns: publicLearningRecords([...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])]) };
+  return { text, offset, candidate, turns: publicLearningRecords([...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])], privateRoot, cwd) };
 }

@@ -56,7 +56,7 @@ test('private memory provenance excludes calls, unattributed outputs and summari
     assert.doesNotMatch((await transcriptSlice(path, tailStart)).text, new RegExp(marker));
     let captured;
     const result = await runLearning(root, { home, context: { learning_qualified: true, session_id: 'private', transcript_path: path }, execute: async request => { captured = request.prompt; return { decision: 'no_change', reason: 'Public evidence already covered.', owner: 'app.mjs' }; } });
-    assert.equal(result.status, 'unchanged'); assert.match(captured, /correct the public owner/); assert.doesNotMatch(captured, new RegExp(marker));
+    assert.equal(result.status, 'idle'); assert.equal(result.skipped, 'private-memory'); assert.equal(captured, undefined);
   }
 });
 
