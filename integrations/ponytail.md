@@ -2,26 +2,22 @@
 
 Skills: ponytail, ponytail-review
 
-Keeps implementation focused on the smallest complete change, with checks tied to the requested behavior.
+[DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) pushes the agent toward the smallest change that does the job; `ponytail-review` reviews with that lens. Useful for fixed, narrow tasks and subagent reviews.
 
-Status: suggested, against [Geppetto's verification contract](https://github.com/immagiov4/Geppetto/blob/main/skills/geppetto-verify/SKILL.md). Project outcome measurements remain to be collected.
+Status: suggested.
 
 ## Install
 
-Claude Code: place the maintainer-provided `ponytail` skill folder in `.claude/skills/` (project) or `~/.claude/skills/` (user). Codex: use `.agents/skills/` or `~/.codex/skills/`. Preserve the source license and the user's model, tier and delegation restrictions. Install only after an explicit yes; resolve the source with the maintainer when absent.
+Claude Code: `claude plugin marketplace add DietrichGebert/ponytail`, then install `ponytail` from it. Codex: `codex plugin marketplace add DietrichGebert/ponytail`, then `codex plugin add` it.
 
 ## With geppetto-build
 
-Use Ponytail to choose the smallest change that covers the requirements map. Keep boundary validation, behavior checks and every requested surface.
+Use it to pick the smallest change that still covers every point of the requirements map.
 
 ## With geppetto-verify
 
-When ponytail-review is installed, use its quality lens within the configured review procedure. Review evidence and model/delegation authorization remain owned by geppetto-verify.
+Use `ponytail-review` as the review lens for small, fixed-scope changes.
 
-## With geppetto-spec
+## With geppetto-living-docs
 
-Question optional machinery and retain the first design that fully satisfies the observed flow.
-
-## With geppetto-learn
-
-Keep the lesson at its existing owner, with the smallest instruction or check that prevents the evidenced recurrence.
+Ponytail discourages new files; the documentation layout agreed in `foundations` still applies.

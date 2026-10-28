@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- Integration catalog: correct the skill-diet source and description, add install commands for ponytail, drop disclaimer sentences.
+
 ## 0.5.0
 
 - Record documentation and observability foundations with the user, report unset choices and preserve agreed structure and realistic collection controls.

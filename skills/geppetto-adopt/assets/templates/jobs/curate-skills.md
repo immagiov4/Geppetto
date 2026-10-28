@@ -8,6 +8,6 @@ Review the project's config-driven categories, definitions and score methods aga
 
 Report learning changes whose evidence recurred after the change as did not fix (the occurrence reopens the key), and changed pages/skills never read since the change as candidates to revert. Use the configured hooks.signalLearning.outcomeWeeks window when present; otherwise inspect retained changes. Preserve the evidence and let the maintainer judge reversal.
 
-Suggest catalog companions whose Geppetto sections match observed skill reads, repeated failures or review activity. Cite those observations; suggest at most three and use the catalog's harness installation procedure after an explicit yes. Refresh ~/.geppetto/integrations.md after installation. Treat a detected installation as availability, not measured benefit.
+Suggest catalog companions whose Geppetto sections match observed skill reads, repeated failures or review activity. Cite those observations; suggest at most three and use the catalog's harness installation procedure after an explicit yes. Refresh ~/.geppetto/integrations.md after installation.
 
 Run processes through the process-execution reference. Report the inspected scope, useful changes and verification result.
