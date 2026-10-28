@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { readFile, appendFile, writeFile, unlink, lstat, open } from 'node:fs/promises';
+import { readFile, appendFile, writeFile, unlink, lstat, open, mkdir } from 'node:fs/promises';
 import { resolve, matchesGlob } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs } from './common.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { redact } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
-import { nativeMemoryEvent } from './memory-hook.mjs';
+import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
 import { placeholderReason } from './gate-sections.mjs';
 function words(command) {
   return [...command.matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s]+)/g)].map(m => m[1] !== undefined ? m[1].replace(/\\(["\\])/g, '$1') : m[2] ?? m[3]);
@@ -26,6 +27,20 @@ function sectionFeedback(body, cwd, runCommand) {
 const digest = text => createHash('sha256').update(text).digest('hex');
 const turnStatePath = (root, session) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}.json`);
 const decisionPath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `decision-${digest(session)}-${digest(turn)}.json`);
+async function sessionStart(event, options) {
+  const memory = await handleMemoryEvent(event, options);
+  if (!event.session_id) return memory;
+  const root = await projectRoot(event.cwd ?? '.');
+  if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return memory;
+  await ignoreLocalFiles(root, ['/hook-state/']);
+  await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
+  let claim;
+  try { claim = await open(`${turnStatePath(root, event.session_id)}.startup`, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return memory; throw error; }
+  const text = `Before each final reply, record this turn's decisions from the project root: node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-turn '<json>' --session ${JSON.stringify(event.session_id)} (the active turn is resolved automatically; use --record-turn - for JSON stdin).\nMinimal schema: {"requirements":{"changes":false},"feedback":{"applies":false},"frustration":{"applies":false}}. Judge the user message; use true when applicable.\nTrue requires meaningful one-line reasons: requirements.what; feedback.on and feedback.action; frustration.cause and frustration.prevention. Apply $requirements-blast-radius, $receive-work-feedback and $geppetto-learn respectively. For a pure continuation without a user message use {"continuation":true}. Review is filled by the gate.`;
+  try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
+  catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; } finally { await claim.close(); }
+  return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } };
+}
 function turnDecision(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new UsageError('Turn decision must be an object.');
   if (value.continuation === true && Object.keys(value).length === 1) return value;
@@ -40,10 +55,20 @@ function turnDecision(value) {
 export async function recordTurn(root, session, turn, value) {
   value = turnDecision(value);
   const state = await jsonFile(turnStatePath(root, session), null);
+  turn ??= state?.turn;
   if (!state || state.turn !== turn) throw new UsageError('No matching active session and turn; use the command supplied by Stop.');
   await atomicJson(decisionPath(root, session, turn), value, { mode: 0o600 }); return value;
 }
 const reviewPolicy = async root => ({ ...reviewGateDefaults, ...(await jsonFile(resolve(root, '.geppetto/config.json'), {})).hooks?.reviewGate });
+async function diffDigest(root, args, suffix) {
+  const hash = createHash('sha256');
+  await new Promise((done, reject) => {
+    const child = spawn('git', args, { cwd: root, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] }); let stderr = '';
+    child.stdout.on('data', chunk => hash.update(chunk)); child.stderr.on('data', chunk => { stderr += chunk; });
+    child.once('error', reject); child.once('close', code => code === 0 ? done() : reject(new Error(`Git diff failed: ${stderr.trim() || code}`)));
+  });
+  return hash.update(suffix).digest('hex');
+}
 /** Only hashes leave this function: line fingerprints permit later comparisons without retaining source. */
 async function reviewSnapshot(root, base, policy) {
   const git = args => gitOutput(root, args, { trim: false });
@@ -63,7 +88,7 @@ async function reviewSnapshot(root, base, policy) {
     for (const line of text.match(/[^\n]*\n|[^\n]+$/g) ?? []) snapshot.push(digest(`${name}\0${line}`));
     if (untracked.has(name)) patch += `${name}\0${digest(contents)}\n`;
   }
-  return { hash: digest((changedPaths.length ? git(['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-renames', base, '--', ...changedPaths]) : '') + patch), snapshot: snapshot.length ? `${snapshot.join('\n')}\n` : '' };
+  return { hash: changedPaths.length ? await diffDigest(root, ['diff', '--binary', '--no-ext-diff', '--no-textconv', '--no-renames', base, '--', ...changedPaths], patch) : digest(patch), snapshot: snapshot.length ? `${snapshot.join('\n')}\n` : '' };
 }
 async function changedLines(root, before, after) {
   if (before === after) return 0;
@@ -139,8 +164,9 @@ async function completionEvent(event) {
   try { review_blocked = (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked };
 }
-export async function handleEvent(event, { runCommand = run, now = Date.now, home, launchLearning } = {}) {
+async function dispatch(event, { runCommand = run, now = Date.now, home, launchLearning } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
+  if (event.hook_event_name === 'SessionStart') return process.env.GEPPETTO_LEARNING_CHILD === '1' ? {} : sessionStart(event, { home });
   const { review_blocked, ...review } = await completionEvent(event);
   const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now, launchLearning);
   const native = await nativeMemoryEvent(event, { home });
@@ -176,10 +202,28 @@ export async function handleEvent(event, { runCommand = run, now = Date.now, hom
   }
   return {};
 }
+export async function handleEvent(event, options) {
+  try { return await dispatch(event, options); }
+  catch (error) {
+    if (event?.hook_event_name !== 'Stop') throw error;
+    try {
+      const root = await projectRoot(event.cwd ?? '.');
+      const statePath = turnStatePath(root, event.session_id ?? 'unknown');
+      let state; try { state = await jsonFile(statePath, null); } catch { /* The broken state may itself have caused Stop to fail. */ }
+      await ignoreLocalFiles(root, ['/hook-state/']);
+      await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
+      const marker = `${statePath}.${digest(event.turn_id ?? state?.turn ?? 'unknown')}.error`; let claim;
+      try { claim = await open(marker, 'wx', 0o600); } catch (cause) { if (cause.code !== 'EEXIST') throw cause; }
+      if (claim) try { await logHookEvent(root, { hook: 'completion', status: 'error', error: redact(error.message) }, event); }
+      catch (cause) { await unlink(marker); throw cause; } finally { await claim.close(); }
+    } catch (cause) { console.error(`Stop diagnostic failed: ${redact(cause.message)}; original error: ${redact(error.message)}`); }
+    return {};
+  }
+}
 export const main = async args => {
   if (!args.length) return hookMain(args, 'Hook', handleEvent);
   const opts = parseArgs(args, { flags: ['--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn'] });
-  if (opts['--record-turn'] && opts['--session'] && opts['--turn'] && Object.keys(opts).length === 4) {
+  if (opts['--record-turn'] && opts['--session'] && opts._.length === 0 && Object.keys(opts).every(key => ['_', '--record-turn', '--session', '--turn'].includes(key))) {
     let value; try { value = JSON.parse(opts['--record-turn'] === '-' ? readFileSync(0, 'utf8') : opts['--record-turn']); } catch { throw new UsageError('Turn decision must be JSON.'); }
     console.log(JSON.stringify(await recordTurn(await projectRoot('.'), opts['--session'], opts['--turn'], value))); return 0;
   }

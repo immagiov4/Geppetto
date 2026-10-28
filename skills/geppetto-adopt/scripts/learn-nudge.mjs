@@ -1,11 +1,12 @@
 import { appendFile, mkdir, readFile, open, unlink, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolve, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults, projectRoot } from './common.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { createReadStream } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { redact } from './signal.mjs';
 /** Record tool starts; completion adds learning context once per qualifying turn. */
 export async function launchLearning(event) {
   const child = spawn(process.execPath, [fileURLToPath(new URL('./learn-runner.mjs', import.meta.url))], { cwd: event.cwd, windowsHide: true, detached: true, shell: false, stdio: ['pipe', 'ignore', 'ignore'] });
@@ -48,7 +49,7 @@ export async function learningEvent(event, now, launch = launchLearning) {
     try { claim = await open(started, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return {}; throw error; }
     await claim.close();
     try { await launch({ ...event, learning_qualified: qualified }); }
-    catch (error) { await unlink(started); await logHookEvent(root, { hook: 'learning', status: 'launch-error', error: error.message }, event); throw error; }
+    catch (error) { await unlink(started); throw error; }
   }
   if (!qualified) return {};
   let marker;
@@ -60,33 +61,45 @@ export async function learningEvent(event, now, launch = launchLearning) {
   return { hookSpecificOutput: { hookEventName: kind, additionalContext: `Before your final reply, use $geppetto-learn to improve the existing owner when this turn produced a reusable workflow, a verified fix after a dead end, a user correction or recurring friction; if so, record one concise signal with node "${fileURLToPath(new URL('./signal.mjs', import.meta.url)).replaceAll('\\', '/')}" "<lesson>" --metric <affected-metric> from the project root; a reusable lesson or decision rationale with no other owner goes to bucket memory through $geppetto-memory. Keep this routine check internal and continue the requested task. ` } };
 }
 const sliceBytes = 40 * 1024;
+function privateEvidence(value) {
+  if (typeof value === 'string') {
+    const text = value.replaceAll('\\', '/'), privatePath = /\bbuckets\/private(?:\/|["'\s]|$)/i;
+    return privatePath.test(text) || privatePath.test(posix.normalize(text));
+  }
+  return value && typeof value === 'object' && Object.entries(value).some(([key, child]) => privateEvidence(key) || privateEvidence(child));
+}
+export const publicLearningRecords = records => records.filter(record => !privateEvidence(record));
 const errorOutput = value => /(?:"(?:is_error|isError)"\s*:\s*true|"(?:exit_code|exitCode)"\s*:\s*-?[1-9]\d*|Process exited with code -?[1-9]\d*|(?:^|\n)(?:Exit code:?\s*-?[1-9]\d*|Error:|ERROR\b|Traceback\b))/.test(value);
 /** Reduce complete JSONL records from a byte cursor; partial final records remain pending. */
 export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = []) {
   if (start > (await stat(path)).size) start = 0;
-  const parts = []; let pending = Buffer.alloc(0), offset = start, candidate = reviewBlocked;
+  const parts = []; let pending = Buffer.alloc(0), offset = 0, candidate = reviewBlocked, privateSeen = false;
   const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
   let preceding = decisions.findLast(turn => turn.transcriptOffset <= start);
   const recent = decisions.filter(turn => turn.transcriptOffset > start), evidence = new Set();
-  const add = (role, text) => { if (text) parts.push({ role, text: `${role}: ${text}\n` }); };
-  for await (const chunk of createReadStream(path, { start })) {
+  const add = (role, text, limit) => { if (text) parts.push({ role, text: `${role}: ${redact(text).slice(0, limit)}\n` }); };
+  // Recheck provenance before the cursor: later summaries can quote private reads without a path.
+  for await (const chunk of createReadStream(path)) {
     pending = Buffer.concat([pending, chunk]); let end;
     while ((end = pending.indexOf(10)) !== -1) {
       const lineStart = offset, line = pending.subarray(0, end).toString('utf8'); pending = pending.subarray(end + 1); offset += end + 1;
-      while (recent[0]?.transcriptOffset <= lineStart) preceding = recent.shift();
       if (!line.trim()) continue;
-      const record = JSON.parse(line), message = record.type === 'response_item' ? record.payload : record.message;
+      const record = JSON.parse(line);
+      if (privateEvidence(record)) privateSeen = true;
+      if (privateSeen || lineStart < start) continue;
+      while (recent[0]?.transcriptOffset <= lineStart) preceding = recent.shift();
+      const message = record.type === 'response_item' ? record.payload : record.message;
       if (!message) continue;
       const role = message.role ?? record.type;
-      if (['function_call', 'custom_tool_call'].includes(message.type)) { add('tool', `${message.name} ${String(message.arguments ?? message.input ?? '').slice(0, 300)}`); continue; }
-      if (['function_call_output', 'custom_tool_call_output'].includes(message.type)) { const output = typeof message.output === 'string' ? message.output : JSON.stringify(message.output); if (errorOutput(output ?? '')) { candidate = true; add('error', output.slice(0, 500)); } continue; }
+      if (['function_call', 'custom_tool_call'].includes(message.type)) { add('tool', `${message.name} ${redact(String(message.arguments ?? message.input ?? '')).slice(0, 300)}`); continue; }
+      if (['function_call_output', 'custom_tool_call_output'].includes(message.type)) { const output = typeof message.output === 'string' ? message.output : JSON.stringify(message.output); if (errorOutput(output ?? '')) { candidate = true; add('error', output, 500); } continue; }
       if (!['user', 'assistant'].includes(role)) continue;
       const before = parts.length;
       if (typeof message.content === 'string') add(role, message.content);
       else for (const block of message.content ?? []) {
         if (['text', 'input_text', 'output_text'].includes(block.type)) add(role, block.text);
-        if (block.type === 'tool_use') add('tool', `${block.name} ${JSON.stringify(block.input ?? {}).slice(0, 300)}`);
-        if (block.type === 'tool_result') { const output = typeof block.content === 'string' ? block.content : JSON.stringify(block.content); if (block.is_error || errorOutput(output ?? '')) { candidate = true; add('error', output.slice(0, 500)); } }
+        if (block.type === 'tool_use') add('tool', `${block.name} ${redact(JSON.stringify(block.input ?? {})).slice(0, 300)}`);
+        if (block.type === 'tool_result') { const output = typeof block.content === 'string' ? block.content : JSON.stringify(block.content); if (block.is_error || errorOutput(output ?? '')) { candidate = true; add('error', output, 500); } }
       }
       if (parts.slice(before).some(part => part.role === 'user') && preceding) {
         evidence.add(preceding);
@@ -94,6 +107,7 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       }
     }
   }
+  if (privateSeen) return { text: '', offset, candidate: false, turns: [] };
   candidate ||= parts.some(part => part.role === 'user' && /\b(?:no|wrong|instead|actually|correction|incorrect|fix|sbagliato|invece|correggi|correzione|errore)\b/i.test(part.text));
   let text = parts.map(part => part.text).join('');
   if (Buffer.byteLength(text) > sliceBytes) {
@@ -110,5 +124,5 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       return decode(bytes.subarray(0, head)) + decode(bytes.subarray(tail));
     }).join('');
   }
-  return { text, offset, candidate, turns: [...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])] };
+  return { text, offset, candidate, turns: publicLearningRecords([...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])]) };
 }

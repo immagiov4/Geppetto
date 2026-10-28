@@ -87,7 +87,9 @@ async function planInstallation({ root, manifest, target, desired, acceptedGener
     const otherHash = retireShared && path.startsWith('.geppetto/bin/') ? null : otherFiles.map(files => files[path]).find(Boolean);
     if (!previous[path] && !otherHash && currentHash) {
       // Git checkouts can normalize text line endings without changing the owned content.
-      const identical = currentHash === desiredHash || (content && isUtf8(current) && isUtf8(content) && !current.includes(0) && !content.includes(0) && current.toString().replaceAll('\r\n', '\n') === content.toString().replaceAll('\r\n', '\n'));
+      const normalize = bytes => bytes.toString().replaceAll('\r\n', '\n');
+      const template = bytes => normalize(bytes).replace(/^(\s+ref: )[a-f\d]{40}$/gm, '$1{{GEPPETTO_SHA}}');
+      const identical = currentHash === desiredHash || (content && isUtf8(current) && isUtf8(content) && !current.includes(0) && !content.includes(0) && (normalize(current) === normalize(content) || path === '.github/workflows/pr-gate.yml' && template(current) === template(content)));
       overlaps.push({ path, currentHash, desiredHash, disposition: identical ? 'adopt-identical' : 'conflict' });
       if (!identical) conflicts.push(`${destination}:1: Existing file is not owned; reconcile it before installation`);
     }
