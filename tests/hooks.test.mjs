@@ -11,6 +11,7 @@ test('PR-creation feedback runs gate-sections over literal bodies and body files
   r = hook(cwd, 'Bash', { command: "gh pr create --body '## Summary'" }); assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /Missing section: Observability/);
   r = hook(cwd, 'Bash', { command: "gh pr create --body '## Observability\n$(touch owned)'" }); assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /sections pass/);
   r = hook(cwd, 'Bash', { command: 'gh pr create --fill' }); assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /provide --body-file/);
+  r = hook(cwd, 'Bash', { command: "cd . && gh pr create --body='## Observability\nLogs'" }); assert.match(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, /sections pass/);
 });
 
 test('pre-push reports unavailable PR information as advisory feedback', t => {

@@ -9,16 +9,15 @@ import { reconcileMachine } from './machine.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
 import { memoryQuestion, memoryDescription } from './memory-setup.mjs';
 import { maintenanceJobs } from './maintenance.mjs';
+import { validateTurnPolicy } from './turn-checks.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const portable = path => path.split(sep).join('/');
 const generatedPaths = new Set(['AGENTS.md', 'CLAUDE.md', '.geppetto/config.json', '.geppetto/authorizations', '.claude/settings.json', '.codex/hooks.json', '.github/workflows/pr-gate.yml']);
-
 // A copied skill must not turn an installation path into a write outside its root.
 async function safePath(root, path) {
   if (!contained(root, path) || resolve(root) === resolve(path)) throw new Error(`${path}:1: Install path escapes its root`);
   await rejectSymlinks(path);
 }
-
 function validateManifest(manifest, root, statePath) {
   if (manifest.version !== 1 || !manifest.installations || typeof manifest.installations !== 'object' || Array.isArray(manifest.installations)) throw new Error(`${statePath}:1: Invalid install manifest`);
   for (const path of manifest.removed ?? []) if (typeof path !== 'string' || (!/^(?:\.agents\/skills\/|\.claude\/skills\/|\.geppetto\/bin\/)/.test(path) && !generatedPaths.has(path)) || !contained(root, resolve(root, path)) || portable(relative(root, resolve(root, path))) !== path) throw new Error(`${statePath}:1: Invalid retired path`);
@@ -32,10 +31,8 @@ function validateManifest(manifest, root, statePath) {
     if (entry.generated !== undefined && (!Array.isArray(entry.generated) || entry.generated.some(path => !generatedPaths.has(path) || !entry.files[path]))) throw new Error(`${statePath}:1: Invalid generated ownership`);
   }
 }
-
 async function packageSource(manifest, statePath) {
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const candidate = resolve(scriptDir, '../../..');
+  const scriptDir = dirname(fileURLToPath(import.meta.url)), candidate = resolve(scriptDir, '../../..');
   // Only the original package layout may discover itself; copies use recorded provenance.
   const original = resolve(candidate, 'skills/geppetto-adopt/scripts') === scriptDir && await exists(resolve(candidate, 'package.json'));
   const provenance = original ? null : manifest.source ?? (await jsonFile(resolve(scriptDir, '../../../../.geppetto/install.json'), {})).source;
@@ -45,13 +42,10 @@ async function packageSource(manifest, statePath) {
   if (metadata.name !== 'geppetto' || typeof metadata.version !== 'string' || !await exists(resolve(sourceRoot, 'skills/geppetto-adopt/scripts/install.mjs'))) throw new Error(`${statePath}:1: Recorded package source is not a Geppetto package`);
   return { path: resolve(sourceRoot), version: metadata.version };
 }
-
 async function desiredFiles({ target, uninstall, root, source, previous, generated, plugin, gateSha }) {
   const desired = new Map();
   if (uninstall) return desired;
-  const sourceRoot = source.path;
-  const skillsRoot = resolve(sourceRoot, 'skills');
-  const skillDir = target === 'claude' ? '.claude/skills' : '.agents/skills';
+  const sourceRoot = source.path, skillsRoot = resolve(sourceRoot, 'skills'), skillDir = target === 'claude' ? '.claude/skills' : '.agents/skills';
   if (!plugin) for (const source of await filesUnder(skillsRoot)) desired.set(portable(relative(root, resolve(root, skillDir, relative(skillsRoot, source)))), await readFile(source));
   const workflow = '.github/workflows/pr-gate.yml';
   if (gateSha) desired.set(workflow, Buffer.from((await readFile(resolve(sourceRoot, 'skills/geppetto-adopt/assets/templates/ci/pr-gate.yml'), 'utf8')).replaceAll('{{GEPPETTO_SHA}}', gateSha)));
@@ -71,16 +65,13 @@ async function desiredFiles({ target, uninstall, root, source, previous, generat
   }
   return desired;
 }
-
 async function planInstallation({ root, manifest, target, desired, acceptedGenerated, retireShared }) {
   const previous = manifest.installations[target]?.files ?? {};
   const changes = []; const nextFiles = {}; const observed = new Map(); const sharedUpdates = new Map(); const overlaps = []; const conflicts = [];
   const otherFiles = Object.entries(manifest.installations).filter(([key]) => key !== target).map(([, entry]) => entry.files ?? {});
   for (const path of new Set([...Object.keys(previous), ...desired.keys()])) {
-    const destination = resolve(root, path);
-    await safePath(root, destination);
-    const current = await exists(destination) ? await readFile(destination) : null;
-    const currentHash = current ? hash(current) : null;
+    const destination = resolve(root, path); await safePath(root, destination);
+    const current = await exists(destination) ? await readFile(destination) : null, currentHash = current ? hash(current) : null;
     observed.set(path, currentHash);
     const content = desired.get(path); const desiredHash = content !== undefined ? hash(content) : null;
     if (previous[path] && currentHash && currentHash !== previous[path] && !acceptedGenerated.includes(path)) conflicts.push(`${destination}:1: Local edits need reconciliation; preserve or merge them before retrying`);
@@ -107,7 +98,6 @@ async function planInstallation({ root, manifest, target, desired, acceptedGener
   if (conflicts.length) throw new Error(conflicts.join('\n'));
   return { changes, nextFiles, observed, sharedUpdates, otherFiles };
 }
-
 async function applyInstallation({ root, manifest, statePath, uninstall, source, plans }) {
   const changes = [...new Map(plans.flatMap(({ plan }) => plan.changes.map(change => [change.path, change]))).values()];
   await mkdir(dirname(statePath), { recursive: true });
@@ -129,15 +119,11 @@ async function applyInstallation({ root, manifest, statePath, uninstall, source,
       if (run('git', ['rev-parse', '--git-dir'], { cwd: root }).status === 0) gitOutput(root, ['rm', '--cached', '--ignore-unmatch', '--', '.geppetto/install.json']);
     }
     for (const change of changes) {
-      const destination = resolve(root, change.path);
-      await safePath(root, destination);
-      if (change.action === 'remove') {
-        await unlink(destination);
-      }
+      const destination = resolve(root, change.path); await safePath(root, destination);
+      if (change.action === 'remove') await unlink(destination);
       else {
         await mkdir(dirname(destination), { recursive: true });
-        const temp = `${destination}.${process.pid}.tmp`;
-        await writeFile(temp, change.content, { flag: 'wx' }); await rename(temp, destination);
+        const temp = `${destination}.${process.pid}.tmp`; await writeFile(temp, change.content, { flag: 'wx' }); await rename(temp, destination);
       }
     }
     try { await rmdir(resolve(root, '.geppetto/bin')); } catch (error) { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; }
@@ -151,16 +137,14 @@ async function applyInstallation({ root, manifest, statePath, uninstall, source,
     await atomicJson(statePath, manifest);
   } finally { await lock.close(); await unlink(lockPath); }
 }
-
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--target', '--project', '--scheduler-jobs', '--memory', '--gate-sha'], repeat: ['--record-generated', '--add-job'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks', '--begin', '--commit'] });
   const target = opts['--target'];
   if (opts._.length || !['claude', 'codex', 'agents'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents> (--project <dir> | --user) [--dry-run] [--uninstall]');
-  const root = resolve(opts['--user'] ? userHome() : opts['--project']);
-  const statePath = resolve(root, '.geppetto/install.json');
+  const root = resolve(opts['--user'] ? userHome() : opts['--project']), statePath = resolve(root, '.geppetto/install.json');
+  if (!opts['--uninstall']) validateTurnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {}));
   await safePath(root, statePath);
-  const manifest = await jsonFile(statePath, { version: 1, installations: {} });
-  validateManifest(manifest, root, statePath);
+  const manifest = await jsonFile(statePath, { version: 1, installations: {} }); validateManifest(manifest, root, statePath);
   if (opts['--begin'] || opts['--commit']) {
     if (opts['--user'] || opts['--uninstall'] || (opts['--begin'] && opts['--commit'])) throw new UsageError('--begin and --commit are separate project adoption steps');
     return installationGit(root, manifest, opts);
@@ -172,8 +156,7 @@ export async function main(args) {
   const recorded = opts['--record-generated'] ?? [];
   if (recorded.some(path => !generatedPaths.has(path)) || (opts['--uninstall'] && recorded.length)) throw new UsageError('--record-generated accepts adoption files only and requires installation');
   const generated = [...new Set([...(manifest.installations[target]?.generated ?? []), ...recorded, ...(!opts['--user'] && !opts['--uninstall'] ? ['.github/workflows/pr-gate.yml'] : [])])].sort();
-  const source = opts['--uninstall'] ? null : await packageSource(manifest, statePath);
-  const plugin = Boolean(opts['--plugin-hooks'] || manifest.installations[target]?.plugin);
+  const source = opts['--uninstall'] ? null : await packageSource(manifest, statePath), plugin = Boolean(opts['--plugin-hooks'] || manifest.installations[target]?.plugin);
   let gateSha = !opts['--user'] && !opts['--uninstall'] ? opts['--gate-sha'] : null;
   if (!opts['--user'] && !opts['--uninstall']) {
     if (!gateSha && await exists(resolve(source.path, '.git'))) gateSha = run('git', ['rev-parse', 'HEAD'], { cwd: source.path }).stdout?.trim();
@@ -182,9 +165,7 @@ export async function main(args) {
   const plans = [];
   // Preflight every installed consumer before retiring their shared scripts.
   for (const owner of new Set([target, ...(!opts['--uninstall'] ? Object.keys(manifest.installations) : [])])) {
-    const entry = manifest.installations[owner] ?? {};
-    const ownerGenerated = owner === target ? generated : entry.generated ?? [];
-    const ownerPlugin = owner === target ? plugin : Boolean(entry.plugin);
+    const entry = manifest.installations[owner] ?? {}, ownerGenerated = owner === target ? generated : entry.generated ?? [], ownerPlugin = owner === target ? plugin : Boolean(entry.plugin);
     const desired = await desiredFiles({ target: owner, uninstall: opts['--uninstall'], root, source, previous: entry, generated: owner === target ? recorded : [], plugin: ownerPlugin, gateSha });
     const plan = await planInstallation({ root, manifest, target: owner, desired, acceptedGenerated: recorded, retireShared: !opts['--uninstall'] });
     plans.push({ target: owner, generated: ownerGenerated, plugin: ownerPlugin, plan });
@@ -208,8 +189,7 @@ export async function main(args) {
     return 1;
   } finally {
     if (!opts['--uninstall']) {
-      const path = '.geppetto/config.json';
-      const currentManifest = await jsonFile(statePath);
+      const path = '.geppetto/config.json', currentManifest = await jsonFile(statePath);
       for (const entry of Object.values(currentManifest.installations)) if (entry.files[path]) entry.files[path] = hash(await readFile(resolve(root, path)));
       await atomicJson(statePath, currentManifest);
     }
@@ -221,10 +201,8 @@ export async function main(args) {
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
   return 0;
 }
-
 async function installationGit(root, manifest, opts) {
-  const git = args => gitOutput(root, args, { label: 'Installation Git operation' });
-  const branch = 'geppetto-install';
+  const git = args => gitOutput(root, args, { label: 'Installation Git operation' }), branch = 'geppetto-install';
   if (opts['--dry-run']) { console.log(`Dry run: ${opts['--begin'] ? 'create' : 'commit owned files on'} ${branch}`); return 0; }
   if (opts['--begin']) {
     const repository = run('git', ['rev-parse', '--git-dir'], { cwd: root, timeout: 0 });
@@ -239,10 +217,8 @@ async function installationGit(root, manifest, opts) {
   for (const path of removed) if (await exists(resolve(root, path))) throw new Error(`${path}:1: Retired file was recreated; reconcile it before committing`);
   const head = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status === 0;
   const trackedRemoved = removed.filter(path => git(['ls-files', '--', path]) || (head && git(['ls-tree', '--name-only', 'HEAD', '--', path])));
-  const registry = '.geppetto/install.json';
-  const paths = [...files, ...trackedRemoved, '.geppetto/.gitignore'];
-  const directory = await mkdtemp(resolve(tmpdir(), 'geppetto-install-'));
-  const env = { ...process.env, GIT_INDEX_FILE: resolve(directory, 'index') };
+  const registry = '.geppetto/install.json', paths = [...files, ...trackedRemoved, '.geppetto/.gitignore'];
+  const directory = await mkdtemp(resolve(tmpdir(), 'geppetto-install-')), env = { ...process.env, GIT_INDEX_FILE: resolve(directory, 'index') };
   const isolated = args => gitOutput(root, args, { env, label: 'Installation commit' });
   try {
     isolated(['read-tree', head ? 'HEAD' : '--empty']);

@@ -67,10 +67,12 @@ test('learning defaults remain enabled and parallel tool completions deliver onl
 });
 
 test('a failed event log preserves the opportunity to deliver and measure the reminder on retry', async t => {
+  const diagnostic = t.mock.method(console, 'error', () => {});
   const cwd = fixture(t); put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: true, benchmark: null, minToolCalls: 1, minDurationMs: 1000 } } });
   const event = { cwd, session_id: 'log-recovery', hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: {} };
   await handleEvent(event); const log = resolve(cwd, '.geppetto/hook-events.jsonl'); mkdirSync(log);
-  await assert.rejects(handleEvent({ ...event, hook_event_name: 'PostToolUse' }));
+  assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'PostToolUse' }), {});
+  assert.equal(diagnostic.mock.callCount(), 1); assert.match(diagnostic.mock.calls[0].arguments[0], /PostToolUse diagnostic/);
   rmdirSync(log);
   assert.ok((await handleEvent({ ...event, hook_event_name: 'PostToolUse' })).hookSpecificOutput.additionalContext);
   assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).hook, 'learnNudge');

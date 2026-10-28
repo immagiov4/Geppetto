@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, get, git, invoke, config } from './helpers.mjs';
+import { spawnSync } from 'node:child_process';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 const decision = { requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false } };
 function project(t, settings = {}) {
@@ -17,6 +18,79 @@ function project(t, settings = {}) {
   return { cwd, send, edit, record, rows };
 }
 const denied = result => result.hookSpecificOutput?.permissionDecision === 'deny';
+test('F1: PreToolUse and PostToolUse errors fail open with one diagnostic; audit/install validate config', async t => {
+  for (const broken of ['config', 'state']) {
+    const { cwd, send } = project(t); await send('UserPromptSubmit');
+    const state = readdirSync(resolve(cwd, '.geppetto/hook-state')).find(name => /^review-turn-.*\.json$/.test(name));
+    put(cwd, broken === 'config' ? '.geppetto/config.json' : `.geppetto/hook-state/${state}`, '{');
+    for (const hook_event_name of ['PreToolUse', 'PostToolUse']) for (const tool_name of ['Read', 'Edit', 'exec_command']) {
+      const result = invoke('hook.mjs', [], { cwd, input: JSON.stringify({ cwd, session_id: 'session', turn_id: 'turn', hook_event_name, tool_name, tool_input: { cmd: 'Get-Content README.md' } }) });
+      assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), {});
+      assert.equal(result.stderr.trim().split(/\r?\n/).length, 1); assert.match(result.stderr, /Geppetto.*diagnostic/);
+    }
+  }
+  const { cwd, send } = project(t, { turnChecks: { rearmOn: [{ tool: '[' }] } });
+  for (const kind of ['PreToolUse', 'PostToolUse']) assert.deepEqual(await send(kind, { tool_name: 'Read', tool_input: {} }), {});
+  const audit = invoke('audit.mjs', ['--verify', '--json'], { cwd }); assert.notEqual(audit.status, 0); assert.match(audit.stdout + audit.stderr, /turnChecks/);
+  const install = invoke('install.mjs', ['--target', 'claude', '--project', cwd, '--dry-run'], { cwd }); assert.notEqual(install.status, 0); assert.match(install.stderr, /turnChecks/);
+  const malformed = invoke('hook.mjs', [], { cwd, input: '{' }); assert.equal(malformed.status, 0); assert.deepEqual(JSON.parse(malformed.stdout), {}); assert.equal(malformed.stderr.trim().split(/\r?\n/).length, 1);
+});
+test('F2: read-only shell reproductions run without a decision request', async t => {
+  const { cwd, send } = project(t); put(cwd, 'README.md', 'sed\n'); await send('UserPromptSubmit');
+  for (const [executable, args, command] of [
+    ['node', ['-e', "console.log('write(')"], 'node -e "console.log(\'write(\')"'],
+    ['python', ['-c', "print('write(')"], 'python -c "print(\'write(\')"'],
+    ['rg', ['sed', '-i', 'README.md'], 'rg sed -i README.md'],
+  ]) {
+    const event = { tool_name: 'Bash', tool_input: { command } };
+    assert.deepEqual(await send('PreToolUse', event), {});
+    const result = spawnSync(executable, args, { cwd, encoding: 'utf8', windowsHide: true }); assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(await send('PostToolUse', event), {});
+  }
+  assert.equal(get(cwd, 'README.md'), 'sed\n'); assert.deepEqual(await send('Stop'), {});
+  assert.equal(existsSync(resolve(cwd, '.geppetto/turns.jsonl')), false);
+});
+test('F2: shell effects on clean, dirty, untracked and staged paths ask once at the next tool boundary', async t => {
+  for (const mode of ['clean', 'dirty', 'untracked', 'staged']) {
+    const { cwd, send, record, rows } = project(t);
+    const path = mode === 'untracked' ? 'new.txt' : 'README.md';
+    if (['dirty', 'untracked'].includes(mode)) put(cwd, path, 'before\n');
+    await send('UserPromptSubmit');
+    const event = { tool_name: 'Bash', tool_input: { command: 'arbitrary-program' } };
+    assert.deepEqual(await send('PreToolUse', event), {});
+    put(cwd, path, 'after!\n'); if (mode === 'staged') git(cwd, ['add', path]);
+    await send('PostToolUse', event);
+    const read = { tool_name: 'Read', tool_input: { file_path: path } };
+    assert.ok(denied(await send('PreToolUse', read)), mode);
+    assert.deepEqual(await send('PreToolUse', read), {}); assert.equal(record(decision).status, 0);
+    await send('PostToolUse', event); assert.deepEqual(await send('PreToolUse', read), {});
+    await send('Stop'); assert.equal(rows()[0].edited, true);
+  }
+});
+test('F3: gh review intent survives options and positional argument placement', async t => {
+  for (const command of ['gh api --method GET repos/o/r/pulls/12/comments', 'gh api -H "Accept: application/vnd.github+json" repos/o/r/pulls/12/comments', 'gh --repo o/r pr view 12 --comments', 'gh -R o/r pr checks 12', 'gh api --hostname github.com --jq . repos/o/r/pulls/12/reviews', 'gh api --preview fixture repos/o/r/pulls/12/comments', 'gh pr view --repo=o/r --comments=true 12', 'gh run view --job 1 12 --log-failed']) {
+    const { send, edit, record } = project(t); await send('UserPromptSubmit'); assert.equal(record(decision).status, 0);
+    await send('PostToolUse', { tool_name: 'Bash', tool_input: { command } }); assert.ok(denied(await edit()), command);
+  }
+});
+test('F4: help and unrelated gh reads preserve the decision', async t => {
+  for (const command of ['gh pr view --comments --help', 'gh api repos/o/r/pulls/12/comments --help', 'gh run view --log-failed --help', 'gh pr checks -h', 'python skills/code-review/scripts/run_review.py --help', 'py skills/code-review/scripts/run_review.py -h', 'gh pr view 12 --comments=false', 'gh api repos/o/r/issues/12/comments', 'echo "gh pr view --comments"', 'gh api -H "repos/o/r/pulls/12/comments" repos/o/r/issues/12/comments']) {
+    const { send, edit, record } = project(t); await send('UserPromptSubmit'); assert.equal(record(decision).status, 0);
+    await send('PostToolUse', { tool_name: 'Bash', tool_input: { command } }); assert.deepEqual(await edit(), {}, command);
+  }
+});
+test('F5: 0.3.1 active state starts fresh and records the upgraded turn', async t => {
+  const { cwd, send, edit, record, rows } = project(t); await send('UserPromptSubmit');
+  const folder = resolve(cwd, '.geppetto/hook-state'), stateName = readdirSync(folder).find(name => /^review-turn-.*\.json$/.test(name));
+  const state = JSON.parse(get(folder, stateName)); delete state.epoch; delete state.worktree;
+  put(folder, stateName, state);
+  // This is the public legacy decision representation, without the epoch/value/history envelope.
+  const { createHash } = await import('node:crypto'); const hash = text => createHash('sha256').update(text).digest('hex');
+  put(folder, `decision-${hash('session')}-${hash('turn')}.json`, decision);
+  assert.ok(denied(await edit())); assert.equal(record(decision).status, 0);
+  assert.deepEqual(await edit(), {}); assert.deepEqual(await send('Stop'), {});
+  assert.equal(rows().length, 1); assert.equal(rows()[0].decisions.length, 1); assert.equal(rows()[0].requirements.changes, false);
+});
 test('decision blocks once before first edit, persists measurement and never adds a Stop block', async t => {
   const { send, edit, record, rows } = project(t); await send('UserPromptSubmit');
   const blocked = await edit(); assert.ok(denied(blocked)); assert.match(blocked.hookSpecificOutput.permissionDecisionReason, /--record-turn/);
@@ -29,12 +103,12 @@ test('bare Stop and edit-free turns never request or persist a decision', async 
   for (const [tool_name, tool_input] of [['Read', {}], ['Bash', { command: 'git diff --stat' }], ['exec_command', { cmd: 'Get-Content README.md' }]]) assert.deepEqual(await send('PreToolUse', { tool_name, tool_input }), {});
   assert.deepEqual(await send('Stop'), {}); assert.equal(existsSync(resolve(cwd, '.geppetto/turns.jsonl')), false);
 });
-test('write tools and supported shell writes gate, while quoted text and recording commands remain available', async t => {
-  for (const [tool_name, tool_input] of [['Write', {}], ['MultiEdit', {}], ['functions.apply_patch', '*** Begin Patch'], ['Bash', { command: 'echo title > README.md' }], ['exec_command', { cmd: 'Set-Content README.md title' }], ['Bash', { command: 'sed -i s/a/b/ README.md' }], ['shell_command', { command: 'python -c "open(\'README.md\',\'w\').write(\'title\')"' }]]) {
+test('native file writes gate, while shell and recording commands remain available', async t => {
+  for (const [tool_name, tool_input] of [['Write', {}], ['MultiEdit', {}], ['functions.apply_patch', '*** Begin Patch'], ['mcp__filesystem__write_file', {}], ['mcp.filesystem.edit_file', {}]]) {
     const { send } = project(t); assert.ok(denied(await send('PreToolUse', { tool_name, tool_input })), JSON.stringify(tool_input));
   }
   const { send } = project(t);
-  for (const command of ['node hook.mjs --record-turn - --session session', 'echo "x > y"', 'rg "Set-Content" .', 'rg "writeFileSync" .']) assert.deepEqual(await send('PreToolUse', { tool_name: 'Bash', tool_input: { command } }), {});
+  for (const command of ['node hook.mjs --record-turn - --session session', 'echo "x > y"', 'rg "Set-Content" .', 'rg "writeFileSync" .', 'echo title > README.md', 'Set-Content README.md title', 'sed -i s/a/b/ README.md', 'python -c "open(\'README.md\',\'w\').write(\'title\')"']) assert.deepEqual(await send('PreToolUse', { tool_name: 'Bash', tool_input: { command } }), {});
 });
 test('configuration generates questions, validation and custom skill instructions; empty checks stay quiet', async t => {
   const { send, edit, record, rows } = project(t, { turnChecks: [{ id: 'privacy', question: 'Does this edit expose private material?', skill: 'privacy-review' }] });
@@ -47,7 +121,7 @@ test('configuration generates questions, validation and custom skill instruction
 });
 test('invalid and duplicate check definitions fail at the configuration boundary', async t => {
   for (const turnChecks of [[{ id: 'x', question: '', skill: 'test' }], [{ id: 'review', question: 'Question?', skill: 'test' }], [{ id: 'x', question: 'Question?', skill: 'test' }, { id: 'x', question: 'Question?', skill: 'test' }], { checks: [], rearmOn: [{ tool: '[' }] }]) {
-    const { send } = project(t, { turnChecks }); await assert.rejects(send('SessionStart'), /turnChecks/);
+    const { cwd } = project(t, { turnChecks }); const result = invoke('audit.mjs', ['--json'], { cwd }); assert.notEqual(result.status, 0); assert.match(result.stderr, /turnChecks/);
   }
 });
 test('review reads rearm feedback alone, duplicate results and unrelated commands keep it valid', async t => {

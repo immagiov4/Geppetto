@@ -6,7 +6,7 @@ import { cli, isMain, parseArgs, UsageError, jsonFile, validateConfig, userHome,
 import { hostLintReport } from './host-lint.mjs';
 import { memorySettings, memoryConfiguration } from './memory-config.mjs';
 import { learningReadiness } from './learn-runner.mjs';
-import { turnMetrics } from './turn-checks.mjs';
+import { turnMetrics, validateTurnPolicy } from './turn-checks.mjs';
 const status = value => value ? 'present' : 'absent';
 const repositoryIdentity = value => /^https?:\/\//.test(value) ? value.replace(/\.git$/, '') : value;
 async function directory(path) { try { return (await stat(path)).isDirectory(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
@@ -57,6 +57,7 @@ export async function main(args) {
   const project = resolve(opts['--project'] ?? '.');
   if (!await directory(project)) throw new Error(`${project}:1: Project directory does not exist`);
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {}); const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
+  validateTurnPolicy(config);
   let turns = ''; try { turns = await readFile(resolve(project, '.geppetto/turns.jsonl'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const report = { project, node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: learningReadiness(project, config.hooks?.signalLearning) };
   report.turnChecks = turnMetrics(turns.split('\n').filter(Boolean).map(JSON.parse));

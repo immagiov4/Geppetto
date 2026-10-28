@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { turnPolicy, defaultTurnChecks } from './turn-checks.mjs';
+import { validateTurnPolicy, defaultTurnChecks } from './turn-checks.mjs';
 export class UsageError extends Error {}
 export const userHome = () => homedir();
 export const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 15000, ...options, windowsHide: true, shell: false });
@@ -121,7 +121,7 @@ export function validateConfig(config, file) {
   if (!Number.isSafeInteger(review.threshold) || review.threshold <= 0 || ![review.docGlobs, review.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string' && glob))) fail('hooks.reviewGate needs a positive threshold and arrays of nonempty globs');
   if (learning?.writeApproval !== undefined && typeof learning.writeApproval !== 'boolean') fail('hooks.signalLearning.writeApproval must be boolean');
   validateMemory(config.memory, file);
-  turnPolicy(config);
+  validateTurnPolicy(config);
   return config;
 }
 export function validateMemory(memory, file) {

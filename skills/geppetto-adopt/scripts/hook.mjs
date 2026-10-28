@@ -10,14 +10,7 @@ import { redact } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
 import { placeholderReason } from './gate-sections.mjs';
-import { turnPolicy, decisionFields, toolName, toolCommand, modifyingTool } from './turn-checks.mjs';
-const words = command => [...command.matchAll(/"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s]+)/g)].map(m => m[1] !== undefined ? m[1].replace(/\\(["\\])/g, '$1') : m[2] ?? m[3]);
-function option(tokens, names) {
-  for (let i = 0; i < tokens.length; i++) {
-    if (names.includes(tokens[i])) return tokens[i + 1];
-    for (const name of names) if (tokens[i].startsWith(`${name}=`)) return tokens[i].slice(name.length + 1);
-  }
-}
+import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, commandArgs } from './turn-checks.mjs';
 function sectionFeedback(body, cwd, runCommand) {
   const result = runCommand(process.execPath, [fileURLToPath(new URL('./gate-sections.mjs', import.meta.url)), '--pr', '-'], { cwd, input: body });
   if (result.status === 0) return 'Geppetto: PR sections pass.';
@@ -26,6 +19,17 @@ function sectionFeedback(body, cwd, runCommand) {
 const digest = text => createHash('sha256').update(text).digest('hex');
 const turnStatePath = (root, session) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}.json`);
 const decisionPath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `decision-${digest(session)}-${digest(turn)}.json`);
+const currentState = state => state && typeof state.turn === 'string' && typeof state.epoch === 'string' && typeof state.worktree === 'string' && typeof state.base === 'string' && typeof state.snapshot === 'string' ? state : null;
+const currentDecision = decision => decision && typeof decision.epoch === 'string' && decision.value && Array.isArray(decision.decisions) && decision.decisions.length ? decision : null;
+async function worktreeFingerprint(root) {
+  const status = gitOutput(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).geppetto/.gitignore'], { trim: false });
+  const hash = createHash('sha256').update(status), entries = status.split('\0').filter(Boolean);
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i], name = entry.slice(3); if (/[RC]/.test(entry.slice(0, 2))) i++;
+    const stat = await lstat(resolve(root, name), { bigint: true }).catch(error => { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; });
+    if (stat) hash.update(`${name}\0${stat.size}\0${stat.mtimeNs}\0${stat.ctimeNs}\n`);
+  } return hash.digest('hex');
+}
 async function sessionStart(event, options) {
   const memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory;
   const root = await projectRoot(event.cwd ?? '.');
@@ -53,9 +57,9 @@ function turnDecision(value, checks) {
   return value;
 }
 export async function recordTurn(root, session, turn, value) {
-  const state = await jsonFile(turnStatePath(root, session), null); turn ??= state?.turn;
+  const state = currentState(await jsonFile(turnStatePath(root, session), null)); turn ??= state?.turn;
   if (!state || state.turn !== turn) throw new UsageError('No matching active session and turn; use the command supplied by PreToolUse.');
-  const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = await jsonFile(path, null), renewed = state.epoch !== 'initial' && previous !== null;
+  const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && previous !== null;
   const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
   if (renewed && value?.continuation) throw new UsageError('Renewed feedback requires an explicit decision.');
   turnDecision(value, renewed && value && Object.keys(value).every(key => ['feedback', 'userCorrection'].includes(key)) ? required : checks);
@@ -67,19 +71,22 @@ export async function recordTurn(root, session, turn, value) {
   await atomicJson(path, { value: merged, epoch: state.epoch, decisions }, { mode: 0o600 }); return merged;
 }
 async function editingEvent(root, state, statePath, event, policy) {
-  const path = decisionPath(root, event.session_id, state.turn), staged = await jsonFile(path, null);
+  const path = decisionPath(root, event.session_id, state.turn), staged = currentDecision(await jsonFile(path, null));
   if (event.hook_event_name === 'PostToolUse') {
-    if (!policy.checks.some(check => check.id === 'feedback') || !policy.rearmOn.some(rule => new RegExp(rule.tool).test(toolName(event)) && (!rule.command || new RegExp(rule.command).test(toolCommand(event))))) return {};
-    if (event.tool_use_id && !await claimFile(`${path}.${digest(event.tool_use_id)}.received`)) return {};
-    await atomicJson(statePath, { ...state, epoch: randomUUID() }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event); return {};
-  }
-  if (!modifyingTool(event)) return {};
-  if (policy.checks.length && staged?.epoch !== state.epoch) {
-    if (await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString())) {
-      const needed = !staged || state.epoch === 'initial' ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
-      await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: needed.map(check => check.id) }, event);
-      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };
+    const worktree = await worktreeFingerprint(root);
+    if (worktree !== state.worktree) {
+      await claimFile(`${path}.edited`); if (staged?.epoch !== state.epoch) state.shellPending = state.epoch;
+      state.worktree = worktree; await atomicJson(statePath, state);
     }
+    if (policy.checks.some(check => check.id === 'feedback') && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
+      const epoch = randomUUID(); await atomicJson(statePath, { ...state, epoch, ...(state.shellPending === state.epoch ? { shellPending: epoch } : {}) }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event);
+    } return {};
+  }
+  if (!modifyingTool(event) && state.shellPending !== state.epoch) return {};
+  if (policy.checks.length && staged?.epoch !== state.epoch && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString())) {
+    const needed = !staged || state.epoch === 'initial' ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
+    await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: needed.map(check => check.id) }, event);
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };
   }
   await claimFile(`${path}.edited`); return {};
 }
@@ -136,11 +143,11 @@ async function completionEvent(event) {
   const root = await projectRoot(event.cwd ?? '.'); const policy = await reviewPolicy(root);
   if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return {};
   if (!Number.isSafeInteger(policy.threshold) || policy.threshold <= 0 || ![policy.docGlobs, policy.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string'))) throw new UsageError('Invalid hooks.reviewGate threshold or globs.');
-  const statePath = turnStatePath(root, event.session_id); let state = await jsonFile(statePath, null);
+  const statePath = turnStatePath(root, event.session_id); let state = currentState(await jsonFile(statePath, null));
   if (kind === 'UserPromptSubmit' || !state || event.turn_id && state.turn !== event.turn_id) {
-    await ignoreLocalFiles(root, ['/turns.jsonl', '/reviews.jsonl', '/hook-state/']);
+    await ignoreLocalFiles(root, ['/turns.jsonl', '/reviews.jsonl', '/hook-state/', '/hook-events.jsonl']);
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
-    state = { turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: 'initial', base, ...(await reviewSnapshot(root, base, policy)) };
+    state = { turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: 'initial', base, worktree: await worktreeFingerprint(root), ...(await reviewSnapshot(root, base, policy)) };
     await atomicJson(statePath, state); if (kind === 'UserPromptSubmit') return {};
   }
   if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})));
@@ -156,7 +163,7 @@ async function completionEvent(event) {
     if (await jsonFile(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`), null) === current.snapshot && (await reviewSnapshot(root, record.base, policy)).hash === record.hash) { status = 'reviewed'; break; }
   }
   if (status === 'block' && /(?:Independent review blocked|Revisione indipendente bloccata):\s*\S.+/i.test(event.last_assistant_message ?? '')) status = 'blocker';
-  const staged = await jsonFile(decisionPath(root, event.session_id, state.turn), null); const reasons = status === 'block' ? ['Code changed without an independent review: run $geppetto-verify, or state the concrete blocker in your reply.'] : [];
+  const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const reasons = status === 'block' ? ['Code changed without an independent review: run $geppetto-verify, or state the concrete blocker in your reply.'] : [];
   let block = reasons.length > 0 && !event.stop_hook_active; const blockPath = `${statePath}.${digest(state.turn)}.blocked`;
   if (block) block = await claimFile(blockPath, status);
   if (status === 'block' && !block) status = 'second-stop';
@@ -187,7 +194,7 @@ async function dispatch(event, { runCommand = run, now = Date.now, home, launchL
   if (typeof event.tool_name !== 'string' || !event.tool_input) throw new UsageError('Hook input needs tool_name and tool_input');
   const input = event.tool_input, eventName = event.hook_event_name ?? 'PreToolUse'; const command = toolCommand(event); const cwd = resolve(input.cwd ?? input.workdir ?? event.cwd ?? '.');
   if (/\bgh\s+pr\s+create\b/.test(command)) {
-    const tokens = words(command); const bodyFile = option(tokens, ['--body-file', '-F']); const body = option(tokens, ['--body', '-b']);
+    const { flags } = commandArgs(command), bodyFile = flags.get('--body-file') ?? flags.get('-F'), body = flags.get('--body') ?? flags.get('-b');
     let feedback;
     if (bodyFile && bodyFile !== '-') {
       try { feedback = sectionFeedback(readFileSync(resolve(cwd, bodyFile), 'utf8'), cwd, runCommand); }
@@ -210,12 +217,12 @@ async function dispatch(event, { runCommand = run, now = Date.now, home, launchL
 export async function handleEvent(event, options) {
   try { return await dispatch(event, options); }
   catch (error) {
+    if (['PreToolUse', 'PostToolUse'].includes(event?.hook_event_name)) { console.error(`Geppetto ${event.hook_event_name} diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); return {}; }
     if (event?.hook_event_name !== 'Stop') throw error;
     try {
       const root = await projectRoot(event.cwd ?? '.'); const statePath = turnStatePath(root, event.session_id ?? 'unknown');
-      let state; try { state = await jsonFile(statePath, null); } catch { /* The broken state may itself have caused Stop to fail. */ }
-      await ignoreLocalFiles(root, ['/hook-state/']);
-      await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
+      const state = await jsonFile(statePath, null).catch(() => null); // Diagnostic recovery must tolerate the broken state itself.
+      await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
       const marker = `${statePath}.${digest(event.turn_id ?? state?.turn ?? 'unknown')}.error`; if (await claimFile(marker)) try { await logHookEvent(root, { hook: 'completion', status: 'error', error: redact(error.message) }, event); }
       catch (cause) { await unlink(marker); throw cause; }
     } catch (cause) { console.error(`Stop diagnostic failed: ${redact(cause.message)}; original error: ${redact(error.message)}`); }
@@ -223,7 +230,7 @@ export async function handleEvent(event, options) {
   }
 }
 export const main = async args => {
-  if (!args.length) return hookMain(args, 'Hook', handleEvent);
+  if (!args.length) try { return await hookMain(args, 'Hook', handleEvent); } catch (error) { console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); console.log('{}'); return 0; }
   const opts = parseArgs(args, { flags: ['--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn'] });
   if (opts['--record-turn'] && opts['--session'] && opts._.length === 0 && Object.keys(opts).every(key => ['_', '--record-turn', '--session', '--turn'].includes(key))) {
     let value; try { value = JSON.parse(opts['--record-turn'] === '-' ? readFileSync(0, 'utf8') : opts['--record-turn']); } catch { throw new UsageError('Turn decision must be JSON.'); }

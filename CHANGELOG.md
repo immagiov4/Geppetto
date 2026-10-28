@@ -2,8 +2,9 @@
 
 ## 0.4.0
 
-- Decide requirements, incoming feedback and frustration before the first edit, with configurable questions and skills; edit-free turns close without a decision request.
+- Decide requirements, incoming feedback and frustration before native file edits or after observed shell changes, with configurable questions and skills; edit-free turns close without a decision request.
 - Renew feedback decisions after configured review-result commands and report measured decision delays and classified next-message corrections through audit.
+- Keep tools available on hook errors, parse review-command arguments and help requests, and start fresh when active turn state has an incompatible shape.
 - Use Liquid D1.1 for semantic requirements screening alongside lexical search and caller reading, with bounded recovery from HTTP 503 responses.
 
 ## 0.3.1

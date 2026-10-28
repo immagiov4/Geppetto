@@ -19,22 +19,29 @@
   "rearmOn": [
     {
       "tool": "^(Bash|exec_command|shell_command|shell)$",
-      "command": "^gh\\s+api\\s+(?:--[\\w-]+\\s+)*[\"\\']?/?repos/[^/\\s]+/[^/\\s]+/pulls/\\d+/(comments|reviews)(?:[?\"\\'\\s].*)?$"
+      "gh": "api",
+      "path": "^/?repos/[^/]+/[^/]+/pulls/\\d+/(comments|reviews)(?:\\?.*)?$"
     },
     {
       "tool": "^(Bash|exec_command|shell_command|shell)$",
-      "command": "^gh\\s+pr\\s+view(?:\\s+[^;|&\\r\\n]+)?\\s+--comments(?:\\s+[^;|&\\r\\n]+)?$"
+      "gh": "pr view",
+      "flags": ["--comments"]
     },
     {
       "tool": "^(Bash|exec_command|shell_command|shell)$",
-      "command": "^(?:python(?:3|\\.exe)?|py)\\s+[\"\\']?(?:[^\"\\'\\r\\n]*[/\\\\])?code-review[/\\\\]scripts[/\\\\]run_review\\.py(?:[\"\\'\\s].*)?$"
+      "script": "(?:^|[/\\\\])code-review[/\\\\]scripts[/\\\\]run_review\\.py$"
     },
     {
       "tool": "^(wait_agent|Task|Agent|task_result)$"
     },
     {
       "tool": "^(Bash|exec_command|shell_command|shell)$",
-      "command": "^gh\\s+run\\s+view(?:\\s+[^;|&\\r\\n]+)?\\s+--log-failed(?:\\s+[^;|&\\r\\n]+)?$"
+      "gh": "run view",
+      "flags": ["--log-failed"]
+    },
+    {
+      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "gh": "pr checks"
     }
   ]
 }
