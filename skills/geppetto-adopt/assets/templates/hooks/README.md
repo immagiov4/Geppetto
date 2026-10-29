@@ -32,7 +32,7 @@ Hermes uses its [plugin template](hermes/plugin.yaml) for read-only memory listi
 
 Complete `$geppetto-verify` or its configured `code-review` engine to record the reviewed diff. The review record holds a SHA-256, resolved comparison base, timestamp and outcome in ignored `.geppetto/reviews.jsonl`; comparison state under `.geppetto/hook-state/` holds only line hashes. Source and diffs stay out of these files. Tracked and non-ignored untracked text source count; binary files, symlinks and submodule contents are outside this gate's line measure. The gate verifies review identity, while the review procedure owns independence and findings.
 
-Git diff output streams into the fingerprint, including patches larger than 1 MiB. Any PreToolUse or PostToolUse error allows the tool and emits one redacted diagnostic line on stderr. Any Stop error lets the turn close and records one redacted error per session/turn in `hook-events.jsonl`; an active Stop also closes. Manual recording commands retain their error exit codes. If the diagnostic itself cannot be persisted, stderr retains its cause.
+Git diff output streams into the fingerprint, including patches larger than 1 MiB. Collected Git text output, including repository inventories, has no fixed subprocess buffer limit; callers can set an explicit `maxBuffer`. These reads retain their output in memory. Any PreToolUse or PostToolUse error allows the tool and emits one redacted diagnostic line on stderr. Any Stop error lets the turn close and records one redacted error per session/turn in `hook-events.jsonl`; an active Stop also closes. Manual recording commands retain their error exit codes. If the diagnostic itself cannot be persisted, stderr retains its cause.
 
 ## Turn record
 

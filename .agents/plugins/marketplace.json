@@ -6,7 +6,7 @@
   "plugins": [
     {
       "name": "geppetto",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "description": "Portable engineering skills and deterministic gates.",
       "source": {
         "source": "local",

@@ -12,7 +12,7 @@ export class UsageError extends Error {}
 export const userHome = () => homedir();
 export const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 15000, ...options, windowsHide: true, shell: false });
 export function gitOutput(root, args, { execute = run, prefix = [], trim = true, label = 'Git operation', detail = true, ...options } = {}) {
-  const result = execute('git', [...prefix, ...args], { cwd: root, timeout: 0, ...options });
+  const result = execute('git', [...prefix, ...args], { cwd: root, timeout: 0, maxBuffer: Infinity, ...options });
   if (result.status !== 0) throw new Error(`${label} failed${detail ? `: ${result.stderr?.trim() || result.error?.message || 'unknown error'}` : '.'}`);
   return trim ? result.stdout?.trim() ?? '' : result.stdout; }
 export const isMain = url => process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === url;
