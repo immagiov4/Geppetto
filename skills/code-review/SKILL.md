@@ -13,6 +13,8 @@ Use this as the baseline code-review procedure. Fix sources and contract, run in
 
 Inspect available programs and delegation interfaces, including Claude Code, Codex, Pi and OpenCode. Verify fresh-context execution, scoped access to review material, authentication, the requested model/options and retained outputs. Reuse the project's working invocation when present. Apply the independent searches, separate confirmation and reporting below through that runtime, retaining its actual invocation, results and available usage evidence.
 
+This procedure calls for independent reviewers in fresh contexts through the permitted delegation interface or runner. Use the task's authorized model and settings unless a separate reviewer selection was approved; a runner's default model is not a requirement to switch models. Preserve explicit prohibitions on delegation and distinguish them from a harness rule that permits delegation when a skill requests it.
+
 The bundled Python runner automates the Codex invocation. For another runtime, use its existing execution or delegation interface with the same isolated material and review stages.
 
 ## Constrained-session handoff

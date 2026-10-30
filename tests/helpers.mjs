@@ -1,4 +1,5 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, basename, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +9,7 @@ export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const scripts = resolve(repo, 'skills/geppetto-adopt/scripts');
 export function fixture(t, cleanup = {}) {
   const dir = mkdtempSync(resolve(tmpdir(), 'geppetto-test-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true, ...cleanup }));
+  t.after(() => rm(dir, { recursive: true, force: true, ...cleanup }));
   return dir;
 }
 export function put(dir, path, text) { mkdirSync(dirname(resolve(dir, path)), { recursive: true }); writeFileSync(resolve(dir, path), typeof text === 'string' ? text : JSON.stringify(text)); }

@@ -4,8 +4,9 @@ import { cpSync, existsSync, unlinkSync, renameSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fixture, put, get, invoke, git, scripts, repo } from './helpers.mjs';
+import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 
-test('adoption initializes a new project and commits only owned files as its first revision', t => {
+test('adoption initializes a new project and commits only owned files as its first revision', async t => {
   const cwd = fixture(t), home = fixture(t); const { install } = source(t);
   const args = ['--target', 'codex', '--project', cwd, '--plugin-hooks'];
   put(cwd, 'app.txt', 'Existing application');
@@ -21,6 +22,11 @@ test('adoption initializes a new project and commits only owned files as its fir
   assert.doesNotMatch(git(cwd, ['show', '--format=', '--name-only', 'HEAD']).stdout, /app.txt/);
   assert.equal(git(cwd, ['diff', '--cached', '--name-only']).stdout.trim(), 'app.txt');
   assert.equal(get(cwd, 'app.txt'), 'Existing application');
+  const ignored = get(cwd, '.geppetto/.gitignore');
+  const event = { cwd, session_id: 'first-real-use', turn_id: 'first', tool_name: 'Read', tool_input: { file_path: resolve(cwd, 'app.txt') } };
+  for (const hook_event_name of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) await handleEvent({ ...event, hook_event_name }, { home, launchLearning: async () => assert.fail('Idle installation must not launch learning') });
+  assert.equal(get(cwd, '.geppetto/.gitignore'), ignored, 'the first hook cycle must not modify the committed installation');
+  assert.equal(git(cwd, ['diff', '--name-only']).stdout.trim(), '', 'runtime activity must leave committed installation files clean');
 });
 
 for (const target of ['claude', 'codex']) test(`${target} plugin adoption stays small, owns only installation files and finalizes on a local branch`, t => {
@@ -106,7 +112,7 @@ test('installation ignores local authorizations while preserving grants and exis
   assert.equal(get(cwd, '.geppetto/.gitignore'), ignored);
   for (let i = 0; i < 2; i++) { r = invoke(install, args, { cwd }); assert.equal(r.status, 0, r.stderr); }
   assert.equal(get(cwd, '.geppetto/authorizations'), grant);
-  assert.equal(get(cwd, '.geppetto/.gitignore'), `${ignored}/authorizations\n/install.json\n`);
+  assert.equal(get(cwd, '.geppetto/.gitignore'), `${ignored}/authorizations\n/install.json\n/turns.jsonl\n/reviews.jsonl\n/hook-state/\n/hook-events.jsonl\n`);
   assert.equal(git(cwd, ['check-ignore', '.geppetto/authorizations']).status, 0);
   assert.equal(git(cwd, ['check-ignore', '.geppetto/config.json']).status, 1);
 });

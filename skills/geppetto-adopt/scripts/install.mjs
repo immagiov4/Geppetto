@@ -106,7 +106,7 @@ async function applyInstallation({ root, manifest, statePath, uninstall, source,
     }
     if (!uninstall) {
       await safePath(root, resolve(root, '.geppetto/.gitignore'));
-      await ignoreLocalFiles(root, ['/authorizations', '/install.json']);
+      await ignoreLocalFiles(root, ['/authorizations', '/install.json', '/turns.jsonl', '/reviews.jsonl', '/hook-state/', '/hook-events.jsonl']);
       if (run('git', ['rev-parse', '--git-dir'], { cwd: root }).status === 0) gitOutput(root, ['rm', '--cached', '--ignore-unmatch', '--', '.geppetto/install.json']);
     }
     for (const change of changes) {
