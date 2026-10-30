@@ -2,7 +2,7 @@
   "checks": [
     {
       "id": "requirements",
-      "question": "Does this request change the agreed requirements?",
+      "question": "Does this request change the agreed requirements, including first documentation or diagnostics requiring foundation choices through geppetto-spec?",
       "skill": "requirements-blast-radius"
     },
     {

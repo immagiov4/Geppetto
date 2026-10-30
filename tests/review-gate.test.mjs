@@ -90,3 +90,14 @@ test('a reviewed clean diff cannot hide a source file replaced by a directory or
     assert.equal((await send('Stop')).decision, 'block');
   }
 });
+
+test('delegate findings recorded by CLI satisfy the gate through small fixes and clear a prior block', async t => {
+  const { cwd, send } = project(t); await send('UserPromptSubmit'); put(cwd, 'app.mjs', lines(80));
+  const blocked = await send('Stop'); assert.match(blocked.reason, /--record-review.*--outcome/);
+  assert.equal(invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'findings'], { cwd }).status, 0);
+  put(cwd, 'app.mjs', lines(85)); assert.deepEqual(await send('Stop'), {});
+  assert.equal(get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse).filter(row => row.hook === 'reviewGate').at(-1).status, 'below-threshold');
+  put(cwd, 'app.mjs', lines(120));
+  await send('UserPromptSubmit', { turn_id: 'next' }); put(cwd, 'app.mjs', lines(160));
+  assert.equal((await send('Stop', { turn_id: 'next' })).decision, 'block');
+});

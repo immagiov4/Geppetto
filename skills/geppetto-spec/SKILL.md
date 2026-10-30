@@ -7,7 +7,7 @@ description: "Specify a change before code: human flow, design limits, requireme
 
 If `~/.geppetto/integrations.md` has a section for this skill, read it.
 
-**Foundations.** Resolve `.geppetto/config.json` `foundations` or supplied project values. Before creating documentation or telemetry with its foundation unset, propose 2–3 concrete options with tradeoffs and decide WITH the user before writing. Record the choice in `foundations.documentation` or `foundations.observability`. Follow recorded choices without asking again.
+**Foundations.** Resolve `.geppetto/config.json` `foundations` or supplied project values. For documentation or diagnostics, record an existing convention when present. Otherwise, with its foundation unset, propose 2–3 concrete options with tradeoffs and decide WITH the user before writing. Record the choice in `foundations.documentation` or `foundations.observability`. Follow recorded choices without asking again.
 
 **Local fix.** For one located owner, no contract/UI change and no dependency, use the [local-fix route](references/local-fix.md): record owner, invariant and focused proof, then hand off to `$geppetto-build`. Load principle skills for unresolved concerns. Otherwise follow the full path.
 

@@ -35,10 +35,11 @@ async function sessionStart(event, options) {
   const policy = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); if (!policy.checks.length) return memory;
   await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
   if (!await claimFile(`${turnStatePath(root, event.session_id)}.startup`)) return memory;
-  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }])); const text = `Before the first file-modifying tool call of a turn, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\nJudge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
+  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }])); const text = `Before the first file-modifying tool call of a turn, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\n${foundationReminder} Judge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
   try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
   catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; }
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
+const foundationReminder = 'For documentation or diagnostics, resolve foundations.documentation and foundations.observability through $geppetto-spec: reuse and record an existing convention; otherwise ask the user before creating it.';
 const recordCommand = (session, turn) => `node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-turn '<json>' --session ${JSON.stringify(session)}${turn ? ` --turn ${JSON.stringify(turn)}` : ''}`;
 function turnDecision(value, checks) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new UsageError('Turn decision must be an object.');
@@ -78,7 +79,7 @@ async function editingEvent(root, state, statePath, event, policy) {
   if (policy.checks.length && staged?.epoch !== state.epoch && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString())) {
     const needed = !staged || state.epoch === 'initial' ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
     await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: needed.map(check => check.id) }, event);
-    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };   }
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${foundationReminder} Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };   }
   await claimFile(`${path}.edited`); return {};
 }
 const reviewPolicy = async root => ({ ...reviewGateDefaults, ...(await jsonFile(resolve(root, '.geppetto/config.json'), {})).hooks?.reviewGate });
@@ -148,7 +149,7 @@ async function completionEvent(event) {
     if (await jsonFile(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`), null) === current.snapshot && (await reviewSnapshot(root, record.base, policy)).hash === record.hash) { status = 'reviewed'; break; }
   }
   if (status === 'block' && /(?:Independent review blocked|Revisione indipendente bloccata):\s*\S.+/i.test(event.last_assistant_message ?? '')) status = 'blocker';
-  const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const reasons = status === 'block' ? ['Code changed without an independent review: run $geppetto-verify, or state the concrete blocker in your reply.'] : [];
+  const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const reasons = status === 'block' ? [`Code changed without an independent review: run $geppetto-verify. After any completed independent review (CLI, delegate or harness), record it before fixing findings: node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-review --base ${state.base} --outcome <passed|findings>. Fixes below the configured threshold reuse that review; otherwise state the concrete blocker.`] : [];
   let block = reasons.length > 0 && !event.stop_hook_active; const blockPath = `${statePath}.${digest(state.turn)}.blocked`;
   if (block) block = await claimFile(blockPath, status);
   if (status === 'block' && !block) status = 'second-stop';
@@ -160,7 +161,7 @@ async function completionEvent(event) {
       await logHookEvent(root, { hook: 'turnGate', status: 'recorded' }, event);
     } catch (error) { await unlink(marker); throw error; }
   }
-  let review_blocked = false; try { review_blocked = (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  let review_blocked = false; try { review_blocked = !['reviewed', 'below-threshold'].includes(status) && (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked }; }
 async function dispatch(event, { runCommand = run, now = Date.now, home, launchLearning } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');

@@ -52,3 +52,16 @@ test('foundation instructions fit within each skill’s existing word count', ()
     assert.ok(text.trim().split(/\s+/).length <= maximum, name);
   }
 });
+
+import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
+test('increment 16 reaches foundation decisions before the first documentation or diagnostic edit', async t => {
+  const root = fixture(t), home = fixture(t);
+  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(root, args);
+  put(root, 'README.md', '# Project'); put(root, '.geppetto/config.json', config()); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
+  const event = { cwd: root, session_id: 'increment16', turn_id: '16' };
+  const start = await handleEvent({ ...event, hook_event_name: 'SessionStart' }, { home });
+  assert.match(start.hookSpecificOutput.additionalContext, /foundations.*documentation.*observability/);
+  await handleEvent({ ...event, hook_event_name: 'UserPromptSubmit', prompt: 'Voglio capire come mantenere questo progetto: scrivi la documentazione dell’architettura, dei dati e delle autorizzazioni. Aggiungi una diagnostica utile per capire perché un caricamento o una riproduzione falliscono, senza esporre password o collegamenti privati.' }, { home });
+  const edit = await handleEvent({ ...event, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: 'docs/architecture.md', content: '# Architecture' } }, { home });
+  assert.match(edit.hookSpecificOutput.permissionDecisionReason, /foundations.*documentation.*observability/);
+});

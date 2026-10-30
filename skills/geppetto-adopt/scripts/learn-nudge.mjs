@@ -6,7 +6,7 @@ import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults, projectRoot, cl
 import { logHookEvent } from './hook-events.mjs';
 import { createReadStream } from 'node:fs';
 import { redact, eligibleSignals, signalArchive, learningPolicy, localRecords } from './signal.mjs';
-import { privateEvidence } from './learning-privacy.mjs';
+import { privateEvidence, privateTranscriptEvidence, privateContent, normalizePrivateText } from './learning-privacy.mjs';
 export { launchLearning } from './common.mjs';
 /** Record tool starts; completion adds learning context once per qualifying turn. */
 export async function learningEvent(event, now, launch = launchLearning) {
@@ -48,7 +48,7 @@ const errorOutput = value => /(?:"(?:is_error|isError)"\s*:\s*true|"(?:exit_code
 /** Reduce complete JSONL records from a byte cursor; partial final records remain pending. */
 export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = [], privateRoot = null, cwd = process.cwd()) {
   if (start > (await stat(path)).size) start = 0;
-  const parts = []; let pending = Buffer.alloc(0), offset = 0, candidate = reviewBlocked, privateSeen = false; const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
+  const privateLines = await privateContent(privateRoot); const parts = []; let pending = Buffer.alloc(0), offset = 0, candidate = reviewBlocked, privateSeen = false; const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
   let preceding = decisions.findLast(turn => turn.transcriptOffset <= start);
   const recent = decisions.filter(turn => turn.transcriptOffset > start), evidence = new Set(); const add = (role, text, limit) => { if (text) parts.push({ role, text: `${role}: ${redact(text).slice(0, limit)}\n` }); };
   // Recheck provenance before the cursor: later summaries can quote private reads without a path.
@@ -59,7 +59,7 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       if (!line.trim()) continue;
       const record = JSON.parse(line); const directory = record.cwd ?? (['session_meta', 'turn_context'].includes(record.type) ? record.payload?.cwd : null);
       if (typeof directory === 'string') cwd = resolve(cwd, directory);
-      if (privateEvidence(record, privateRoot, cwd)) privateSeen = true;
+      if (privateTranscriptEvidence(record, privateRoot, cwd)) privateSeen = true;
       if (privateSeen || lineStart < start) continue;
       while (recent[0]?.transcriptOffset <= lineStart) preceding = recent.shift();
       const message = record.type === 'response_item' ? record.payload : record.message;
@@ -83,7 +83,7 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
   }
   if (privateSeen) return { text: '', offset, candidate: false, turns: [], skipped: 'private-memory' };
   candidate ||= parts.some(part => part.role === 'user' && /\b(?:no|wrong|instead|actually|correction|incorrect|fix|sbagliato|invece|correggi|correzione|errore)\b/i.test(part.text));
-  let text = parts.map(part => part.text).join('');
+  let text = parts.map(part => part.text).join(''); if (privateLines.some(secret => normalizePrivateText(text).includes(secret))) return { text: '', offset, candidate: false, turns: [], skipped: 'private-memory' };
   if (Buffer.byteLength(text) > sliceBytes) {
     const users = parts.filter(part => part.role === 'user').map(part => part.text).join('');
     if (Buffer.byteLength(users) > sliceBytes) throw new Error('User messages exceed the learning slice budget; transcript cursor retained.');

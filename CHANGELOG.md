@@ -2,6 +2,10 @@
 
 ## 0.6.0
 
+- Learning distinguishes private access from memory index and exclusion-glob mentions.
+- Independent reviews from any runtime can be recorded before small finding fixes.
+- Turn decisions route first documentation and diagnostics to foundation choices.
+
 - Installation explains capability choices and their data destinations, and reports the saved choices and controls.
 - The semantic source screen uses the recorded `screen.shareSource` answer for private projects and projects without a remote.
 

@@ -208,3 +208,18 @@ test('large public learning changes commit their complete content beyond the def
   assert.equal(diff.status, 0, diff.stderr); assert.ok(Buffer.byteLength(diff.stdout) > 1700000);
   assert.equal(get(root, target), '# Example\n\nKeep the existing owner.\n');
 });
+
+import { privateTranscriptEvidence } from '../skills/geppetto-adopt/scripts/learning-privacy.mjs';
+import { transcriptSlice } from '../skills/geppetto-adopt/scripts/learn-nudge.mjs';
+test('transcript provenance distinguishes memory mentions and excluded globs from private access', async t => {
+  const root = fixture(t);
+  const call = cmd => ({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd }) } });
+  for (const text of ["rg --glob '!buckets/private/**' foo", '[private](buckets/private/index.md) Personal life facts.']) {
+    assert.equal(privateTranscriptEvidence({ type: 'assistant', message: { content: text } }, null, root), false);
+  }
+  assert.equal(privateTranscriptEvidence(call("rg --glob '!buckets/private/**' foo"), null, root), false);
+  for (const cmd of ['cat buckets/private/x.md', 'ls buckets/private', 'rg foo buckets/private']) assert.equal(privateTranscriptEvidence(call(cmd), null, root), true);
+  put(root, 'memory/buckets/private/x.md', 'Synthetic secret line with enough characters.');
+  put(root, 'quoted.jsonl', jsonl([{ type: 'assistant', message: { content: 'Synthetic secret line with enough characters.' } }]));
+  assert.equal((await transcriptSlice(resolve(root, 'quoted.jsonl'), 0, false, [], resolve(root, 'memory/buckets/private'), root)).skipped, 'private-memory');
+});
