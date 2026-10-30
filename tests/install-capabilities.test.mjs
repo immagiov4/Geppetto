@@ -17,5 +17,3 @@ test('install question and recap cover every capability choice', t => {
   assert.equal(machine.jobs['maintain-memory'], undefined);
   for (const name of ['Memory:', 'hooks=', 'screen.shareSource=true', 'learner=', 'review=', 'maintenance.enabled=false', 'ci.enabled=false', 'foundations=', 'docs=', 'hostChecks=', 'integrations=', 'OPENROUTER_API_KEY']) assert.ok(result.stdout.includes(name), result.stdout);
 });
-
-
