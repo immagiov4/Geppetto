@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, mkdirSync, existsSync } from 'node:fs';
@@ -31,7 +32,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     assert.deepEqual(event('PostToolUse'), {});
     assert.equal(hooks.PostToolUse[0].hooks[0].async, undefined, 'context must arrive before the next model request');
     assert.equal(hooks.Stop.flatMap(group => group.hooks).length, 1, 'the shared Stop dispatch starts the existing runner');
-    assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).hook, 'learnNudge');
+    assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'hook-events.jsonl'))).hook, 'learnNudge');
     const memory = fixture(t); git(memory, ['init', '-q']); put(memory, 'index.md', '| Bucket | Scope | Holds |\n|---|---|---|\n| preferences | global | Working preferences. |\n');
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
     assert.match(event('SessionStart').hookSpecificOutput.additionalContext, /preferences — Working preferences/);

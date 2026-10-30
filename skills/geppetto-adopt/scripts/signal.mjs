@@ -1,13 +1,10 @@
 import { userTurnDecision } from './turn-checks.mjs';
-import { readFile } from 'node:fs/promises';
+import { projectRecords } from './project-records.mjs';
 import { resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { cli, isMain, parseArgs, UsageError, jsonFile, projectRoot, learningPolicy, appendRecord, launchLearning } from './common.mjs';
 export { learningDefaults, learningPolicy } from './common.mjs';
-export async function localRecords(root, name) {
-  try { return (await readFile(resolve(root, `.geppetto/${name}.jsonl`), 'utf8')).split('\n').filter(Boolean).map(JSON.parse); }
-  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
-}
+export const localRecords = projectRecords;
 export async function signalArchive(root) {
   const grouped = new Map();
   for (const row of await localRecords(root, 'signals')) {

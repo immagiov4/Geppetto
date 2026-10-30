@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, unlinkSync, readFileSync, mkdirSync, rmSync, rmdirSync } from 'node:fs';
@@ -44,7 +45,7 @@ test('learning sees current permitted project files without changing the user in
   assert.equal(get(root, 'app.mjs'), 'export const behavior = "current";\n');
   assert.equal(existsSync(resolve(root, 'lesson.md')), false);
   assert.equal(command(['diff', '--name-only', result.baseline, result.branch]).trim(), 'lesson.md');
-  assert.equal(JSON.parse(get(root, '.geppetto/learning.json')).baseline, result.baseline);
+  assert.equal(JSON.parse(get(root, projectDataPath(root, 'learning.json'))).baseline, result.baseline);
 });
 
 test('learning captures file-directory replacements in either direction, including staged replacements', async t => {

@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
@@ -23,7 +24,7 @@ test('native memory writes receive one reminder per turn even when learning nudg
   assert.deepEqual(await send(), {});
   await send({ hook_event_name: 'UserPromptSubmit', prompt: 'Second' });
   assert.ok((await send({ tool_name: 'MultiEdit', tool_input: { edits: [{ file_path: resolve(home, '.claude/projects/example/memory/second.md') }] } })).hookSpecificOutput);
-  const records = get(cwd, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse);
+  const records = get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
   assert.equal(records.length, 2); assert.ok(records.every(row => row.hook === 'nativeMemory' && row.modelCalls === 0));
 });
 

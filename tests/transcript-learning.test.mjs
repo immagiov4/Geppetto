@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, delimiter } from 'node:path';
@@ -131,10 +132,10 @@ test('the shipped Stop dispatch launches a detached worker for eligible evidence
     if (name === 'UserPromptSubmit') assert.equal(invoke('hook.mjs', ['--record-turn', JSON.stringify({ continuation: true }), '--session', 'detached', '--turn', 'one'], { cwd, home }).status, 0);
   }
   const deadline = Date.now() + 15000;
-  while (!existsSync(resolve(cwd, '.geppetto/learning.json')) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
-  assert.equal(JSON.parse(get(cwd, '.geppetto/learning.json')).status, 'unchanged');
+  while (!existsSync(projectDataPath(cwd, 'learning.json')) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
+  assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'learning.json'))).status, 'unchanged');
   assert.match(JSON.parse(get(home, 'received.json')).prompt, /correct the documented owner/);
-  assert.match(get(cwd, '.geppetto/signals.jsonl'), /resolved/);
+  assert.match(get(cwd, projectDataPath(cwd, 'signals.jsonl')), /resolved/);
   while (existsSync(resolve(home, '.geppetto/learn.lock')) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
   assert.equal(existsSync(resolve(home, '.geppetto/learn.lock')), false);
   const { workerPid } = JSON.parse(get(home, 'received.json'));

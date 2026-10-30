@@ -1,20 +1,21 @@
 import { privateEvidence } from './learning-privacy.mjs';
-import { mkdtemp, writeFile, rm, stat, realpath, readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
+import { resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { cli, isMain, parseArgs, UsageError, jsonFile, validateConfig, userHome, run, filesUnder, exists, foundationReport } from './common.mjs';
+import { cli, isMain, parseArgs, UsageError, jsonFile, validateConfig, userHome, run, filesUnder, exists, foundationReport, contained } from './common.mjs';
 import { localRecords, learningPolicy, signalArchive } from './signal.mjs';
 import { hostLintReport } from './host-lint.mjs';
 import { memorySettings, memoryConfiguration } from './memory-config.mjs';
 import { learningReadiness } from './learn-runner.mjs';
 import { turnMetrics, validateTurnPolicy, userTurnDecision } from './turn-checks.mjs';
 import { readKind } from './hook-events.mjs';
+import { projectDataPath } from './project-records.mjs';
 const status = value => value ? 'present' : 'absent';
 const repositoryIdentity = value => /^https?:\/\//.test(value) ? value.replace(/\.git$/, '') : value;
 /** Counts and observed reads only; missing observations are never inferred as usage. */
 export async function learningAudit(project, { home = userHome(), since, now = Date.now() } = {}) {
-  const policy = learningPolicy(await jsonFile(resolve(project, '.geppetto/config.json'), {})), memory = await memorySettings(project, home); if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError('--since must be an ISO date.'); const start = since ?? (policy.outcomeWeeks ? new Date(now - policy.outcomeWeeks * 7 * 24 * 60 * 60 * 1000).toISOString() : ''), startTime = start ? Date.parse(start) : -Infinity; const reads = await localRecords(project, 'reads'), signals = (await localRecords(project, 'signals')).filter(row => !privateEvidence(row, memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null, project)), archive = (await signalArchive(project)).filter(row => !privateEvidence(row, memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null, project)); const seen = (path, after) => reads.some(row => resolve(row.path) === resolve(path) && Date.parse(row.ts) >= after);
+  const policy = learningPolicy(await jsonFile(resolve(project, '.geppetto/config.json'), {})), memory = await memorySettings(project, home); if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError('--since must be an ISO date.'); const start = since ?? (policy.outcomeWeeks ? new Date(now - policy.outcomeWeeks * 7 * 24 * 60 * 60 * 1000).toISOString() : ''), startTime = start ? Date.parse(start) : -Infinity; const reads = await localRecords(project, 'reads'), signals = (await localRecords(project, 'signals')).filter(row => !privateEvidence(row, memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null, row.worktree ?? project)), archive = (await signalArchive(project)).filter(row => !privateEvidence(row, memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null, row.worktree ?? project)); const seen = (path, after) => reads.some(row => resolve(row.worktree && contained(row.worktree, row.path) ? resolve(project, relative(row.worktree, row.path)) : row.path) === resolve(path) && Date.parse(row.ts) >= after);
   const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {}); const roots = [resolve(project, '.agents/skills'), resolve(project, '.claude/skills'), resolve(home, '.claude/skills'), resolve(home, '.agents/skills'), resolve(home, '.codex/skills'), ...Object.values(machine.projects?.[project] ?? {}).map(source => resolve(source, 'skills'))];
   if (memory?.localPath) roots.push(resolve(memory.localPath, 'buckets'));
   const pages = [...new Set(roots.filter(root => !/[/\\]private(?:[/\\]|$)/i.test(root)).flatMap(root => {
@@ -22,7 +23,7 @@ export async function learningAudit(project, { home = userHome(), since, now = D
   }).filter(path => readKind(path, memory, project)))];
   if (memory?.localPath && readKind(resolve(memory.localPath, 'index.md'), memory, project) && await exists(resolve(memory.localPath, 'index.md'))) pages.push(resolve(memory.localPath, 'index.md'));
   const outcomes = signals.filter(row => row.status === 'resolved' && Date.parse(row.ts) >= startTime && row.paths?.length).map(change => { const neverRead = change.paths.filter(path => readKind(resolve(project, path), memory, project) && !seen(resolve(project, path), Date.parse(change.ts))); return { key: change.key, reference: change.reference, didNotFix: signals.some(row => row.key === change.key && row.session && (Date.parse(row.ts) > Date.parse(change.ts) || signals.indexOf(row) > signals.indexOf(change))), neverRead, candidateToRevert: neverRead.length > 0 }; }); const turns = (await localRecords(project, 'turns')).filter(row => Date.parse(row.ts) >= startTime).map(userTurnDecision);
-  return { since: start || null, openKeys: archive.filter(row => row.status === 'open' && !row.legacy).map(row => row.key), openEvidence: archive.filter(row => row.status === 'open' && !row.legacy), neverRead: pages.filter(path => !seen(path, startTime)), outcomes, categories: policy.categories.map(category => ({ ...category, keys: archive.filter(row => row.category === category.id).length, sessions: new Set(signals.filter(row => row.category === category.id && row.session && Date.parse(row.ts) >= startTime).map(row => `${row.key}\0${row.session}`)).size })), userFriction: { flagged: turns.filter(row => row.feedback?.applies || row.frustration?.applies).length, turns: turns.length, unclassified: turns.filter(row => typeof row.feedback?.applies !== 'boolean' || typeof row.frustration?.applies !== 'boolean').length }, other: archive.filter(row => row.category === 'other'), legacy: archive.filter(row => row.legacy || row.metric && !row.category), proposals: (await localRecords(project, 'category-proposals')).filter(row => !privateEvidence(row, memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null, project)) }; }
+  return { since: start || null, openKeys: archive.filter(row => row.status === 'open' && !row.legacy).map(row => row.key), openEvidence: archive.filter(row => row.status === 'open' && !row.legacy), neverRead: pages.filter(path => !seen(path, startTime)), outcomes, categories: policy.categories.map(category => ({ ...category, keys: archive.filter(row => row.category === category.id).length, sessions: new Set(signals.filter(row => row.category === category.id && row.session && Date.parse(row.ts) >= startTime).map(row => `${row.key}\0${row.session}`)).size })), userFriction: { flagged: turns.filter(row => row.feedback?.applies || row.frustration?.applies).length, turns: turns.length, unclassified: turns.filter(row => typeof row.feedback?.applies !== 'boolean' || typeof row.frustration?.applies !== 'boolean').length }, other: archive.filter(row => row.category === 'other'), legacy: archive.filter(row => row.legacy || row.metric && !row.category), proposals: (await localRecords(project, 'category-proposals')).filter(row => !privateEvidence(row, memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null, row.worktree ?? project)) }; }
 async function directory(path) { try { return (await stat(path)).isDirectory(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 async function file(path) { try { return (await stat(path)).isFile(); } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 async function memoryReport(project) {
@@ -61,9 +62,9 @@ export async function main(args) {
   if (!await directory(project)) throw new Error(`${project}:1: Project directory does not exist`);
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {}); const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
   validateTurnPolicy(config);
-  let turns = ''; try { turns = await readFile(resolve(project, '.geppetto/turns.jsonl'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const report = { project, foundations: foundationReport(config), node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: learningReadiness(project, config.hooks?.signalLearning) };
-  report.turnChecks = turnMetrics(turns.split('\n').filter(Boolean).map(JSON.parse));
+  const turns = await localRecords(project, 'turns');
+  const report = { project, dataDirectory: projectDataPath(project, ''), foundations: foundationReport(config), node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: learningReadiness(project, config.hooks?.signalLearning) };
+  report.turnChecks = turnMetrics(turns);
   report.evidence = await learningAudit(project, { since: opts['--since'] });
   if (opts['--verify']) {
     report.verification = await verify(project);
@@ -73,6 +74,7 @@ export async function main(args) {
   if (opts['--json']) console.log(JSON.stringify(report, null, 2));
   else {
     console.log(`Geppetto audit: ${project}\nNode ${report.node.version} (minimum 22)`);
+    console.log(`Runtime data: ${report.dataDirectory}`);
     console.log(`Installed: ${report.installed.join(', ') || 'run adoption'}`);
     console.log(`Hooks: ${Object.keys(machine.hooks ?? {}).join(', ') || 'run adoption'}`);
     console.log(`Memory: ${report.memory.status}`); console.log(`Unset foundations: ${report.foundations.unset.join(', ') || 'none'}`);

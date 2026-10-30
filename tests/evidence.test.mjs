@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, delimiter } from 'node:path';
@@ -35,8 +36,8 @@ test('the recording CLI starts its default worker at threshold and exits without
   const result = spawnSync(process.execPath, [resolve(scripts, 'signal.mjs'), 'Second observation', '--key', 'cli-case', '--category', 'workflow', '--session', 'two'], { cwd: root, windowsHide: true, encoding: 'utf8', timeout: 15000, env: { ...process.env, NODE_OPTIONS: observeWorker(home), HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex'), PATH: `${home}${delimiter}${process.env.PATH}` } });
   assert.equal(result.status, 0, result.stderr);
   const deadline = Date.now() + 15000;
-  while ((!existsSync(resolve(root, '.geppetto/learning.json')) || existsSync(resolve(home, '.geppetto/learn.lock'))) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
-  assert.equal(JSON.parse(get(root, '.geppetto/learning.json')).status, 'unchanged');
+  while ((!existsSync(projectDataPath(root, 'learning.json')) || existsSync(resolve(home, '.geppetto/learn.lock'))) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
+  assert.equal(JSON.parse(get(root, projectDataPath(root, 'learning.json'))).status, 'unchanged');
   await waitForWorker(home, deadline);
 });
 
@@ -52,7 +53,7 @@ test('immediate and weekly learning retain transcript privacy provenance before 
   const result = spawnSync(process.execPath, [resolve(scripts, 'signal.mjs'), 'Synthetic private summary without its path', '--key', 'private-context', '--category', 'workflow', '--session', 'two'], { cwd: root, windowsHide: true, encoding: 'utf8', timeout: 15000, env: { ...process.env, NODE_OPTIONS: observeWorker(home), HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex'), PATH: `${home}${delimiter}${process.env.PATH}` } });
   assert.equal(result.status, 0, result.stderr);
   const deadline = Date.now() + 15000;
-  while ((!existsSync(resolve(root, '.geppetto/hook-events.jsonl')) || existsSync(resolve(home, '.geppetto/learn.lock'))) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
+  while ((!existsSync(projectDataPath(root, 'hook-events.jsonl')) || existsSync(resolve(home, '.geppetto/learn.lock'))) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
   assert.equal(existsSync(resolve(home, 'provider-called')), false);
   assert.equal((await signalArchive(root)).find(row => row.key === 'private-context').status, 'open');
   const weekly = await runLearning(root, { home, execute: () => assert.fail('Private provenance must also cover weekly backstop runs') });
@@ -84,9 +85,9 @@ test('shell read telemetry ignores neighboring writes and listings and excludes 
   const root = fixture(t), home = fixture(t), event = { cwd: root, session_id: 'shell-reads', hook_event_name: 'PostToolUse', tool_name: 'exec_command' };
   put(root, '.geppetto/config.json', { hooks: { learnNudge: { enabled: false }, signalLearning: { enabled: false } } });
   await handleEvent({ ...event, tool_input: { cmd: 'Get-Content "skills/read/SKILL.md"; Set-Content "skills/write/SKILL.md" x; rg --files "skills/list/SKILL.md"' } }, { home });
-  assert.deepEqual(get(root, '.geppetto/reads.jsonl').trim().split('\n').map(JSON.parse).map(row => row.path), [resolve(root, 'skills/read/SKILL.md')]);
+  assert.deepEqual(get(root, projectDataPath(root, 'reads.jsonl')).trim().split('\n').map(JSON.parse).map(row => row.path), [resolve(root, 'skills/read/SKILL.md')]);
   await handleEvent({ ...event, tool_input: { cmd: 'cat "skills/failed/SKILL.md"' }, tool_response: 'Process exited with code 1' }, { home });
-  assert.equal(get(root, '.geppetto/reads.jsonl').trim().split('\n').length, 1);
+  assert.equal(get(root, projectDataPath(root, 'reads.jsonl')).trim().split('\n').length, 1);
 });
 
 test('audit limits read observations by the selected window and keeps private evidence out of maintenance', async t => {
@@ -202,7 +203,7 @@ test('category boundary lists supported categories and requires concrete evidenc
   assert.equal(bad.status, 2); assert.match(bad.stderr, /security.*verification.*workflow.*efficiency.*communication.*behavior.*other/);
   await assert.rejects(recordSignal(root, observation('misc', 's', { category: 'other' })), /evidence/);
   await recordSignal(root, observation('misc', 's', { category: 'other', evidence: 'build.log:12', source: 'agent' }), { launch: async () => {} });
-  put(root, '.geppetto/signals.jsonl', get(root, '.geppetto/signals.jsonl') + rows([{ id: 'legacy', metric: 'latency', text: 'Old signal' }]));
+  put(root, '.geppetto/signals.jsonl', get(root, projectDataPath(root, 'signals.jsonl')) + rows([{ id: 'legacy', metric: 'latency', text: 'Old signal' }]));
   assert.equal((await signalArchive(root)).find(row => row.id === 'legacy').metric, 'latency');
   assert.deepEqual(await eligibleSignals(root), []);
   assert.deepEqual(JSON.parse(invoke('signal.mjs', ['--list'], { cwd: root }).stdout), ['misc']);
@@ -217,7 +218,7 @@ test('PostToolUse records successful memory and skill reads only, with no conten
   for (const path of [resolve(root, 'skills/example/SKILL.md'), resolve(memory, 'buckets/preferences/page.md'), resolve(root, 'README.md'), resolve(memory, 'buckets/private/facts.md')]) await handleEvent({ ...event, tool_input: { file_path: path } }, { home });
   await handleEvent({ ...event, tool_input: { file_path: 'skills/failed/SKILL.md' }, tool_response: { isError: true } }, { home });
   await handleEvent({ ...event, tool_name: 'Write', tool_input: { file_path: 'skills/write/SKILL.md' } }, { home });
-  const reads = get(root, '.geppetto/reads.jsonl').trim().split('\n').map(JSON.parse);
+  const reads = get(root, projectDataPath(root, 'reads.jsonl')).trim().split('\n').map(JSON.parse);
   assert.deepEqual(reads.map(row => row.kind), ['skill', 'memory']); assert.ok(reads.every(row => row.session === 'reads' && row.ts && row.path));
   assert.doesNotMatch(JSON.stringify(reads), /private|# Preference/);
 });

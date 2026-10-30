@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
@@ -52,7 +53,7 @@ test('runner processes a signal snapshot on a branch, machine lock prevents over
   assert.equal(result.status, 'committed'); assert.equal(launches, 1); assert.equal(get(root, 'README.md'), '# Fixture\n');
   assert.equal((await runLearning(root, { home, execute })).status, 'idle');
   assert.equal(existsSync(resolve(home, '.geppetto/learn.lock')), false);
-  put(root, '.geppetto/signals.jsonl', get(root, '.geppetto/signals.jsonl') + JSON.stringify({ id: 'two', key: 'two', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix verified dead end' }) + '\n');
+  put(root, '.geppetto/signals.jsonl', get(root, projectDataPath(root, 'signals.jsonl')) + JSON.stringify({ id: 'two', key: 'two', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix verified dead end' }) + '\n');
   await assert.rejects(runLearning(root, { home, execute: async () => { throw new Error('fixture failure'); } }), /fixture failure/);
   assert.equal(existsSync(resolve(home, '.geppetto/learn.lock')), false);
   const retry = await runLearning(root, { home, execute: async () => ({ decision: 'no_change', reason: 'Existing procedure covers the signal.', owner: 'README.md' }) }); assert.equal(retry.status, 'unchanged');

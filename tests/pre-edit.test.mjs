@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';
@@ -14,7 +15,7 @@ function project(t, settings = {}, nested = false) {
   const send = (kind, extra = {}) => handleEvent({ cwd, session_id: 'session', turn_id: 'turn', hook_event_name: kind, ...extra });
   const edit = (extra = {}) => send('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: 'README.md' }, ...extra });
   const record = (value, session = 'session', turn = 'turn') => invoke('hook.mjs', ['--record-turn', JSON.stringify(value), '--session', session, '--turn', turn], { cwd });
-  const rows = () => get(cwd, '.geppetto/turns.jsonl').trim().split('\n').map(JSON.parse);
+  const rows = () => get(cwd, projectDataPath(cwd, 'turns.jsonl')).trim().split('\n').map(JSON.parse);
   return { root, cwd, send, edit, record, rows };
 }
 const denied = result => result.hookSpecificOutput?.permissionDecision === 'deny';
@@ -48,7 +49,7 @@ test('F2: read-only shell reproductions run without a decision request', async t
     assert.deepEqual(await send('PostToolUse', event), {});
   }
   assert.equal(get(cwd, 'README.md'), 'sed\n'); assert.deepEqual(await send('Stop'), {});
-  assert.equal(existsSync(resolve(cwd, '.geppetto/turns.jsonl')), false);
+  assert.equal(existsSync(projectDataPath(cwd, 'turns.jsonl')), false);
 });
 test('F2: shell effects on clean, dirty, untracked and staged paths ask once at the next tool boundary', async t => {
   for (const mode of ['clean', 'dirty', 'untracked', 'staged']) {
@@ -153,7 +154,7 @@ test('decision blocks once before first edit, persists measurement and never add
 test('bare Stop and edit-free turns never request or persist a decision', async t => {
   const { cwd, send } = project(t); assert.deepEqual(await send('Stop'), {}); await send('UserPromptSubmit');
   for (const [tool_name, tool_input] of [['Read', {}], ['Bash', { command: 'git diff --stat' }], ['exec_command', { cmd: 'Get-Content README.md' }]]) assert.deepEqual(await send('PreToolUse', { tool_name, tool_input }), {});
-  assert.deepEqual(await send('Stop'), {}); assert.equal(existsSync(resolve(cwd, '.geppetto/turns.jsonl')), false);
+  assert.deepEqual(await send('Stop'), {}); assert.equal(existsSync(projectDataPath(cwd, 'turns.jsonl')), false);
 });
 test('native file writes gate, while shell and recording commands remain available', async t => {
   for (const [tool_name, tool_input] of [['Write', {}], ['MultiEdit', {}], ['functions.apply_patch', '*** Begin Patch'], ['mcp__filesystem__write_file', {}], ['mcp.filesystem.edit_file', {}]]) {

@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
@@ -76,7 +77,7 @@ test('bad Stop configuration closes every delivery and logs its redacted error o
       const result = invoke('hook.mjs', [], { cwd: root, input: JSON.stringify({ cwd: root, session_id: 'errors', turn_id: 'one', hook_event_name: 'Stop', stop_hook_active }) });
       assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), {});
     }
-    const events = get(root, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse);
+    const events = get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
     assert.equal(events.length, 1); assert.match(events[0].error, /Invalid hooks.reviewGate/); assert.equal(events[0].status, 'error');
     const manual = invoke('hook.mjs', ['--record-turn', '{}', '--session', 'errors', '--turn', 'one'], { cwd: root }); assert.equal(manual.status, 2);
   }
@@ -88,7 +89,7 @@ test('Stop catches downstream learning errors and active Stop never blocks', asy
   assert.equal(invoke('hook.mjs', ['--record-turn', JSON.stringify(decision), '--session', event.session_id, '--turn', event.turn_id], { cwd: root }).status, 0);
   put(root, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 0 } } });
   for (const stop_hook_active of [false, true]) assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop', stop_hook_active }), {});
-  const errors = get(root, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse).filter(row => row.status === 'error');
+  const errors = get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse).filter(row => row.status === 'error');
   assert.equal(errors.length, 1); assert.match(errors[0].error, /minToolCalls/);
 });
 
@@ -99,7 +100,7 @@ test('failed learning launch closes Stop with one redacted diagnostic and leaves
   assert.equal(invoke('hook.mjs', ['--record-turn', JSON.stringify(decision), '--session', event.session_id, '--turn', event.turn_id], { cwd: root }).status, 0);
   const launchLearning = async () => { throw new Error(`Synthetic launch failed: api_key=${secret}`); };
   for (const stop_hook_active of [false, true]) assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop', stop_hook_active }, { launchLearning }), {});
-  const log = get(root, '.geppetto/hook-events.jsonl'); assert.ok(!log.includes(secret));
+  const log = get(root, projectDataPath(root, 'hook-events.jsonl')); assert.ok(!log.includes(secret));
   const errors = log.trim().split('\n').map(JSON.parse).filter(row => row.error); assert.equal(errors.length, 1); assert.match(errors[0].error, /Synthetic launch failed.*REDACTED/);
   const starts = []; await handleEvent({ ...event, hook_event_name: 'Stop', stop_hook_active: true }, { launchLearning: async event => { starts.push(event); } }); assert.equal(starts.length, 1);
 });
@@ -131,7 +132,7 @@ test('tracked diffs over one MiB remain gated, recordable and invalidated by fur
   const hash = JSON.parse(result.stdout).hash;
   assert.equal(hash, createHash('sha256').update(bytes).digest('hex'));
   result = stop(); assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), {});
-  assert.equal(JSON.parse(get(root, '.geppetto/turns.jsonl')).review.status, 'reviewed');
+  assert.equal(JSON.parse(get(root, projectDataPath(root, 'turns.jsonl'))).review.status, 'reviewed');
   put(root, 'app.mjs', source + 'export const changed = true;\n');
   result = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed'], { cwd: root }); assert.equal(result.status, 0, result.stderr); assert.notEqual(JSON.parse(result.stdout).hash, hash);
 });
@@ -150,8 +151,8 @@ test('SessionStart supplies a resolved command and minimal schema once, so an or
   const recordScript = text.match(/node "([^"]+hook\.mjs)"/)?.[1]; assert.equal(resolve(recordScript), resolve(repo, 'skills/geppetto-adopt/scripts/hook.mjs'));
   const recorded = invoke(recordScript, ['--record-turn', JSON.stringify(decision), '--session', event.session_id], { cwd: root }); assert.equal(recorded.status, 0, recorded.stderr);
   assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop' }), {});
-  const events = get(root, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse); assert.equal(events.filter(row => row.status === 'block').length, 0);
-  assert.equal(JSON.parse(get(root, '.geppetto/turns.jsonl')).sessionId, event.session_id);
+  const events = get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse); assert.equal(events.filter(row => row.status === 'block').length, 0);
+  assert.equal(JSON.parse(get(root, projectDataPath(root, 'turns.jsonl'))).sessionId, event.session_id);
 });
 
 test('SessionStart keeps the turn command scoped to repositories where the completion gate can record a turn', async t => {

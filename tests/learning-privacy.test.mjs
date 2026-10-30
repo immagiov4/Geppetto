@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, symlinkSync } from 'node:fs';
@@ -28,9 +29,9 @@ test('private reads relative to tool or session cwd skip the entire turn without
     put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'pending', key: 'pending', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix the existing owner.' }]));
     const result = await runLearning(root, { home, context: { learning_qualified: true, session_id: host, transcript_path: resolve(home, 'transcript.jsonl'), cwd: root }, execute: async () => assert.fail('private turn reached execute') });
     assert.equal(result.status, 'idle'); assert.equal(result.skipped, 'private-memory');
-    const event = JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim());
+    const event = JSON.parse(get(root, projectDataPath(root, 'hook-events.jsonl')).trim());
     assert.equal(event.skipped, 'private-memory'); assert.equal(event.modelCalls, 0);
-    assert.equal(existsSync(resolve(root, '.geppetto/learning.json')), false);
+    assert.equal(existsSync(projectDataPath(root, 'learning.json')), false);
   }
 });
 
@@ -66,8 +67,8 @@ test('learning rejects added private lines and paths before staging or committin
     assert.equal(git(root, ['rev-parse', 'HEAD']).stdout.trim(), before);
     assert.equal(get(root, 'skills/example/SKILL.md'), '# Example\n\nKeep the existing owner.\n');
     assert.equal(existsSync(resolve(root, 'new-lesson.md')), false);
-    assert.ok(!get(root, '.geppetto/learning.json').includes(addition));
-    assert.equal(JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim()).status, 'blocked');
+    assert.ok(!get(root, projectDataPath(root, 'learning.json')).includes(addition));
+    assert.equal(JSON.parse(get(root, projectDataPath(root, 'hook-events.jsonl')).trim()).status, 'blocked');
   }
 });
 
@@ -132,7 +133,7 @@ test('private junctions and encoded file URIs exclude complete Codex and Claude 
       calls++; return { decision: 'no_change', reason: 'Already covered.', owner: 'skills/example/SKILL.md' };
     } });
     assert.equal(calls, 0); assert.equal(result.skipped, 'private-memory'); assert.equal(result.status, 'idle');
-    assert.equal(JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim()).modelCalls, 0);
+    assert.equal(JSON.parse(get(root, projectDataPath(root, 'hook-events.jsonl')).trim()).modelCalls, 0);
   });
 });
 
@@ -163,7 +164,7 @@ test('normalized private text is blocked across added lines in tracked and new f
     assert.equal(result.status, 'blocked'); assert.equal(result.lastId, null); assert.equal(existsSync(result.path), false);
     assert.match(result.assessment.reason, /private/);
     assert.equal(git(root, ['branch', '--list', result.branch]).stdout.trim(), '');
-    assert.ok(!get(root, '.geppetto/learning.json').includes('observatory'));
+    assert.ok(!get(root, projectDataPath(root, 'learning.json')).includes('observatory'));
   });
 });
 

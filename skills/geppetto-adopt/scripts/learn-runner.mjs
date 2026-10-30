@@ -5,14 +5,15 @@ import { spawn } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { cli, isMain, jsonFile, atomicJson, userHome, run, projectRoot, ignoreLocalFiles, foundationReport } from './common.mjs';
+import { learningState } from './project-records.mjs';
 import { learningFilePath } from './learner-tools.mjs';
 import { learningContext, learningGit as git } from './learning-context.mjs';
 import { learningResult, learningResultSchema } from './learning-result.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { transcriptSlice, publicLearningRecords } from './learn-nudge.mjs';
-import { redact, eligibleSignals, resolveSignals } from './signal.mjs';
+import { redact, eligibleSignals, resolveSignals, localRecords } from './signal.mjs';
 import { memorySettings } from './memory-config.mjs';
-import { privateEvidence, privateContent, normalizePrivateText } from './learning-privacy.mjs';
+import { privateEvidence, privateContent, normalizePrivateText, signalProvenance } from './learning-privacy.mjs';
 export function learningCommand(name) {
   for (const directory of (process.env.PATH ?? '').split(delimiter)) {
     const paths = [resolve(directory, process.platform === 'win32' ? `${name}.exe` : name), resolve(directory, name === 'codex' ? 'node_modules/@openai/codex/bin/codex.js' : 'node_modules/@anthropic-ai/claude-code/cli.js')];
@@ -83,19 +84,24 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
   try { lock = await open(lockPath, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') return { status: 'busy' }; throw error; }
   try {
     await lock.writeFile(String(process.pid));
-    const statePath = resolve(root, '.geppetto/learning.json'); const state = await jsonFile(statePath, {});
+    const { path: statePath, state } = await learningState(root);
     const memory = await memorySettings(root, home), privateRoot = memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null; const candidates = publicLearningRecords(await eligibleSignals(root), privateRoot, event.cwd ?? root), pending = []; let slice, cursorPath;
-    for (const record of candidates) { if (record.transcript_path && (await transcriptSlice(record.transcript_path, 0, false, [], privateRoot, root)).skipped) { await logHookEvent(root, { hook: 'learning', status: 'idle', skipped: 'private-memory', modelCalls: 0 }, event); continue; } pending.push(record); }
+    for (const record of candidates) {
+      const provenance = record.transcript_path && existsSync(record.transcript_path) && existsSync(record.worktree ?? root) ? await signalProvenance(record.worktree ?? root, record) : record;
+      if (record.sourcePrivacy === 'private' || provenance.sourcePrivacy === 'private') { await logHookEvent(root, { hook: 'learning', status: 'idle', skipped: 'private-memory', modelCalls: 0 }, event); continue; }
+      if (record.transcript_path && provenance.sourcePrivacy !== 'public') { await logHookEvent(root, { hook: 'learning', status: 'blocked', key: record.key, reason: 'Signal source provenance is unavailable.', modelCalls: 0 }, event); continue; }
+      pending.push(record);
+    }
     if (candidates.length && !pending.length) return { status: 'idle', skipped: 'private-memory' };
     if ((event.learning_qualified || pending.length) && event.transcript_path && event.session_id) {
       cursorPath = resolve(root, '.geppetto/hook-state', createHash('sha256').update(event.session_id).digest('hex'), 'transcript.json');
-      const cursor = await jsonFile(cursorPath, {}); const turnPath = resolve(root, '.geppetto/turns.jsonl'); const turns = existsSync(turnPath) ? (await readFile(turnPath, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse).filter(turn => turn.sessionId === event.session_id) : [];
-      slice = await transcriptSlice(event.transcript_path, cursor.path === event.transcript_path ? cursor.offset : 0, event.review_blocked, turns, privateRoot, event.cwd ?? root);
-      if (slice.skipped) {
+      const cursor = await jsonFile(cursorPath, {}); const turns = (await localRecords(root, 'turns', { currentWorktree: true })).filter(turn => turn.sessionId === event.session_id);
+      try { slice = await transcriptSlice(event.transcript_path, cursor.path === event.transcript_path ? cursor.offset : 0, event.review_blocked, turns, privateRoot, event.cwd ?? root); } catch (error) { await logHookEvent(root, { hook: 'learning', status: 'blocked', reason: 'Event transcript unavailable.', error: error.code ?? 'invalid-transcript', modelCalls: 0 }, event); slice = null; }
+      if (slice?.skipped) {
         await logHookEvent(root, { hook: 'learning', status: 'idle', skipped: slice.skipped, modelCalls: 0 }, event);
         await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: event.transcript_path, offset: slice.offset });
         return { status: 'idle', skipped: slice.skipped };       }
-      if (!slice.candidate) {
+      if (slice && !slice.candidate) {
         if (slice.text) await logHookEvent(root, { hook: 'learning', status: 'no-candidate', bytes: Buffer.byteLength(slice.text), modelCalls: 0 }, event);
         await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: event.transcript_path, offset: slice.offset });
         if (!pending.length) return { status: slice.text ? 'no-candidate' : 'idle' };
@@ -135,7 +141,6 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
     assessment = learningResult(assessment);
     if (assessment.decision === 'blocked') {
       const result = { status: 'blocked', branch, path, ...context, assessment, lastId: state.lastId ?? null };
-      await ignoreLocalFiles(root, ['/learning.json']);
       await atomicJson(statePath, result); await logHookEvent(root, { hook: 'learning', ...result }, event); return result;
     }
     if (git(path, ['ls-files', '--others', '--ignored', '--exclude-standard', '-z'])) throw new Error('Learning output is ignored by Git; inspect the retained worktree.');
@@ -144,7 +149,6 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
     if (Boolean(changed) !== (assessment.decision === 'applied')) throw new Error('Learning decision contradicts the retained file changes; signals remain pending.');
     const status = !changed ? 'unchanged' : policy.writeApproval ? 'staged' : 'committed'; const evidence = pending.map(row => row.key);
     if (status === 'committed') git(path, ['-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', `learn: retain reusable improvement\n\nEvidence: ${evidence.join(', ')}`]);
-    await ignoreLocalFiles(root, ['/learning.json']);
     const result = { status, branch, path, ...context, assessment, evidence, lastId: pending.at(-1)?.id ?? state.lastId ?? null };
     if (status !== 'staged' && evidence.length) await resolveSignals(root, evidence, { reference: status === 'committed' ? git(path, ['rev-parse', 'HEAD']).trim() : `no-change:${id}`, paths, through: Object.fromEntries(pending.map(row => [row.key, row.id])), reason: assessment.reason });
     await atomicJson(statePath, result); await logHookEvent(root, { hook: 'learning', ...result }, event);

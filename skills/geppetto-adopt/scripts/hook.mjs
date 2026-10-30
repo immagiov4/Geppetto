@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { readFile, appendFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
 import { resolve, matchesGlob } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile } from './common.mjs';
+import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, exists } from './common.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
-import { redact } from './signal.mjs';
+import { redact, localRecords } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
 import { placeholderReason } from './gate-sections.mjs';
@@ -121,7 +121,7 @@ export async function recordReview(root, base, outcome) {
   const current = await reviewSnapshot(root, base, await reviewPolicy(root));
   await atomicJson(resolve(root, '.geppetto/hook-state', `review-${base}-${current.hash}.json`), current.snapshot);
   const record = { hash: current.hash, base, ts: new Date().toISOString(), outcome };
-  await appendFile(resolve(root, '.geppetto/reviews.jsonl'), `${JSON.stringify(record)}\n`, { mode: 0o600 }); return record;
+  await appendRecord(root, 'reviews', record); return record;
 }
 async function completionEvent(event) {
   const kind = event.hook_event_name;
@@ -139,8 +139,8 @@ async function completionEvent(event) {
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
   if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})));
   if (kind !== 'Stop') return {};
-  let reviews = ''; try { reviews = await readFile(resolve(root, '.geppetto/reviews.jsonl'), 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const records = reviews.trim().split('\n').filter(Boolean).map(JSON.parse), last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy); const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null); const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);
+  const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
+  const last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy); const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null); const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);
   let status = 'below-threshold';
   if (records.some(record => record.base === last.base && record.hash === current.hash)) status = 'reviewed';
   else if (policy.enabled && lines >= policy.threshold && sinceReview >= policy.threshold) status = 'block';
@@ -156,7 +156,7 @@ async function completionEvent(event) {
   if (staged && !block) {
     const marker = `${decisionPath(root, event.session_id, state.turn)}.recorded`; if (await claimFile(marker)) try {
       const transcriptOffset = event.transcript_path ? (await lstat(event.transcript_path)).size : null; const decisions = staged.decisions, first = decisions[0]; const edited = await lstat(`${decisionPath(root, event.session_id, state.turn)}.edited`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
-      await appendFile(resolve(root, '.geppetto/turns.jsonl'), `${JSON.stringify({ ...staged.value, requestedAt: first.requestedAt, decidedAt: first.decidedAt, decisions, edited, addedSeconds: decisions.reduce((sum, d) => sum + Math.max(0, Date.parse(d.decidedAt) - Date.parse(d.requestedAt)) / 1000, 0), review: { status, lines, sinceReview, hash: current.hash }, sessionId: event.session_id, turnId: state.turn, previousTurnId: state.previousTurnId, ts: new Date().toISOString(), transcriptOffset })}\n`, { mode: 0o600 });
+      await appendRecord(root, 'turns', { ...staged.value, requestedAt: first.requestedAt, decidedAt: first.decidedAt, decisions, edited, addedSeconds: decisions.reduce((sum, d) => sum + Math.max(0, Date.parse(d.decidedAt) - Date.parse(d.requestedAt)) / 1000, 0), review: { status, lines, sinceReview, hash: current.hash }, sessionId: event.session_id, turnId: state.turn, previousTurnId: state.previousTurnId, ts: new Date().toISOString(), transcriptOffset });
       await logHookEvent(root, { hook: 'turnGate', status: 'recorded' }, event);
     } catch (error) { await unlink(marker); throw error; }
   }

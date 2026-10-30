@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.3
+
+- Learning records, evidence and progress live in the Git common directory, so every worktree of a repository shares them and they survive worktree removal. Old per-worktree records are imported once; originals stay untouched.
+
+## 0.5.2
+
+- Git output in large repositories no longer fails on buffer limits.
+
 ## 0.5.1
 
 - Integration catalog: correct the skill-diet source and description, add install commands for ponytail, drop disclaimer sentences.

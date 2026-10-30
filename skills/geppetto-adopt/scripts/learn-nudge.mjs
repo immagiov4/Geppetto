@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults, projectRoot, claimFile, launchLearning } from './common.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { createReadStream } from 'node:fs';
-import { redact, eligibleSignals, signalArchive, learningPolicy } from './signal.mjs';
+import { redact, eligibleSignals, signalArchive, learningPolicy, localRecords } from './signal.mjs';
 import { privateEvidence } from './learning-privacy.mjs';
 export { launchLearning } from './common.mjs';
 /** Record tool starts; completion adds learning context once per qualifying turn. */
@@ -14,9 +14,9 @@ export async function learningEvent(event, now, launch = launchLearning) {
   const kind = event.hook_event_name ?? 'PreToolUse';
   if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active && kind !== 'Stop') return {};
   const root = await projectRoot(event.cwd ?? '.'); const configPath = resolve(root, '.geppetto/config.json');
-  if (!await exists(configPath) && !(kind === 'Stop' && await exists(resolve(root, '.geppetto/signals.jsonl')))) return {};
+  if (!await exists(configPath) && !(kind === 'Stop' && (await localRecords(root, 'signals')).length > 0)) return {};
   const config = { ...learnNudgeDefaults, ...(await jsonFile(configPath, {})).hooks?.learnNudge };
-  if (!config.enabled && !(kind === 'Stop' && await exists(resolve(root, '.geppetto/signals.jsonl')))) return {};
+  if (!config.enabled && !(kind === 'Stop' && (await localRecords(root, 'signals')).length > 0)) return {};
   for (const key of ['minToolCalls', 'minDurationMs']) if (!Number.isSafeInteger(config[key]) || config[key] <= 0) throw new Error(`${configPath}:1: hooks.learnNudge.${key} must be a positive integer`);
   const session = createHash('sha256').update(event.session_id).digest('hex'); const state = resolve(root, '.geppetto/hook-state', session); const activity = resolve(state, 'activity.jsonl');
   if (!['PostToolUse', 'Stop'].includes(kind)) {
@@ -43,7 +43,7 @@ export async function learningEvent(event, now, launch = launchLearning) {
   const keys = (await signalArchive(root)).filter(row => row.status === 'open' && !row.legacy).map(row => row.key), categories = learningPolicy(await jsonFile(configPath, {})).categories;
   return { hookSpecificOutput: { hookEventName: kind, additionalContext: `Use $geppetto-learn for reusable lessons. Open keys: ${JSON.stringify(keys)}. Reuse one or open a short slug; record once per session with node "${fileURLToPath(new URL('./signal.mjs', import.meta.url)).replaceAll('\\', '/')}" "<lesson>" --key <key> --session ${JSON.stringify(event.session_id)} --category <id>. Assign one primary category per episode in configured order: ${categories.map(row => row.id).join(' > ')}; secondary effects go in --attributes <json-object>. other requires --evidence. User feedback/frustration provenance comes from the turn record. Keep this check internal and continue the task.` } }; }
 const sliceBytes = 40 * 1024;
-export const publicLearningRecords = (records, privateRoot, cwd) => records.filter(record => !privateEvidence(record, privateRoot, cwd));
+export const publicLearningRecords = (records, privateRoot, cwd) => records.filter(record => !privateEvidence(record, privateRoot, record.worktree ?? cwd));
 const errorOutput = value => /(?:"(?:is_error|isError)"\s*:\s*true|"(?:exit_code|exitCode)"\s*:\s*-?[1-9]\d*|Process exited with code -?[1-9]\d*|(?:^|\n)(?:Exit code:?\s*-?[1-9]\d*|Error:|ERROR\b|Traceback\b))/.test(value);
 /** Reduce complete JSONL records from a byte cursor; partial final records remain pending. */
 export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = [], privateRoot = null, cwd = process.cwd()) {

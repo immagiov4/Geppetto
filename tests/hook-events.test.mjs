@@ -1,10 +1,11 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, put, get, git, invoke } from './helpers.mjs';
 import { handleMemoryEvent } from '../skills/geppetto-adopt/scripts/memory-hook.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 
-const records = root => get(root, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse);
+const records = root => get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
 
 test('project-wide memory results retain their originating sessions without copying event payloads', async t => {
   const cwd = fixture(t), home = fixture(t), memory = fixture(t);

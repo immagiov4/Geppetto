@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, rmdirSync } from 'node:fs';
@@ -33,7 +34,7 @@ test('every long turn receives internal learning context after a tool and Stop s
   assert.deepEqual(await send('Stop', 'second', 5500), {}, 'wall time starts at the first call');
   assert.ok((await send('PostToolUse', 'second', 6000)).hookSpecificOutput.additionalContext, 'one long command qualifies when it finishes');
   assert.deepEqual(await send('Stop', 'second', 7000), {});
-  const logs = get(cwd, '.geppetto/hook-events.jsonl').trim().split('\n').map(JSON.parse);
+  const logs = get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
   assert.equal(logs.length, 3); assert.equal(logs[0].toolCalls, 2); assert.equal(logs[0].elapsedMs, 300); assert.equal(logs[2].toolCalls, 1); assert.equal(logs[2].elapsedMs, 1000);
   assert.notEqual(logs[0].turn, logs[1].turn);
   assert.equal(logs[0].hook, 'learnNudge'); assert.equal(logs[0].modelCalls, 0); assert.equal(logs[0].costUsd, 0);
@@ -51,7 +52,7 @@ test('native turn IDs remain eligible without prompt events and old session mark
     assert.ok((await handleEvent({ ...event, hook_event_name: 'PostToolUse' })).hookSpecificOutput.additionalContext);
     assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'PostToolUse' }), {});
   }
-  assert.deepEqual(get(cwd, '.geppetto/hook-events.jsonl').trim().split('\n').map(line => JSON.parse(line).turn), ['first', 'second']);
+  assert.deepEqual(get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(line => JSON.parse(line).turn), ['first', 'second']);
 });
 
 test('learning defaults remain enabled and parallel tool completions deliver only one internal reminder', async t => {
@@ -70,12 +71,12 @@ test('a failed event log preserves the opportunity to deliver and measure the re
   const diagnostic = t.mock.method(console, 'error', () => {});
   const cwd = fixture(t); put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: true, benchmark: null, minToolCalls: 1, minDurationMs: 1000 } } });
   const event = { cwd, session_id: 'log-recovery', hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: {} };
-  await handleEvent(event); const log = resolve(cwd, '.geppetto/hook-events.jsonl'); mkdirSync(log);
+  await handleEvent(event); const log = projectDataPath(cwd, 'hook-events.jsonl'); mkdirSync(log);
   assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'PostToolUse' }), {});
   assert.equal(diagnostic.mock.callCount(), 1); assert.match(diagnostic.mock.calls[0].arguments[0], /PostToolUse diagnostic/);
   rmdirSync(log);
   assert.ok((await handleEvent({ ...event, hook_event_name: 'PostToolUse' })).hookSpecificOutput.additionalContext);
-  assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).hook, 'learnNudge');
+  assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'hook-events.jsonl'))).hook, 'learnNudge');
 });
 
 test('internal learning preserves PR feedback', async t => {
@@ -119,6 +120,6 @@ test('plugin reminder signal command runs from a project with no vendored script
   const script = context.match(/node "([^"]+signal\.mjs)"/)?.[1]; assert.ok(script, context);
   const result = invoke(script, ['Use the existing owner', '--category', 'workflow', '--key', 'existing-owner', '--session', 'plugin-signal'], { cwd });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(get(cwd, '.geppetto/signals.jsonl')).text, 'Use the existing owner');
+  assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'signals.jsonl'))).text, 'Use the existing owner');
   assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);
 });

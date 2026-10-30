@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
@@ -25,7 +26,7 @@ test('prompt memory hooks stay silent without paid calls even with legacy classi
     authorization: { reserve: unexpected, settle: unexpected },
   });
   assert.deepEqual(result, {});
-  assert.equal(existsSync(resolve(cwd, '.geppetto/hook-events.jsonl')), false);
+  assert.equal(existsSync(projectDataPath(cwd, 'hook-events.jsonl')), false);
   const listing = session(cwd, home);
   assert.equal(listing.status, 0, listing.stderr);
   assert.match(JSON.parse(listing.stdout).hookSpecificOutput.additionalContext, /Memories live here:/);
@@ -38,7 +39,7 @@ test('session memory context lists every bucket and injects only linked nonpriva
   assert.equal(output.hookEventName, 'SessionStart');
   assert.equal(output.additionalContext, `Memories live here: ${memory} (https://example.invalid/memory). Read and update them through $geppetto-memory.\nGlobal buckets:\nprivate — Personal facts.\npreferences — Working preferences.\nProject buckets:\nmy-app — My app facts.\ngeppetto — Geppetto facts.\nPROJECT bucket index (my-app):\n# My app\n\n[Playback](playback.md) — Timing facts.\n\nPROJECT bucket index (geppetto):\n# Geppetto\n\n[Hooks](hooks.md) — Hook facts.\n`);
   assert.doesNotMatch(output.additionalContext, /PRIVATE INDEX|PAGE MUST/);
-  const log = JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')); assert.equal(log.injectedBytes, Buffer.byteLength(output.additionalContext)); assert.equal(log.modelCalls, 0); assert.equal(log.event, 'SessionStart');
+  const log = JSON.parse(get(cwd, projectDataPath(cwd, 'hook-events.jsonl'))); assert.equal(log.injectedBytes, Buffer.byteLength(output.additionalContext)); assert.equal(log.modelCalls, 0); assert.equal(log.event, 'SessionStart');
 });
 
 test('legacy projectBucket overrides user buckets and the array form takes precedence over the old key', t => {
@@ -53,7 +54,7 @@ test('configured unavailable memory emits one reasoned line; absent configuratio
   const { cwd, home } = setup(t); put(cwd, '.geppetto/config.json', { memory: { localPath: 'missing', buckets: [] } });
   let r = session(cwd, home); assert.equal(r.status, 0, r.stderr); const text = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
   assert.match(text, /^Memory is configured but unavailable: .*clone.*$/); assert.equal(text.split('\n').length, 1);
-  assert.equal(JSON.parse(get(cwd, '.geppetto/hook-events.jsonl')).status, 'unavailable');
+  assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'hook-events.jsonl'))).status, 'unavailable');
   const empty = fixture(t); r = session(empty, empty); assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout), {});
 });
 
@@ -75,7 +76,7 @@ test('the user-level ~/.geppetto config never makes the home directory a project
   const home = fixture(t); const cwd = resolve(home, 'work', 'scratch'); put(cwd, 'note.txt', 'x');
   put(home, '.geppetto/config.json', { memory: { localPath: 'missing-memory' } });
   const r = session(cwd, home); assert.equal(r.status, 0, r.stderr);
-  assert.ok(!existsSync(resolve(home, '.geppetto/hook-events.jsonl')), 'home must not receive project hook events');
+  assert.ok(!existsSync(projectDataPath(home, 'hook-events.jsonl')), 'home must not receive project hook events');
 });
 
 
@@ -85,5 +86,5 @@ test('project discovery stops at the user home before reading ancestor configura
   put(ancestor, '.geppetto/config.json', { memory: { localPath: 'unrelated-memory' } });
   const r = session(cwd, home); assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(r.stdout), {});
-  assert.ok(!existsSync(resolve(ancestor, '.geppetto/hook-events.jsonl')));
+  assert.ok(!existsSync(projectDataPath(ancestor, 'hook-events.jsonl')));
 });

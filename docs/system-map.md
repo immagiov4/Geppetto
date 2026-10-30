@@ -16,6 +16,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Memory listing and configuration | `memory-hook.mjs`, `memory-config.mjs` |
 | Memory installation and Claude native directory ownership | `memory-setup.mjs` |
 | Cross-machine maintenance registrations | `memory-jobs.mjs` |
+| Shared repository journals, legacy recovery and learning progress | `project-records.mjs` |
 | Hook telemetry | `hook-events.mjs` |
 | Evidence keys, categories, merging and proposals | `signal.mjs`, `learning-defaults.json` |
 | Read/outcome reports and companion compilation | `audit.mjs`, `maintenance.mjs` |

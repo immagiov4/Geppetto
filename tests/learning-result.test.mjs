@@ -1,3 +1,4 @@
+import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { delimiter, resolve } from 'node:path';
@@ -25,11 +26,11 @@ test('a successful CLI reporting an inaccessible owner leaves the signal pending
   const context = { session_id: 'origin-session', turn_id: 'origin-turn' };
   const result = await runLearning(root, { home, context });
   assert.equal(result.status, 'blocked');
-  const state = JSON.parse(get(root, '.geppetto/learning.json'));
+  const state = JSON.parse(get(root, projectDataPath(root, 'learning.json')));
   assert.notEqual(state.lastId, 'unresolved');
   assert.equal(state.assessment.owner, 'writing-for-humans');
   assert.match(state.assessment.reason, /outside the permitted scope/);
-  const blockedEvent = JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim());
+  const blockedEvent = JSON.parse(get(root, projectDataPath(root, 'hook-events.jsonl')).trim());
   assert.equal(blockedEvent.sessionId, context.session_id); assert.equal(blockedEvent.turnId, context.turn_id);
   let prompt;
   const retry = await runLearning(root, { home, context: { ...context, turn_id: 'retry-turn' }, execute: async request => {
@@ -37,8 +38,8 @@ test('a successful CLI reporting an inaccessible owner leaves the signal pending
     return { decision: 'no_change', reason: 'The existing communication procedure already covers this correction.', owner: 'writing-for-humans' };
   } });
   assert.match(prompt, /unresolved/); assert.equal(retry.status, 'unchanged');
-  assert.equal(JSON.parse(get(root, '.geppetto/learning.json')).lastId, 'unresolved');
-  const retryEvent = JSON.parse(get(root, '.geppetto/hook-events.jsonl').trim().split('\n').at(-1));
+  assert.equal(JSON.parse(get(root, projectDataPath(root, 'learning.json'))).lastId, 'unresolved');
+  const retryEvent = JSON.parse(get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').at(-1));
   assert.equal(retryEvent.sessionId, context.session_id); assert.equal(retryEvent.turnId, 'retry-turn');
 });
 
@@ -52,7 +53,7 @@ test('missing, malformed and contradictory assessments never consume pending evi
     { decision: 'unknown', reason: 'Unknown.', owner: 'README.md' },
     { decision: 'applied', reason: 'Claims an edit that does not exist.', owner: 'README.md' }]) {
     await assert.rejects(runLearning(root, { home, execute: async () => assessment }), /valid decision|contradicts/);
-    assert.equal(existsSync(resolve(root, '.geppetto/learning.json')), false);
+    assert.equal(existsSync(projectDataPath(root, 'learning.json')), false);
   }
   await assert.rejects(runLearning(root, { home, execute: async ({ cwd }) => {
     put(cwd, 'lesson.md', 'Unacknowledged output\n');

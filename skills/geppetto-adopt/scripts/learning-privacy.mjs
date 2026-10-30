@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import { resolve, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { contained } from './common.mjs';
+import { memorySettings } from './memory-config.mjs';
 const minimumPrivateLineCharacters = 20;
 export const normalizePrivateText = text => text.toLowerCase().replace(/\s+/g, ' ').trim();
 function evidencePath(name, base) {
@@ -45,4 +46,19 @@ export async function privateContent(privateRoot) {
   }
   if (privateRoot) await visit(privateRoot);
   return [...lines];
+}
+
+/** Preserve source exclusion before a checkout and its private aliases disappear. */
+export async function signalProvenance(root, row) {
+  if (!row.transcript_path) return row;
+  try {
+    const memory = await memorySettings(root), privateRoot = memory?.localPath ? resolve(memory.localPath, 'buckets/private') : null;
+    let cwd = row.worktree ?? root;
+    for (const line of (await readFile(row.transcript_path, 'utf8')).split('\n').filter(line => line.trim())) {
+      const record = JSON.parse(line), directory = record.cwd ?? (['session_meta', 'turn_context'].includes(record.type) ? record.payload?.cwd : null);
+      if (typeof directory === 'string') cwd = resolve(cwd, directory);
+      if (privateEvidence(record, privateRoot, cwd)) return { ...row, sourcePrivacy: 'private' };
+    }
+    return { ...row, sourcePrivacy: 'public' };
+  } catch (error) { return { ...row, sourcePrivacy: 'unavailable', sourceError: error.code ?? 'invalid-transcript' }; }
 }
