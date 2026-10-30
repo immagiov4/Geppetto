@@ -14,25 +14,20 @@ An update reconciles every installed target before retiring shared scripts. The 
 
 ## Capability question
 
-Ask this single question, adapting existing values and available companions from the audit:
+The person installing does not know what Geppetto does. Ask once, in their language, with the recommended settings filled in from the audit. Leave out lines already configured on this machine; fill `<runtime>` with the CLI and model that will actually run, preserving the current model and service tier.
 
-Install Geppetto here with these choices (recommended answers shown)?
+> Install Geppetto here with these settings? Reply yes, or change any line.
+>
+> 1. **Memory**: where lessons are saved. A local Git folder (recommended), a private GitHub repo to share them across computers, Claude's or Codex's own memory, or none.
+> 2. **Checks while working**: yes. Before editing, the agent writes down what it decided; before finishing a large change, `<runtime>` reviews it and receives that change.
+> 3. **Finding the code a change touches**: yes. Your request and the project's committed code go to OpenRouter, private projects included.
+> 4. **Learning from your corrections**: yes. `<runtime>` reads short excerpts of the conversation, with secrets removed, and improves the skills.
+> 5. **Weekly upkeep**: yes. `<runtime>` tidies skills and memory once a week.
+> 6. **GitHub check**: yes. A GitHub Actions workflow checks each pull request.
 
-- Memory: reuse the configured location; otherwise a local Git folder (recommended), a private GitHub repo for sync, tool-native memory, or none. GitHub sync sends saved memories to GitHub.
-- Hooks: yes (recommended); local checks guide work and require review before substantial changes finish.
-- Source screen: yes (recommended); send committed source files and the request to OpenRouter to find affected code, including private projects. The key can select providers that keep no data.
-- Background learner: yes (recommended); the selected Codex or Claude CLI sends filtered transcript slices to its model provider to propose improvements. Choose the CLI/model; recommend the current authorized selection.
-- Maintenance jobs: yes (recommended); weekly skill and memory upkeep uses that CLI/provider with skill and memory context, excluding private buckets.
-- Review runtime: the current authorized CLI/model (recommended); it sends the change and relevant code to its provider for independent review.
-- Project conventions: reuse existing documentation, error visibility and checks (recommended); agree missing conventions before recording them. These checks run locally and in CI.
-- CI workflow: yes (recommended); GitHub Actions checks pushed project files using a pinned Geppetto version.
-- Integrations: reuse installed companions (recommended); name each proposed addition and its data destination before choosing to install it.
+When the OpenRouter key is missing, add to line 3 an offer to enter it through private secret entry. Documentation and observability conventions are agreed later, when a feature first needs them; companions are proposed one at a time when relevant.
 
-Only when missing, offer the OpenRouter key once through private secret entry. Node 22+, Git, Python 3.10+ for screening, and signed-in CLIs are prerequisites to report in the recap.
-
-Record the answers before enabling capabilities: memory through `--memory`; hooks through `hooks.reviewGate.enabled`, `hooks.learnNudge.enabled` and `hooks.signalLearning.enabled`; learner CLI/model/effort through `hooks.signalLearning.host`, `.model`, `.reasoningEffort`; source permission through `python <screen>/scripts/screen.py --repo <project> --share-source yes|no`; jobs through `maintenance.enabled`; project conventions through `foundations`, `docs.root` and `hostChecks.changed`; review runtime through `review.engine` and the selected runtime's settings; CI through `ci.enabled`; integration additions only after the answer. Preserve the current authorized model and service tier. A declined learner sets `hooks.signalLearning.enabled: false`; declined hooks disable all three hook policies. Configure before installation and register `.geppetto/config.json` with `--record-generated` when updating an owned configuration.
-
-The recap lists every question item with its actual value and the control above, including memory location, source permission, key availability (never its value), learner CLI/model/effort, job identities/cadence/next run/disable controls, review runtime, CI path and integration selections. Report prerequisite blockers beside their affected capability. Hooks themselves run local checks; learning and review use the chosen provider.
+Record the answers before installing: line 1 through `--memory`; line 2 through `hooks.reviewGate.enabled`; line 3 through `python <screen>/scripts/screen.py --repo <project> --share-source yes|no`; line 4 through `hooks.learnNudge.enabled` and `hooks.signalLearning.enabled`, with a changed runtime in `hooks.signalLearning.model` and `.reasoningEffort`; line 5 through `maintenance.enabled`; line 6 through `ci.enabled`. Register `.geppetto/config.json` with `--record-generated` when updating an owned configuration. The recap repeats each line with its actual value and how to change it; report a missing prerequisite (Node 22+, Git, Python 3.10+, a signed-in CLI) beside the line it blocks. Never show the key's value.
 
 ## Memory
 
