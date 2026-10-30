@@ -137,7 +137,7 @@ async function completionEvent(event) {
     await atomicJson(statePath, state); if (kind === 'UserPromptSubmit') return {};
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
-  if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})));
+  if (policy.enabled === false) return {}; if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})));
   if (kind !== 'Stop') return {};
   const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
   const last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy); const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null); const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);

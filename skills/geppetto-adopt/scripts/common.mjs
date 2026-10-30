@@ -136,7 +136,7 @@ export function validateConfig(config, file) {
   const learning = config.hooks.signalLearning; const review = { ...reviewGateDefaults, ...config.hooks.reviewGate };
   if (!Number.isSafeInteger(review.threshold) || review.threshold <= 0 || ![review.docGlobs, review.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string' && glob))) fail('hooks.reviewGate needs a positive threshold and arrays of nonempty globs');
   if (learning?.writeApproval !== undefined && typeof learning.writeApproval !== 'boolean') fail('hooks.signalLearning.writeApproval must be boolean');
-  validateMemory(config.memory, file); validateTurnPolicy(config); learningPolicy(config); foundationReport(config);
+  for (const [section, key] of [['ci', 'enabled'], ['maintenance', 'enabled'], ['screen', 'shareSource']]) if (config[section] !== undefined && (!config[section] || typeof config[section] !== 'object' || Array.isArray(config[section]) || (config[section][key] !== undefined && typeof config[section][key] !== 'boolean'))) fail(`${section}.${key} must be boolean`); validateMemory(config.memory, file); validateTurnPolicy(config); learningPolicy(config); foundationReport(config);
   return config; }
 export function validateMemory(memory, file) {
   if (memory === undefined) return; if (!memory || typeof memory !== 'object' || Array.isArray(memory)) throw new Error(`${file}:1: memory must be an object`);

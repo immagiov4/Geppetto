@@ -115,7 +115,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
     }
     machine.jobs.learn = { source: 'skills/geppetto-adopt/assets/templates/jobs/learn.md', trigger: 'Stop', status: 'installed' };
     await refreshMaintenanceLauncher(home, source);
-    if (local.maintenance?.enabled !== false) await attachJobs(machine, path, registry, { home, harness, source, jobs, scheduler, addJobs, machineName });
+    if (local.maintenance?.enabled === false) await stopJobs(machine, path, jobs, unscheduler, execute); else await attachJobs(machine, path, registry, { home, harness, source, jobs, scheduler, addJobs, machineName });
     await atomicJson(path, machine);
     return machine;
   } finally { await lock.close(); await unlink(lockPath); }
