@@ -12,9 +12,31 @@ Targets are `claude`, `codex` and `agents`. With a plugin installed for that tar
 
 An update reconciles every installed target before retiring shared scripts. The local hash manifest is ignored and untracked, protects edits and foreign files; reruns reconcile ownership and `--uninstall` removes owned files. CI runs the package gate; local commands resolve `<adopt>/scripts/` from the installed plugin or skill. Dry runs are read-only. Exit codes: 0 success, 1 conflict/check/blocker, 2 invalid arguments. If machine registration is permission-blocked, put the installer's single retry command in the recap for execution outside the sandbox.
 
+## Capability question
+
+Ask this single question, adapting existing values and available companions from the audit:
+
+Install Geppetto here with these choices (recommended answers shown)?
+
+- Memory: reuse the configured location; otherwise a local Git folder (recommended), a private GitHub repo for sync, tool-native memory, or none. GitHub sync sends saved memories to GitHub.
+- Hooks: yes (recommended); local checks guide work and require review before substantial changes finish.
+- Source screen: yes (recommended); send committed source files and the request to OpenRouter to find affected code, including private projects. The key can select providers that keep no data.
+- Background learner: yes (recommended); the selected Codex or Claude CLI sends filtered transcript slices to its model provider to propose improvements. Choose the CLI/model; recommend the current authorized selection.
+- Maintenance jobs: yes (recommended); weekly skill and memory upkeep uses that CLI/provider with skill and memory context, excluding private buckets.
+- Review runtime: the current authorized CLI/model (recommended); it sends the change and relevant code to its provider for independent review.
+- Project conventions: reuse existing documentation, error visibility and checks (recommended); agree missing conventions before recording them. These checks run locally and in CI.
+- CI workflow: yes (recommended); GitHub Actions checks pushed project files using a pinned Geppetto version.
+- Integrations: reuse installed companions (recommended); name each proposed addition and its data destination before choosing to install it.
+
+Only when missing, offer the OpenRouter key once through private secret entry. Node 22+, Git, Python 3.10+ for screening, and signed-in CLIs are prerequisites to report in the recap.
+
+Record the answers before enabling capabilities: memory through `--memory`; hooks through `hooks.reviewGate.enabled`, `hooks.learnNudge.enabled` and `hooks.signalLearning.enabled`; learner CLI/model/effort through `hooks.signalLearning.host`, `.model`, `.reasoningEffort`; source permission through `python <screen>/scripts/screen.py --repo <project> --share-source yes|no`; jobs through `maintenance.enabled`; project conventions through `foundations`, `docs.root` and `hostChecks.changed`; review runtime through `review.engine` and the selected runtime's settings; CI through `ci.enabled`; integration additions only after the answer. Preserve the current authorized model and service tier. A declined learner sets `hooks.signalLearning.enabled: false`; declined hooks disable all three hook policies. Configure before installation and register `.geppetto/config.json` with `--record-generated` when updating an owned configuration.
+
+The recap lists every question item with its actual value and the control above, including memory location, source permission, key availability (never its value), learner CLI/model/effort, job identities/cadence/next run/disable controls, review runtime, CI path and integration selections. Report prerequisite blockers beside their affected capability. Hooks themselves run local checks; learning and review use the chosen provider.
+
 ## Memory
 
-Reuse memory from the machine registry or `~/.geppetto/config.json`, including a recorded native-only or no-memory choice. Otherwise ask one question: “Install Geppetto here, with hooks, learning and maintenance jobs, and which memory should it use?”
+Reuse memory from the machine registry or `~/.geppetto/config.json`, including a recorded native-only or no-memory choice. Otherwise include the four choices below in the single capability question.
 
 | Choice | What the user gets | Installer argument |
 |---|---|---|

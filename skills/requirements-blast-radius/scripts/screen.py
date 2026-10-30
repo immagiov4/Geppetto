@@ -1,7 +1,7 @@
 """Rank every tracked non-test source chunk against a requested user outcome.
 
 Only committed bytes are read. API credentials come exclusively from the environment.
-Use --public-code after verifying the repository and requested revision are public.
+Provider calls require screen.shareSource=true in the project configuration.
 """
 import argparse
 import concurrent.futures
@@ -185,8 +185,15 @@ def rank(rows):
 def run(args):
     start = time.perf_counter()
     repo = Path(args.repo).resolve()
-    if not args.public_code:
-        raise ValueError('Verify public source and pass --public-code before transmitting committed source.')
+    config_path = repo / '.geppetto/config.json'
+    config = json.loads(config_path.read_text(encoding='utf-8-sig')) if config_path.exists() else {}
+    if args.mode != 'grep' and not args.inventory_only and config.get('screen', {}).get('shareSource') is not True:
+        reason = 'screen.shareSource is false or absent; semantic screen skipped. Enable with python <skill>/scripts/screen.py --repo <repo> --share-source yes.'
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps({'skipped': True, 'complete': False, 'reason': reason}, indent=2), encoding='utf-8')
+        print(reason)
+        return 0
     if any(part.casefold() == 'devdata' for part in repo.parts):
         raise ValueError('Private data directories are outside the source boundary.')
     request = Path(args.request_file).read_text(encoding='utf-8')
@@ -239,18 +246,28 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', required=True)
     parser.add_argument('--ref', default='HEAD')
-    parser.add_argument('--request-file', required=True)
-    parser.add_argument('--output', required=True)
-    parser.add_argument('--cache', required=True)
-    parser.add_argument('--public-code', action='store_true')
+    parser.add_argument('--request-file')
+    parser.add_argument('--output')
+    parser.add_argument('--cache')
+    parser.add_argument('--share-source', choices=['yes', 'no'], help='Record permission to send committed source to OpenRouter.')
     parser.add_argument('--inventory-only', action='store_true', help='Write the manifest for review without provider calls.')
     parser.add_argument('--source-suffix', action='append', default=[], help='Additional source suffix including its dot; repeat as needed.')
-    parser.add_argument('--mode', choices=['decisions', 'chat', 'grep'], required=True)
+    parser.add_argument('--mode', choices=['decisions', 'chat', 'grep'])
     parser.add_argument('--model', default='')
     parser.add_argument('--workers', type=int, default=24, help='Transport parallelism; lower when the provider rejects admission.')
     parser.add_argument('--retries', type=int, default=2, help='Additional transport attempts for HTTP 503 only; use zero for a single attempt.')
     parser.add_argument('--chunk-chars', type=int, default=24000, help='Full-coverage character windows, sized below candidate context limits.')
     args = parser.parse_args()
+    if args.share_source:
+        path = Path(args.repo).resolve() / '.geppetto/config.json'
+        config = json.loads(path.read_text(encoding='utf-8-sig')) if path.exists() else {}
+        config.setdefault('screen', {})['shareSource'] = args.share_source == 'yes'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(config, indent=2) + '\n', encoding='utf-8')
+        print(f"screen.shareSource={config['screen']['shareSource']}")
+        return 0
+    if not all([args.request_file, args.output, args.cache, args.mode]):
+        parser.error('Supply --request-file, --output, --cache and --mode for screening.')
     if args.workers < 1 or args.chunk_chars < 1 or args.retries < 0 or (args.mode != 'grep' and not args.model):
         parser.error('Use positive workers/chunk size, nonnegative retries and supply --model for provider modes.')
     return run(args)

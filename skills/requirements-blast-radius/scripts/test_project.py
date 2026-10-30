@@ -101,7 +101,8 @@ class ProjectChecks(unittest.TestCase):
         screen=importlib.util.module_from_spec(spec); spec.loader.exec_module(screen)
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder); (root/'request.txt').write_text('Implement feature')
-            args=SimpleNamespace(repo=str(root),ref='HEAD',request_file=str(root/'request.txt'),output=str(root/'out.json'),cache=str(root/'cache'),public_code=True,chunk_chars=10,source_suffix=[],inventory_only=False,mode='decisions',model='fixture')
+            (root/'.geppetto').mkdir(); (root/'.geppetto/config.json').write_text('{"screen":{"shareSource":true}}')
+            args=SimpleNamespace(repo=str(root),ref='HEAD',request_file=str(root/'request.txt'),output=str(root/'out.json'),cache=str(root/'cache'),chunk_chars=10,source_suffix=[],inventory_only=False,mode='decisions',model='fixture')
             with patch.dict('os.environ',{},clear=True), patch.object(screen,'git',return_value='fixture'), patch.object(screen,'inventory',return_value=([],[])), patch.object(screen,'api') as api:
                 self.assertEqual(screen.run(args),0)
                 self.assertFalse(api.called)

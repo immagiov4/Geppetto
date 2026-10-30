@@ -13,6 +13,44 @@ screen = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(screen)
 
 class ScreenChecks(unittest.TestCase):
+    def test_source_choice_controls_remote_less_repository(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            screen.git(root, 'init', '-q')
+            (root/'save.py').write_text('save = True')
+            screen.git(root, 'add', '.')
+            screen.git(root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture')
+            (root/'request.txt').write_text('save')
+            args = SimpleNamespace(repo=str(root), ref='HEAD', request_file=str(root/'request.txt'), output=str(root/'out.json'), cache=str(root/'cache'), chunk_chars=24000, source_suffix=[], inventory_only=False, mode='chat', model='fixture', workers=1, retries=0)
+            for choice in [None, False, True]:
+                (root/'.geppetto').mkdir(exist_ok=True)
+                (root/'.geppetto/config.json').write_text(json.dumps({} if choice is None else {'screen': {'shareSource': choice}}))
+                response = {'model': 'fixture', 'choices': [{'message': {'content': '{"score": 1, "reason": "save"}'}}], 'usage': {'cost': 0}}
+                with patch.dict(os.environ, {'OPENROUTER_API_KEY': 'fixture'}), patch.object(screen, 'api', return_value=response) as api:
+                    self.assertEqual(screen.run(args), 0)
+                    result = json.loads((root/'out.json').read_text())
+                    self.assertEqual(api.called, choice is True)
+                    if choice is not True:
+                        self.assertIn('screen.shareSource', result['reason'])
+                        self.assertIn('--share-source yes', result['reason'])
+                    else:
+                        self.assertTrue(result['complete'])
+
+    def test_choice_command_preserves_other_configuration(self):
+        import subprocess
+        import sys
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'.geppetto/config.json'
+            path.parent.mkdir()
+            path.write_text('{"memory":{"choice":"none"}}')
+            for choice in ['yes', 'no']:
+                result = subprocess.run([sys.executable, str(Path(screen.__file__)), '--repo', folder, '--share-source', choice], capture_output=True, text=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                config = json.loads(path.read_text())
+                self.assertEqual(config['memory']['choice'], 'none')
+                self.assertEqual(config['screen']['shareSource'], choice == 'yes')
+
     def test_503_is_retried_but_other_http_errors_are_terminal(self):
         from io import BytesIO
         response = BytesIO(b'{"model":"fixture"}')

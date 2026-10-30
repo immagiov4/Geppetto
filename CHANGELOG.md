@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0
+
+- Installation explains capability choices and their data destinations, and reports the saved choices and controls.
+- The semantic source screen uses the recorded `screen.shareSource` answer for private projects and projects without a remote.
+
 ## 0.5.3
 
 - Learning records, evidence and progress live in the Git common directory, so every worktree of a repository shares them and they survive worktree removal. Old per-worktree records are imported once; originals stay untouched.

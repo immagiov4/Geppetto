@@ -46,11 +46,11 @@ async function desiredFiles({ target, uninstall, root, source, previous, generat
   if (!plugin) for (const source of await filesUnder(skillsRoot)) desired.set(portable(relative(root, resolve(root, skillDir, relative(skillsRoot, source)))), await readFile(source));
   if (!plugin && await exists(resolve(sourceRoot, 'integrations'))) for (const path of filesUnder(resolve(sourceRoot, 'integrations'))) desired.set(`${skillDir}/geppetto-adopt/integrations/${portable(relative(resolve(sourceRoot, 'integrations'), path))}`, await readFile(path));
   const workflow = '.github/workflows/pr-gate.yml';
-  if (gateSha) desired.set(workflow, Buffer.from((await readFile(resolve(sourceRoot, 'skills/geppetto-adopt/assets/templates/ci/pr-gate.yml'), 'utf8')).replaceAll('{{GEPPETTO_SHA}}', gateSha)));
+  if (gateSha && (await jsonFile(resolve(root, '.geppetto/config.json'), {})).ci?.enabled !== false) desired.set(workflow, Buffer.from((await readFile(resolve(sourceRoot, 'skills/geppetto-adopt/assets/templates/ci/pr-gate.yml'), 'utf8')).replaceAll('{{GEPPETTO_SHA}}', gateSha)));
   if (!await exists(resolve(root, '.geppetto/config.json'))) desired.set('.geppetto/config.json', Buffer.from(`${JSON.stringify(defaultConfig(), null, 2)}\n`));
   else if (previous.files?.['.geppetto/config.json']) desired.set('.geppetto/config.json', await readFile(resolve(root, '.geppetto/config.json')));
   for (const path of new Set([...(previous.generated ?? []), ...generated])) {
-    if (desired.has(path)) continue;
+    if (desired.has(path) || path === workflow && (await jsonFile(resolve(root, '.geppetto/config.json'), {})).ci?.enabled === false) continue;
     await safePath(root, resolve(root, path));
     if (path === '.geppetto/authorizations' && !generated.includes(path) && !await exists(resolve(root, path))) continue;
     let content = await readFile(resolve(root, path));
@@ -144,7 +144,7 @@ export async function main(args) {
   if (!opts['--uninstall'] && !opts['--memory'] && !memory?.choice && !memory?.repo && !memory?.localPath) throw new Error(memoryQuestion);
   const recorded = opts['--record-generated'] ?? [];
   if (recorded.some(path => !generatedPaths.has(path)) || (opts['--uninstall'] && recorded.length)) throw new UsageError('--record-generated accepts adoption files only and requires installation');
-  const generated = [...new Set([...(manifest.installations[target]?.generated ?? []), ...recorded, ...(!opts['--user'] && !opts['--uninstall'] ? ['.github/workflows/pr-gate.yml'] : [])])].sort(); const source = opts['--uninstall'] ? null : await packageSource(manifest, statePath), plugin = Boolean(opts['--plugin-hooks'] || manifest.installations[target]?.plugin);
+  const generated = [...new Set([...(manifest.installations[target]?.generated ?? []), ...recorded, ...(!opts['--user'] && !opts['--uninstall'] && (await jsonFile(resolve(root, '.geppetto/config.json'), {})).ci?.enabled !== false ? ['.github/workflows/pr-gate.yml'] : [])])].sort(); const source = opts['--uninstall'] ? null : await packageSource(manifest, statePath), plugin = Boolean(opts['--plugin-hooks'] || manifest.installations[target]?.plugin);
   let gateSha = !opts['--user'] && !opts['--uninstall'] ? opts['--gate-sha'] : null;
   if (!opts['--user'] && !opts['--uninstall']) {
     if (!gateSha && await exists(resolve(source.path, '.git'))) gateSha = run('git', ['rev-parse', 'HEAD'], { cwd: source.path }).stdout?.trim();
@@ -183,6 +183,8 @@ export async function main(args) {
   console.log(`Machine resources: ${Object.keys(machine.hooks).join(', ')} hooks; ${Object.keys(machine.jobs).join(', ')} jobs; OpenRouter ${process.env.OPENROUTER_API_KEY ? 'available for requirements screening' : 'key missing for requirements screening'}`);
   console.log(`Memory: ${memoryDescription(await memoryConfiguration(root))}; change with --memory <local|github|native|none>.`);
   if (!opts['--uninstall']) { const companions = await compileIntegrations(root); console.log(`Optional companions (install on yes): ${companions.suggestions.slice(0, 3).join(', ') || 'none'}. See the integration catalog for harness instructions.`); }
+  const choices = await jsonFile(resolve(root, '.geppetto/config.json'), {});
+  console.log(`Choices (.geppetto/config.json): hooks=${JSON.stringify(choices.hooks ?? {})}; screen.shareSource=${choices.screen?.shareSource === true}; learner=${JSON.stringify(choices.hooks?.signalLearning ?? {})}; review=${JSON.stringify(choices.review ?? { engine: 'code-review' })}; maintenance.enabled=${choices.maintenance?.enabled !== false}; jobs=${JSON.stringify(machine.jobs)}; ci.enabled=${choices.ci?.enabled !== false}; foundations=${JSON.stringify(choices.foundations ?? {})}; docs=${JSON.stringify(choices.docs ?? {})}; hostChecks=${JSON.stringify(choices.hostChecks ?? {})}; integrations=~/.geppetto/integrations.md. Change these config keys; source: python <screen>/scripts/screen.py --repo <project> --share-source yes|no; jobs: ~/.geppetto/machine.json scheduler disable controls; key: launching environment OPENROUTER_API_KEY.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
   return 0; }
