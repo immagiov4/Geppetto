@@ -2,7 +2,7 @@
 
 Skills: write-pr, pr
 
-Suggested for PR preparation: the maintainer's `write-pr` edition keeps a short Problem / Approach / Result opening, evidence that helps judge the change and expandable supporting details. [Matt Pocock's pr](https://github.com/mattpocock/skills/tree/main/skills/engineering/pr) is an alternative focused on a useful visual summary, evidence and merge consequences.
+Suggested for PR preparation: bundled `write-pr` keeps a short Problem / Approach / Result opening, evidence that helps judge the change and expandable supporting details. [Matt Pocock's pr](https://github.com/mattpocock/skills/tree/main/skills/engineering/pr) is an alternative focused on a useful visual summary, evidence and merge consequences.
 
 Source: the bundled edition is pinned in [third-party notices](../THIRD_PARTY_NOTICES.md). It is also maintained in [My Codex Skills](https://github.com/immagiov4/my-codex-skills/tree/4ce5ba501e90429e8f39dd19049f1dd7ac1d6893/skills/write-pr).
 

@@ -4,8 +4,6 @@ Skills: engineering-workflow
 
 Suggested as the execution router when the project needs one. [Engineering Workflow](https://github.com/immagiov4/my-codex-skills/tree/main/skills/engineering-workflow) connects discovery, architecture, implementation, verification and documentation; Geppetto supplies the conditions for inspecting and improving that work.
 
-Status: recommended from the maintainer's workflow; use the project's chosen edition.
-
 ## Install
 
 Reuse the project's or harness's installed `engineering-workflow`. Otherwise select it from `immagiov4/my-codex-skills` with the harness's skill installer, or run `npx skills add immagiov4/my-codex-skills --skill engineering-workflow`. Resolve its referenced skills and record source and scope in `packs`.
