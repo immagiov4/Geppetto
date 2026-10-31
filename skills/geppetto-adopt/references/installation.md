@@ -16,6 +16,8 @@ An update reconciles every installed target before retiring shared scripts. The 
 
 The person installing does not know what Geppetto does. Ask once, in their language, with the recommended settings filled in from the audit. Leave out lines already configured on this machine; fill `<runtime>` with the CLI and model that will actually run, preserving the current model and service tier.
 
+Explain the small baseline: keep evidence of what happened, design technical observability before building, and place a verified improvement at its existing owner. Show the actual workflow defaults that will apply—decision checks, review trigger, required sections and companion choices—with the purpose of each. Compare them with the maintainer's selected skills and conventions. When they prescribe another method, agree how to preserve the baseline through that method and record the configuration or routing change; reuse it afterward. A bundled procedure is a fallback when no alternative has been selected. Repository-specific PR formats, documentation layouts and review thresholds are choices, not universal engineering rules.
+
 > Install Geppetto here with these settings? Reply yes, or change any line.
 >
 > 1. **Memory**: where lessons are saved. A local Git folder (recommended), a private GitHub repo to share them across computers, Claude's or Codex's own memory, or none.
@@ -25,7 +27,7 @@ The person installing does not know what Geppetto does. Ask once, in their langu
 > 5. **Weekly upkeep**: yes. `<runtime>` tidies skills and memory once a week.
 > 6. **GitHub check**: yes. A GitHub Actions workflow checks each pull request.
 
-When the OpenRouter key is missing, add to line 3 an offer to enter it through private secret entry. Documentation and observability conventions are agreed later, when a feature first needs them; companions are proposed one at a time when relevant.
+When the OpenRouter key is missing, add to line 3 an offer to enter it through private secret entry. The first specification settles technical observability and any needed documentation structure before implementation, through geppetto-spec. At design time, strongly recommend Architect and Codebase Design and offer Engineering Workflow as the execution router; reuse installed copies. Extra pstack principles are optional after checking overlap. Follow the [companion catalog](integrations.md) for sources and installation.
 
 Record the answers before installing: line 1 through `--memory`; line 2 through `hooks.reviewGate.enabled`, which turns off both the decision record and the review; line 3 through `python <screen>/scripts/screen.py --repo <project> --share-source yes|no`; line 4 through `hooks.learnNudge.enabled` and `hooks.signalLearning.enabled`, with a changed runtime in `hooks.signalLearning.model` and `.reasoningEffort`; line 5 through `maintenance.enabled`; line 6 through `ci.enabled`. Register `.geppetto/config.json` with `--record-generated` when updating an owned configuration. The recap repeats each line with its actual value and how to change it; report a missing prerequisite (Node 22+, Git, Python 3.10+, a signed-in CLI) beside the line it blocks. Never show the key's value.
 

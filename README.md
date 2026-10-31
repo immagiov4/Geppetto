@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-3f7877?style=flat-square" alt="Works with Claude Code and Codex">
-  <img src="https://img.shields.io/badge/skills-17-783b18?style=flat-square" alt="17 skills">
+  <img src="https://img.shields.io/badge/skills-18-783b18?style=flat-square" alt="18 skills">
   <img src="https://img.shields.io/badge/node-%E2%89%A522-83624c?style=flat-square" alt="Node 22 or later">
   <img src="https://img.shields.io/badge/license-MIT-b56315?style=flat-square" alt="MIT license">
 </p>
@@ -90,7 +90,7 @@ Generalizable lessons and decision rationale live in a Git repository of Markdow
 |---|---|
 | **Procedures** | `geppetto-adopt`, `geppetto-spec`, `geppetto-build`, `geppetto-verify`, `geppetto-learn`, `geppetto-memory` |
 | **Principles** | `geppetto-measure-it`, `geppetto-x-ray`, `geppetto-reuse-it`, `geppetto-living-docs`, `geppetto-behaviour-tests` |
-| **Bundled** | `writing-for-agents`, `requirements-blast-radius`, `skill-learning-patterns`, `code-review`, `receive-work-feedback`, `retro` (optional) |
+| **Bundled** | `writing-for-agents`, `requirements-blast-radius`, `skill-learning-patterns`, `code-review`, `receive-work-feedback`, `retro` (optional), `write-pr` (fallback when no PR procedure is selected) |
 | **Scripts** | `audit`, `install`, `gate-sections`, `gate-agents`, `signal`, `memory-hook`, `learn-nudge`, `learn-runner`, `machine`, `migrate-agents`, `host-lint` |
 
 Bundled copies keep provenance in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

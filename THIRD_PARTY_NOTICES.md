@@ -2,7 +2,7 @@
 
 ## Canonical source snapshot
 
-The six bundled skills were copied from [immagiov4/my-codex-skills](https://github.com/immagiov4/my-codex-skills/tree/fe258e71ea9ba3de0a67e7ef9d5e40e0c27cce54/skills), commit `fe258e71ea9ba3de0a67e7ef9d5e40e0c27cce54`, from a clean checkout. Local HEAD and remote main matched that commit on October 25, 2026. Their scripts, references, schemas and invocation metadata travel with them.
+The six original bundled skills were copied from [immagiov4/my-codex-skills](https://github.com/immagiov4/my-codex-skills/tree/fe258e71ea9ba3de0a67e7ef9d5e40e0c27cce54/skills), commit `fe258e71ea9ba3de0a67e7ef9d5e40e0c27cce54`, from a clean checkout. Local HEAD and remote main matched that commit on October 25, 2026. Their scripts, references, schemas and invocation metadata travel with them.
 
 | Bundled path | Origin and licensing evidence in that snapshot | Local adaptation |
 | --- | --- | --- |
@@ -16,6 +16,8 @@ The six bundled skills were copied from [immagiov4/my-codex-skills](https://gith
 The older design proposal recorded uncertainty about Matt Pocock's license. The canonical source snapshot now contains the notice reproduced here; this records supplied provenance, rather than an independent audit of upstream history. Original work and local adaptations in the source repository are MIT; upstream material retains its original notices.
 
 ## Earlier derivations retained by the bundles
+
+`write-pr` comes from [immagiov4/my-codex-skills](https://github.com/immagiov4/my-codex-skills/tree/4ce5ba501e90429e8f39dd19049f1dd7ac1d6893/skills/write-pr), commit `4ce5ba501e90429e8f39dd19049f1dd7ac1d6893`. It adapts Matt Pocock's PR procedure, which credits Dex Horthy / Humanlayer's show-me. The source MIT notice is retained as `skills/write-pr/LICENSE.txt`; its local link is adjusted to that filename. The procedure is a fallback and preserves the maintainer's selected PR method and project contract.
 
 `writing-for-agents` derives from [mattpocock/skills](https://github.com/mattpocock/skills/tree/main/skills/productivity/writing-for-agents). Its exact upstream revision is not recorded in the canonical skill; the reproducible source for this bundle is the my-codex-skills commit above.
 

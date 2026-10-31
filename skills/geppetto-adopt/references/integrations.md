@@ -4,14 +4,17 @@ The package catalog lives in `integrations/<companion>.md`, one file per compani
 
 Adoption suggests at most three catalog companions; curation uses observed skill reads and evidence to explain relevant suggestions. An explicit yes authorizes installation through the catalog's harness procedure. Availability establishes a reading path, while measured benefit requires a project comparison. A recurring pairing may justify a local catalog proposal through geppetto-learn; upstream publication follows a requested PR.
 
+For non-trivial design, strongly recommend `architect` and `codebase-design`; recommend `engineering-workflow` when the project needs an execution router. Reuse installed copies and propose missing ones at the relevant design step. The additional pstack principles are an optional extension: select them for unresolved concerns after checking overlap with Geppetto and the project's existing procedures. Keep the selected workflow's structure and the maintainer's decision checkpoints.
+
 The bundled and host skills may require companion skills outside this pack. When that branch applies, resolve the companion by name in the project's skill directories first, then the harness's global/user skill directories or installed plugins. Read the resolved `SKILL.md` and record its name, source path and scope in `.geppetto/config.json` `packs`; a global installation satisfies resolution without copying it into the project. Preserve project-local precedence and the task's authority.
 
 If a required companion is absent everywhere, report its name and blocked branch and use only a substitute explicitly permitted by the owning skill or project. Installation follows the task's existing authorization. Optional companions use the alternatives below.
 
 - `writing-for-humans`: use it for human prose when installed; otherwise follow the project's writing rules and reread for supported meaning and audience.
+- `write-pr` or `pr`: suggest for PR preparation through the companion catalog, preferring the project's maintained edition and pairing it with the selected prose simplifier.
 - `agent-question-notifications`: use its persistent notice mechanism when installed and applicable; otherwise leave the decision in the original conversation and maintain the pause only on dependent work.
 - An issue-governance skill: use before authorized issue mutations when installed; otherwise follow the project's issue rules and publication authorization.
 - `skill-creator`: use the harness's installed validator; otherwise inspect `name`, `description`, references and observable completion criteria directly.
-- `tdd`, `grilling`, `to-spec`, `to-tickets`, pstack and extra principle packs: optional development choices discovered by adopt. Record them in `packs`; keep the Geppetto principles complete.
+- `tdd`, `grilling`, `to-spec`, `to-tickets` and extra principle packs: optional development choices discovered by adopt. Record them in `packs`; keep the Geppetto principles complete.
 
 Portable local links in the bundled copies route here where the canonical collection referenced an unbundled companion. That changes resolution, not the companion's rules or the user's authority.

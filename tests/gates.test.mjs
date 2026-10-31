@@ -2,6 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, put, invoke, config } from './helpers.mjs';
 
+test('section gate accepts heading icons while preserving level, body and example checks', t => {
+  const cwd = fixture(t);
+  put(cwd, '.geppetto/config.json', { sections: { pr: ['Observability', 'Testing'] } });
+  const accepted = invoke('gate-sections.mjs', ['--pr', '-'], { cwd, input: '## 👁️ Observability\nOperation events link each request to its job.\n\n## 🧪 Testing\nThe failed-job retry scenario passes.\n' });
+  assert.equal(accepted.status, 0, accepted.stderr);
+  for (const input of ['### 👁️ Observability\nEvents record the job.\n', '## 👁️ Observability\n', '```markdown\n## 👁️ Observability\nExample only.\n```']) {
+    assert.equal(invoke('gate-sections.mjs', ['--pr', '-'], { cwd, input: input + '\n## Testing\nThe failed-job retry scenario passes.\n' }).status, 1);
+  }
+});
+
 for (const answer of ['**Not applicable**', '*Not applicable*', '`Not applicable`', 'N/A', 'n/a', '-', '.', 'TBD', 'none', '**N/A**', 'Not applicable because …']) {
   test(`required sections reject unexplained answer ${JSON.stringify(answer)}`, t => {
     const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd: fixture(t), input: `## Observability\n${answer}` });

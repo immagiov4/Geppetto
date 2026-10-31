@@ -39,11 +39,17 @@ async function packageSource(manifest, statePath) {
   const metadata = await jsonFile(resolve(sourceRoot, 'package.json'));
   if (metadata.name !== 'geppetto' || typeof metadata.version !== 'string' || !await exists(resolve(sourceRoot, 'skills/geppetto-adopt/scripts/install.mjs'))) throw new Error(`${statePath}:1: Recorded package source is not a Geppetto package`);
   return { path: resolve(sourceRoot), version: metadata.version }; }
-async function desiredFiles({ target, uninstall, root, source, previous, generated, plugin, gateSha }) {
+async function desiredFiles({ target, uninstall, root, source, previous, installations, generated, plugin, gateSha }) {
   const desired = new Map();
   if (uninstall) return desired;
   const sourceRoot = source.path, skillsRoot = resolve(sourceRoot, 'skills'), skillDir = target === 'claude' ? '.claude/skills' : '.agents/skills';
-  if (!plugin) for (const source of await filesUnder(skillsRoot)) desired.set(portable(relative(root, resolve(root, skillDir, relative(skillsRoot, source)))), await readFile(source));
+  const prPath = `${skillDir}/write-pr/SKILL.md`;
+  const keepProjectPR = await exists(resolve(root, prPath)) && !Object.values(installations).some(entry => entry.files?.[prPath]);
+  if (!plugin) for (const source of await filesUnder(skillsRoot)) {
+    const name = portable(relative(skillsRoot, source));
+    if (keepProjectPR && name.startsWith('write-pr/')) continue;
+    desired.set(`${skillDir}/${name}`, await readFile(source));
+  }
   if (!plugin && await exists(resolve(sourceRoot, 'integrations'))) for (const path of filesUnder(resolve(sourceRoot, 'integrations'))) desired.set(`${skillDir}/geppetto-adopt/integrations/${portable(relative(resolve(sourceRoot, 'integrations'), path))}`, await readFile(path));
   const workflow = '.github/workflows/pr-gate.yml';
   if (gateSha && (await jsonFile(resolve(root, '.geppetto/config.json'), {})).ci?.enabled !== false) desired.set(workflow, Buffer.from((await readFile(resolve(sourceRoot, 'skills/geppetto-adopt/assets/templates/ci/pr-gate.yml'), 'utf8')).replaceAll('{{GEPPETTO_SHA}}', gateSha)));
@@ -153,7 +159,7 @@ export async function main(args) {
   const plans = [];
   // Preflight every installed consumer before retiring their shared scripts.
   for (const owner of new Set([target, ...(!opts['--uninstall'] ? Object.keys(manifest.installations) : [])])) {
-    const entry = manifest.installations[owner] ?? {}, ownerGenerated = owner === target ? generated : entry.generated ?? [], ownerPlugin = owner === target ? plugin : Boolean(entry.plugin); const desired = await desiredFiles({ target: owner, uninstall: opts['--uninstall'], root, source, previous: entry, generated: owner === target ? recorded : [], plugin: ownerPlugin, gateSha }); const plan = await planInstallation({ root, manifest, target: owner, desired, acceptedGenerated: recorded, retireShared: !opts['--uninstall'] });
+    const entry = manifest.installations[owner] ?? {}, ownerGenerated = owner === target ? generated : entry.generated ?? [], ownerPlugin = owner === target ? plugin : Boolean(entry.plugin); const desired = await desiredFiles({ target: owner, uninstall: opts['--uninstall'], root, source, previous: entry, installations: manifest.installations, generated: owner === target ? recorded : [], plugin: ownerPlugin, gateSha }); const plan = await planInstallation({ root, manifest, target: owner, desired, acceptedGenerated: recorded, retireShared: !opts['--uninstall'] });
     plans.push({ target: owner, generated: ownerGenerated, plugin: ownerPlugin, plan });
   }
   const changes = [...new Map(plans.flatMap(({ plan }) => plan.changes.map(change => [change.path, change]))).values()];

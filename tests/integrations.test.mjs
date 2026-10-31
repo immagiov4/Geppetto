@@ -38,3 +38,40 @@ test('generated installations retain a working catalog beside the copied skills'
   assert.equal(result.status, 0, result.stderr);
   assert.match(get(root, '.agents/skills/geppetto-adopt/integrations/TokenEconomizer.md'), /microskills=off/);
 });
+
+test('standalone installation preserves an existing project PR procedure instead of replacing it with the fallback', t => {
+  const root = fixture(t), home = fixture(t), path = '.agents/skills/write-pr/SKILL.md';
+  put(root, path, '# Maintainer PR procedure\nKeep the chosen project format.\n');
+  const result = invoke('install.mjs', ['--target', 'agents', '--project', root, '--gate-sha', 'a'.repeat(40)], { cwd: root, home });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(get(root, path), '# Maintainer PR procedure\nKeep the chosen project format.\n');
+  assert.equal(JSON.parse(get(root, '.geppetto/install.json')).installations.agents.files[path], undefined);
+});
+
+test('bundled PR fallback retains shared ownership across standalone targets', t => {
+  const root = fixture(t), home = fixture(t), path = '.agents/skills/write-pr/SKILL.md';
+  for (const target of ['agents', 'codex']) {
+    const result = invoke('install.mjs', ['--target', target, '--project', root, '--gate-sha', 'a'.repeat(40)], { cwd: root, home });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const manifest = JSON.parse(get(root, '.geppetto/install.json'));
+  assert.ok(manifest.installations.agents.files[path]);
+  assert.equal(manifest.installations.agents.files[path], manifest.installations.codex.files[path]);
+  const result = invoke('install.mjs', ['--target', 'agents', '--project', root, '--uninstall'], { cwd: root, home });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(get(root, path), get(repo, 'skills/write-pr/SKILL.md'));
+});
+
+test('design companions resolve from project skills without activating unrelated optional principles', async t => {
+  const home = fixture(t), root = fixture(t);
+  const previousHome = process.env.CODEX_HOME;
+  process.env.CODEX_HOME = resolve(home, '.codex');
+  t.after(() => { if (previousHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousHome; });
+  for (const name of ['architect', 'codebase-design', 'engineering-workflow']) put(root, `.agents/skills/${name}/SKILL.md`, '# Installed project companion');
+  const report = await compileIntegrations(root, { home, catalog: resolve(repo, 'integrations'), execute: () => ({ status: 0, stdout: '[]' }), roots: [] });
+  assert.deepEqual(report.installed, ['architect', 'codebase-design', 'engineering-workflow']);
+  assert.ok(report.suggestions.includes('pstack-principles'));
+  const view = get(home, '.geppetto/integrations.md');
+  for (const name of report.installed) assert.ok(view.includes(resolve(repo, `integrations/${name}.md`).replaceAll('\\', '/')));
+  assert.ok(!view.includes(resolve(repo, 'integrations/pstack-principles.md').replaceAll('\\', '/')));
+});

@@ -6,11 +6,19 @@ import { contained, isMain, userHome, gitOutput } from './common.mjs';
 import { redact, maintainEvidence } from './signal.mjs';
 import { logReads } from './hook-events.mjs';
 const blocked = part => /^(?:\.git|\.geppetto|\.codex|\.claude|\.agents|node_modules|\.env(?:\..*)?|.*\.(?:pem|key))$/i.test(part);
+function blockedPath(parts, directory = false) {
+  if (/^\.(?:agents|claude)$/i.test(parts[0])) {
+    if (directory && parts.length === 1) return false;
+    if (parts[1]?.toLowerCase() !== 'skills') return true;
+    parts = parts.slice(2);
+  }
+  return parts.some(blocked);
+}
 export class LearningScopeError extends Error {}
 export async function learningFilePath(root, name) {
   if (typeof name !== 'string' || !name || name.includes('\0')) throw new LearningScopeError('A project-relative file path is required');
   const path = resolve(root, name);
-  if (!contained(root, path) || path === root || relative(root, path).split(sep).some(blocked)) throw new LearningScopeError('File is outside the learning scope');
+  if (!contained(root, path) || path === root || blockedPath(relative(root, path).split(sep))) throw new LearningScopeError('File is outside the learning scope');
   for (let current = path; current !== root; current = dirname(current)) {
     try { if ((await lstat(current)).isSymbolicLink()) throw new LearningScopeError('Learning file paths must not use symbolic links'); }
     catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
@@ -19,8 +27,8 @@ export async function learningFilePath(root, name) {
 async function listFiles(root, directory = root) {
   const names = [];
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
-    if (blocked(entry.name) || entry.isSymbolicLink()) continue;
     const path = resolve(directory, entry.name);
+    if (blockedPath(relative(root, path).split(sep), entry.isDirectory()) || entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) names.push(...await listFiles(root, path));
     else if (entry.isFile()) names.push(relative(root, path).split(sep).join('/'));
   }
@@ -37,7 +45,7 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
     for (const base of [referenceRoot, resolve(referenceRoot, '../integrations')]) if (contained(base, path)) return read(await learningFilePath(base, path));
   }
   if (name === 'Glob' || name === 'Grep') {
-    const files = (await listFiles(root)).filter(file => matchesGlob(file, args.glob ?? '**/*'));
+    const files = (await listFiles(root)).filter(file => !args.glob || matchesGlob(file, args.glob));
     if (name === 'Glob') return files.join('\n');
     if (typeof args.text !== 'string' || !args.text) throw new Error('Grep needs literal text');
     const found = [];

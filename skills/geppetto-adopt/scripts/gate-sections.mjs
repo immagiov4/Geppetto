@@ -33,13 +33,14 @@ export function markdownHeadings(lines) {
   return found;
 }
 export const placeholderReason = text => !/[\p{L}\p{N}]/u.test(text.replace(/[*_`#>]/g, '')) || /^(?:not applicable(?:[\s\p{P}]+because)?|n\/a|tbd|none|ok|no)\b[\s\p{P}]*$/iu.test(text.replace(/[*_`#>]/g, '').trim());
+const headingIdentity = title => title.replace(/^(?:👁\uFE0F?|🧪|⚠\uFE0F?)\s+/u, '').toLowerCase();
 export function checkSections(text, required, file = '<stdin>') {
   const lines = markdownLines(text);
   const contentLines = markdownLines(text, { keepCode: true });
   const sections = markdownHeadings(lines);
   const errors = [];
   for (const title of required) {
-    const matches = sections.filter(h => h.title.toLowerCase() === title.toLowerCase());
+    const matches = sections.filter(h => headingIdentity(h.title) === headingIdentity(title));
     if (!matches.length) { errors.push(`${file}:1: Missing section: ${title}`); continue; }
     const misplaced = matches.find(h => h.level !== 2);
     if (misplaced) { errors.push(`${file}:${misplaced.line + 1}: Use a level-two heading: ## ${title}`); continue; }
