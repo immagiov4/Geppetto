@@ -9,7 +9,7 @@
       "name": "geppetto",
       "source": "./",
       "description": "Portable engineering skills and deterministic gates.",
-      "version": "0.7.0"
+      "version": "0.7.1"
     }
   ]
 }

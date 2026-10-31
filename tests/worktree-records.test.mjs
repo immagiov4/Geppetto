@@ -43,6 +43,15 @@ test('legacy evidence from all live worktrees is recovered once, without losing 
   assert.equal((await localRecords(root, 'signals')).length, 4);
 });
 
+test('checkout-specific evidence recognizes an explicit root alias', async t => {
+  const { root } = repositories(t), alias = resolve(fixture(t), 'alias');
+  await symlink(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  put(root, '.geppetto/turns.jsonl', '{"turnId":"before-alias"}\n');
+  assert.equal((await localRecords(alias, 'turns', { currentWorktree: true }))[0]?.turnId, 'before-alias');
+  await appendRecord(alias, 'turns', { turnId: 'through-alias' });
+  assert.equal((await localRecords(root, 'turns', { currentWorktree: true })).length, 2);
+});
+
 test('all journals survive deletion while review eligibility remains checkout-specific', async t => {
   const { root, other, check } = repositories(t);
   for (const journal of ['turns', 'reviews', 'reads', 'hook-events', 'category-proposals']) {

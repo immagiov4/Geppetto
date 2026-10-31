@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir, writeFile, rename, unlink, stat } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile, rename, unlink, stat, realpath } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -55,7 +55,10 @@ export async function projectRecords(root, name, { currentWorktree = false } = {
   records.push(...lines(await readOptional(resolve(directory, `${name}.jsonl`))));
   const unique = new Map();
   for (const row of records) {
-    if (currentWorktree && row.worktree && resolve(row.worktree) !== resolve(root)) continue;
+    if (currentWorktree && row.worktree && resolve(row.worktree) !== resolve(root)) {
+      try { if (await realpath(row.worktree) !== await realpath(root)) continue; }
+      catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+    }
     unique.set(JSON.stringify(row), row);
   }
   return [...unique.values()].sort((a, b) => (Date.parse(a.ts) || 0) - (Date.parse(b.ts) || 0));

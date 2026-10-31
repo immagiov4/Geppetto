@@ -10,6 +10,7 @@ test('learning sees current permitted project files without changing the user in
   const root = fixture(t), home = fixture(t);
   const command = args => { const result = git(root, args); assert.equal(result.status, 0, result.stderr); return result.stdout; };
   command(['init', '-q']); command(['config', 'user.name', 'Fixture']); command(['config', 'user.email', 'fixture@example.invalid']);
+  command(['config', 'core.autocrlf', 'false']);
   put(root, '.gitignore', '.geppetto/\nignored/\n');
   put(root, 'app.mjs', 'export const behavior = "old";\n');
   put(root, 'removed.mjs', 'obsolete\n');
@@ -53,6 +54,7 @@ test('learning captures file-directory replacements in either direction, includi
     const root = fixture(t), home = fixture(t);
     const command = args => { const result = git(root, args); assert.equal(result.status, 0, result.stderr); return result.stdout; };
     command(['init', '-q']); command(['config', 'user.name', 'Fixture']); command(['config', 'user.email', 'fixture@example.invalid']);
+    command(['config', 'core.autocrlf', 'false']);
     put(root, '.gitignore', '.geppetto/\n');
     put(root, directoryFirst ? 'owner/old.mjs' : 'owner', 'old owner\n');
     command(['add', '.']); command(['commit', '-qm', 'baseline']);
@@ -99,6 +101,7 @@ test('a dirty submodule is reported as excluded while ordinary current files rem
   const initialize = cwd => {
     command(cwd, ['init', '-q']); command(cwd, ['config', 'user.name', 'Fixture']);
     command(cwd, ['config', 'user.email', 'fixture@example.invalid']);
+    command(cwd, ['config', 'core.autocrlf', 'false']);
   };
   initialize(root); mkdirSync(resolve(root, 'dependency')); initialize(resolve(root, 'dependency'));
   put(root, 'dependency/lib.txt', 'original dependency\n');

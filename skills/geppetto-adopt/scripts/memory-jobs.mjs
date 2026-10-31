@@ -67,7 +67,7 @@ export async function memoryJobs(memory, execute = run) {
         const rows = state.rows.map(row => ({ ...row }));
         const result = change(rows);
         const text = format(rows);
-        const changed = text !== state.text;
+        const changed = text !== state.text.replaceAll('\r\n', '\n');
         if (!changed && (!state.remote || state.head === state.remoteHead)) return result;
         const commit = changed ? await registryCommit(root, state.head, text, execute) : state.head;
         if (state.remote) {

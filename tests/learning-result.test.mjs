@@ -3,12 +3,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { delimiter, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import { fixture, put, get, git } from './helpers.mjs';
+import { fixture, put, get, git, restoreEnv } from './helpers.mjs';
 import { runLearning, executeLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
 
 test('a successful CLI reporting an inaccessible owner leaves the signal pending and records the blocker', async t => {
   const root = fixture(t), home = fixture(t), old = { ...process.env };
-  t.after(() => { process.env = old; });
+  t.after(() => restoreEnv(old));
   git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']);
   git(root, ['config', 'user.email', 'fixture@example.invalid']);
   put(root, 'README.md', '# Current project\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
@@ -22,7 +22,7 @@ test('a successful CLI reporting an inaccessible owner leaves the signal pending
       if (args.includes('--output-last-message')) fs.writeFileSync(path, JSON.stringify({decision:'blocked',reason:'The communication owner is outside the permitted scope.',owner:'writing-for-humans'}));
     });
   `);
-  process.env.PATH = `${root}${delimiter}${old.PATH}`;
+  process.env.PATH = `${root}${delimiter}${process.env.PATH}`;
   const context = { session_id: 'origin-session', turn_id: 'origin-turn' };
   const result = await runLearning(root, { home, context });
   assert.equal(result.status, 'blocked');
@@ -70,7 +70,7 @@ test('missing, malformed and contradictory assessments never consume pending evi
 
 test('Claude structured output is required and a host-reported failure cannot masquerade as completion', async t => {
   const root = fixture(t), old = { ...process.env };
-  t.after(() => { process.env = old; });
+  t.after(() => restoreEnv(old));
   put(root, 'node_modules/@anthropic-ai/claude-code/cli.js', `
     const fs=require('node:fs');process.stdin.resume();process.stdin.on('end',()=>{
       const args=process.argv.slice(2);fs.writeFileSync('claude-args.json',JSON.stringify(args));

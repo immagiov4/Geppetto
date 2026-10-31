@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { rmSync, existsSync, cpSync } from 'node:fs';
-import { fixture, get, put, repo, invoke } from './helpers.mjs';
+import { fixture, get, put, repo, invoke, restoreEnv } from './helpers.mjs';
 import { reconcileMachine } from '../skills/geppetto-adopt/scripts/machine.mjs';
 import { scheduleMaintenance, disableMaintenance } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
 
@@ -48,7 +48,7 @@ function isolatedMachine(t) {
   const home = fixture(t), original = { ...process.env };
   // Keep a broken injection from reaching the real registry or scheduler during red tests.
   process.env.HOME = home; process.env.USERPROFILE = home; process.env.PATH = '';
-  t.after(() => { process.env = original; });
+  t.after(() => restoreEnv(original));
   return home;
 }
 

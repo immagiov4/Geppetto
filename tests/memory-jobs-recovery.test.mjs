@@ -76,6 +76,7 @@ test('registering jobs never publishes unrelated locally committed memories', as
 
 test('a losing registry writer rereads ownership without divergent local commits', async t => {
   const { a, b } = shared(t);
+  assert.equal(git(b.localPath, ['config', 'core.autocrlf', 'true']).status, 0);
   const first = await memoryJobs(a.memory), second = await memoryJobs(b.memory);
   const claim = machine => rows => {
     const owner = rows.find(row => row.job === 'maintain-memory');

@@ -79,7 +79,7 @@ test('fresh clone updates an exactly generated workflow pin but preserves user e
   let result = install(root, oldPin); assert.equal(result.status, 0, result.stderr);
   result = install(root, oldPin, ['--commit']); assert.equal(result.status, 0, result.stderr);
   const clone = resolve(fixture(t), 'clone'); assert.equal(git(root, ['clone', '-q', root, clone]).status, 0);
-  const workflow = '.github/workflows/pr-gate.yml'; put(clone, workflow, get(clone, workflow).replaceAll('\n', '\r\n'));
+  const workflow = '.github/workflows/pr-gate.yml'; put(clone, workflow, get(clone, workflow).replace(/\r?\n/g, '\r\n'));
   result = install(clone, newPin); assert.equal(result.status, 0, result.stderr); assert.match(get(clone, workflow), new RegExp(newPin));
   const edited = resolve(fixture(t), 'edited'); assert.equal(git(root, ['clone', '-q', root, edited]).status, 0);
   const changed = get(edited, workflow) + '\n# User-owned customization\n'; put(edited, workflow, changed);

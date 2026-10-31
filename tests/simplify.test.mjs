@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { existsSync, symlinkSync } from 'node:fs';
-import { fixture, put, get, invoke, git } from './helpers.mjs';
+import { fixture, put, get, invoke, git, restoreEnv } from './helpers.mjs';
 import { runLearning, executeLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
 import { learningFileTool } from '../skills/geppetto-adopt/scripts/learner-tools.mjs';
 import { memorySettings } from '../skills/geppetto-adopt/scripts/memory-config.mjs';
@@ -61,7 +61,7 @@ test('runner processes a signal snapshot on a branch, machine lock prevents over
 
 test('the subscription CLI receives only file tools, with no model override or API routing', async t => {
   const cwd = fixture(t); const old = { ...process.env };
-  t.after(() => { process.env = old; });
+  t.after(() => restoreEnv(old));
   put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>{const args=process.argv.slice(2);fs.writeFileSync('native.json',JSON.stringify({args,prompt,key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD}));fs.writeFileSync(args[args.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'Already covered.',owner:'README.md'}));});`);
   process.env.PATH = cwd; process.env.OPENAI_API_KEY = 'fixture-secret';
   assert.equal((await executeLearning({ cwd, prompt: 'Fixed synthetic learning prompt', host: 'codex', resultPath: resolve(cwd, 'result.json') })).decision, 'no_change');
@@ -74,14 +74,14 @@ test('the subscription CLI receives only file tools, with no model override or A
 
 test('configured learning model and effort reach the CLI and the signal dispatcher', async t => {
   const cwd = fixture(t), home = fixture(t); const old = { ...process.env };
-  t.after(() => { process.env = old; });
+  t.after(() => restoreEnv(old));
   put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'),args=process.argv.slice(2);fs.writeFileSync('selection.json',JSON.stringify(args));fs.writeFileSync(args[args.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'Already covered.',owner:'README.md'}));process.stdin.resume();`);
   process.env.PATH = cwd;
   await executeLearning({ cwd, prompt: 'Actual incident', host: 'codex', model: 'gpt-6.1-terra', reasoningEffort: 'medium', resultPath: resolve(cwd, 'result.json') });
   const args = JSON.parse(get(cwd, 'selection.json'));
   assert.equal(args[args.indexOf('--model') + 1], 'gpt-6.1-terra');
   assert.ok(args.includes('model_reasoning_effort="medium"'));
-  process.env = old;
+  restoreEnv(old);
   git(cwd, ['init', '-q']); git(cwd, ['config', 'user.name', 'Fixture']); git(cwd, ['config', 'user.email', 'fixture@example.invalid']);
   put(cwd, '.geppetto/config.json', { hooks: { signalLearning: { model: 'gpt-6.1-terra', reasoningEffort: 'medium' } } });
   git(cwd, ['add', '.geppetto/config.json']); git(cwd, ['commit', '-qm', 'baseline']);
@@ -119,6 +119,21 @@ test('learning can read bundled procedures without writing them or reading outsi
   const r = invoke('learner-tools.mjs', [root, 'workspace-write', '["Read","Write"]', references], { cwd: root, input: messages.map(m => JSON.stringify({ jsonrpc: '2.0', ...m })).join('\n') + '\n' });
   assert.equal(r.status, 0, r.stderr); const replies = r.stdout.trim().split('\n').map(JSON.parse);
   assert.equal(replies[0].result.content[0].text, 'Read the actual procedure.'); assert.equal(replies[1].result.isError, true);
+});
+
+test('learning resolves an explicit root alias before checking absolute paths inside it', async t => {
+  const directory = fixture(t), root = fixture(t), references = fixture(t);
+  const alias = resolve(directory, 'project'), packageAlias = resolve(directory, 'package'), guides = resolve(packageAlias, 'skills');
+  symlinkSync(root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  symlinkSync(references, packageAlias, process.platform === 'win32' ? 'junction' : 'dir');
+  put(root, 'owner.md', 'Project owner'); put(references, 'skills/guide.md', 'Procedure');
+  put(references, 'integrations/companion.md', 'Companion');
+  assert.equal(await learningFileTool(alias, 'Read', { path: resolve(alias, 'owner.md') }), 'Project owner');
+  assert.equal(await learningFileTool(alias, 'Read', { path: resolve(guides, 'guide.md') }, false, guides), 'Procedure');
+  assert.equal(await learningFileTool(alias, 'Read', { path: resolve(packageAlias, 'integrations/companion.md') }, false, guides), 'Companion');
+  await learningFileTool(alias, 'Write', { path: resolve(alias, 'owner.md'), content: 'Updated owner' });
+  assert.equal(get(root, 'owner.md'), 'Updated owner');
+  await assert.rejects(learningFileTool(alias, 'Write', { path: resolve(guides, 'guide.md'), content: 'Forbidden' }, false, guides), /scope/);
 });
 
 test('write approval retains a staged result and a signal appended during a run stays eligible', async t => {

@@ -35,14 +35,20 @@ async function listFiles(root, directory = root) {
   return names; }
 /** File-only MCP boundary; neither shell, delegation nor publication is exposed. */
 export async function learningFileTool(root, name, args, readOnly = false, referenceRoot = null, telemetry = {}) {
+  const requestedRoot = resolve(root);
   root = await realpath(root);
+  if (typeof args.path === 'string' && contained(requestedRoot, resolve(requestedRoot, args.path))) args = { ...args, path: resolve(root, relative(requestedRoot, resolve(requestedRoot, args.path))) };
   const read = async path => { const text = redact(await readFile(path, 'utf8')); await logReads({ cwd: telemetry.root ?? root, session_id: telemetry.session ?? 'learner', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { path } }, { home: telemetry.home, readRoot: root, reference: telemetry.root && contained(root, path) ? gitOutput(root, ['rev-parse', 'HEAD']) : undefined }); return text; };
   if (name === 'MaintainEvidence') { if (!telemetry.maintenance || readOnly) throw new Error('Maintenance capability is unavailable'); await maintainEvidence(root, args); return 'Evidence maintenance saved'; }
   if (name === 'Read' && referenceRoot) {
+    const requestedReference = resolve(referenceRoot);
     referenceRoot = await realpath(referenceRoot);
     const path = resolve(root, args.path);
     if (path === resolve(userHome(), '.geppetto/integrations.md')) return read(path);
-    for (const base of [referenceRoot, resolve(referenceRoot, '../integrations')]) if (contained(base, path)) return read(await learningFilePath(base, path));
+    for (const [base, requestedBase] of [[referenceRoot, requestedReference], [resolve(referenceRoot, '../integrations'), resolve(requestedReference, '../integrations')]]) {
+      const candidate = contained(requestedBase, path) ? resolve(base, relative(requestedBase, path)) : path;
+      if (contained(base, candidate)) return read(await learningFilePath(base, candidate));
+    }
   }
   if (name === 'Glob' || name === 'Grep') {
     const files = (await listFiles(root)).filter(file => !args.glob || matchesGlob(file, args.glob));

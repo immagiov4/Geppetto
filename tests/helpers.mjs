@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, basename, delimiter } from 'node:path';
@@ -8,11 +8,16 @@ import { spawnSync, spawn } from 'node:child_process';
 export const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const scripts = resolve(repo, 'skills/geppetto-adopt/scripts');
 export function fixture(t, cleanup = {}) {
-  const dir = mkdtempSync(resolve(tmpdir(), 'geppetto-test-'));
+  const dir = realpathSync.native(mkdtempSync(resolve(tmpdir(), 'geppetto-test-')));
   t.after(() => rm(dir, { recursive: true, force: true, ...cleanup }));
   return dir;
 }
 export function put(dir, path, text) { mkdirSync(dirname(resolve(dir, path)), { recursive: true }); writeFileSync(resolve(dir, path), typeof text === 'string' ? text : JSON.stringify(text)); }
+/** Preserve Node's case-insensitive Windows environment object. */
+export function restoreEnv(snapshot) {
+  for (const key of Object.keys(process.env)) if (!Object.hasOwn(snapshot, key)) delete process.env[key];
+  Object.assign(process.env, snapshot);
+}
 export const get = (dir, path) => readFileSync(resolve(dir, path), 'utf8');
 export function invoke(script, args = [], { cwd = repo, home = cwd, input = '', env = {}, memoryChoice } = {}) {
   // Installation fixtures use a fake native scheduler, never the host's real jobs.
