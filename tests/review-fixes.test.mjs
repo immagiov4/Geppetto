@@ -47,7 +47,7 @@ test('R2: never-read outcomes and inventory exclude documents outside successful
   const privateRoot = resolve(memory, 'buckets/private');
   put(root, '.geppetto/config.json', { memory: { localPath: privateRoot } }); put(privateRoot, 'index.md', '# Synthetic private index');
   await logReads(readEvent(root, resolve(privateRoot, 'index.md')), { home });
-  assert.equal((await localRecords(root, 'reads')).length, 2);
+  assert.equal((await localRecords(root, 'reads')).length, 3);
   assert.equal((await learningAudit(root, { home })).neverRead.includes(resolve(privateRoot, 'index.md')), false);
 });
 

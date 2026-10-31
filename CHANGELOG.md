@@ -2,7 +2,7 @@
 
 ## 0.6.0
 
-- Learning distinguishes private access from memory index and exclusion-glob mentions.
+- Personal memory buckets follow the same retrieval, maintenance and learning rules as other buckets; the name private does not block access or discard conversations.
 - Independent reviews from any runtime can be recorded before small finding fixes.
 - Turn decisions route first documentation and diagnostics to foundation choices.
 

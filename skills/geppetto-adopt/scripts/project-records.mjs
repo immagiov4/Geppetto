@@ -3,7 +3,6 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { run, rejectSymlinks } from './common.mjs';
-import { signalProvenance } from './learning-privacy.mjs';
 
 const journals = ['signals', 'turns', 'reviews', 'reads', 'hook-events', 'category-proposals'];
 const digest = text => createHash('sha256').update(text).digest('hex');
@@ -34,7 +33,6 @@ export async function recoverProjectRecords(root) {
     let text = await readOptional(path); if (!text.trim()) continue;
     const target = resolve(imports, `${name}-${digest(worktree + '\0' + text)}.json`);
     if (existsSync(target)) continue;
-    if (name === 'signals') { text = (await Promise.all(lines(text).map(row => signalProvenance(worktree, row)))).map(JSON.stringify).join('\n'); }
     const temp = `${target}.${randomUUID()}.tmp`;
     try {
       await writeFile(temp, JSON.stringify({ worktree: resolve(worktree), name, text, modifiedAt: (await stat(path)).mtimeMs }), { flag: 'wx', mode: 0o600 });

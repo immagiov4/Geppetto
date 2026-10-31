@@ -35,40 +35,6 @@ test('learner provider input redacts untruncated secrets in transcripts, signals
   assert.doesNotMatch((await transcriptSlice(resolve(home, 'pem.jsonl'))).text, /SYNTHETIC_KEY_MATERIAL/);
 });
 
-test('private memory provenance excludes calls, unattributed outputs and summaries even across transcript cursors', async t => {
-  for (const host of ['claude', 'codex']) {
-    const root = project(t), home = fixture(t), marker = 'SYNTHETIC_PRIVATE_MEMORY_DETAIL';
-    put(root, '.geppetto/config.json', config());
-    put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'public', key: 'public', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'No, correct the public owner.' }, { id: 'private', key: 'private', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: `From buckets/private/facts.md: ${marker}` }]));
-    put(root, '.geppetto/turns.jsonl', jsonl([{ ...decision, feedback: { applies: true, on: `buckets/private/facts.md: ${marker}`, action: 'Read the private fact.' }, sessionId: 'private', transcriptOffset: 0 }]));
-    const before = jsonl([user('No, fix the public owner.')]);
-    const calls = host === 'claude' ? [
-      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'private-read', name: 'Read', input: { file_path: 'D:\\synthetic-memory\\buckets\\private\\facts.md' } }] } },
-      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'private-read', is_error: true, content: `Error: ${marker}` }] } },
-    ] : [
-      { type: 'response_item', payload: { type: 'function_call', call_id: 'private-read', name: 'exec_command', arguments: JSON.stringify({ cmd: 'cat D:/synthetic-memory/buckets/private/facts.md' }) } },
-      { type: 'response_item', payload: { type: 'function_call_output', call_id: 'private-read', output: `Error: ${marker}` } },
-    ];
-    put(home, 'transcript.jsonl', before + jsonl([...calls, { type: 'assistant', message: { content: `From buckets/private/facts.md: ${marker}` } }, { type: 'assistant', message: { content: marker } }, user(`No, that detail was ${marker}`)]));
-    const path = resolve(home, 'transcript.jsonl');
-    assert.doesNotMatch((await transcriptSlice(path, Buffer.byteLength(before))).text, new RegExp(marker));
-    const tailStart = Buffer.byteLength(get(home, 'transcript.jsonl'));
-    put(home, 'transcript.jsonl', get(home, 'transcript.jsonl') + jsonl([user(`No, correct ${marker}`)]));
-    assert.doesNotMatch((await transcriptSlice(path, tailStart)).text, new RegExp(marker));
-    let captured;
-    const result = await runLearning(root, { home, context: { learning_qualified: true, session_id: 'private', transcript_path: path }, execute: async request => { captured = request.prompt; return { decision: 'no_change', reason: 'Public evidence already covered.', owner: 'app.mjs' }; } });
-    assert.equal(result.status, 'idle'); assert.equal(result.skipped, 'private-memory'); assert.equal(captured, undefined);
-  }
-});
-
-test('private provenance recognizes path traversal and nested Codex tool arguments', async t => {
-  const root = fixture(t), marker = 'SYNTHETIC_PRIVATE_TRAVERSAL';
-  for (const path of ['D:/synthetic-memory/buckets/preferences/../private/facts.md', 'D:\\synthetic-memory\\buckets\\preferences\\..\\private\\facts.md']) {
-    put(root, 'transcript.jsonl', jsonl([{ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: `cat ${path}` }) } }, { type: 'response_item', payload: { type: 'function_call_output', output: `Error: ${marker}` } }]));
-    assert.doesNotMatch((await transcriptSlice(resolve(root, 'transcript.jsonl'))).text, new RegExp(marker));
-  }
-});
-
 test('bad Stop configuration closes every delivery and logs its redacted error once per turn', async t => {
   for (const policy of [{ threshold: 0 }, { docGlobs: [42] }]) {
     const root = project(t);

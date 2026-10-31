@@ -93,8 +93,8 @@ export async function setupMemory(project, machine, { home, memoryChoice, execut
     }
   }
   if (!memory?.choice && !memory?.repo && !memory?.localPath) return null;
-  const bucket = memory.buckets?.find(name => name.toLowerCase() !== 'private' && name !== 'preferences') ?? (basename(project).replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[^a-zA-Z0-9]+/, '') || 'project');
-  if (['private', 'preferences'].includes(bucket.toLowerCase())) throw new UsageError('Choose a project bucket through memory.buckets');
+  const bucket = memory.buckets?.find(name => name !== 'preferences') ?? (basename(project).replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[^a-zA-Z0-9]+/, '') || 'project');
+  if (bucket.toLowerCase() === 'preferences') throw new UsageError('Choose a project bucket through memory.buckets');
   const managed = ['local', 'github'].includes(memory.choice);
   if (managed && (memoryChoice || !memory.buckets?.length)) {
     await seed(memory, bucket, execute);
@@ -137,7 +137,7 @@ export async function bridgeNativeMemory(project, machine, memory) {
     }
     delete machine.nativeMemory[project]; return;
   }
-  const bucket = memory.buckets.find(name => !['private', 'preferences'].includes(name.toLowerCase()));
+  const bucket = memory.buckets.find(name => name.toLowerCase() !== 'preferences');
   if (!bucket || !memory.localPath) return;
   await memoryWritePath(path);
   const settings = await jsonFile(path, {});

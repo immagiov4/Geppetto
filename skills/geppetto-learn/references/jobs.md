@@ -10,7 +10,7 @@ Pass native registrations in an external JSON file to installation's `--schedule
 
 OS jobs invoke the shared maintenance launcher recorded on the machine. Each installation refreshes that entrypoint and the registered prompt sources to the selected package. Windows retains the hidden `maintenance.vbs` launcher and task names; cron reconciles its marked entries in place while preserving their cadence and unrelated jobs. Native scheduler registrations retain their identities.
 
-Exercise new jobs on synthetic inputs before enabling them. OS jobs reuse the [bounded learning CLI](ingestion.md), receiving machine context as input; private buckets and shell/delegation/publication tools stay excluded. Read [process execution](../../geppetto-adopt/references/processes.md) before launching tools.
+Exercise new jobs on synthetic inputs before enabling them. OS jobs reuse the [bounded learning CLI](ingestion.md), receiving machine context as input; shell/delegation/publication tools stay excluded. Read [process execution](../../geppetto-adopt/references/processes.md) before launching tools.
 
 ## Observability
 

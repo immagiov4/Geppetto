@@ -8,4 +8,4 @@ Session context records its status, injected bytes and zero model calls in the l
 
 ## Verification
 
-Synthetic hook tests verify session listings, linked indexes, private-content exclusion and unavailable memory. A regression exercises a legacy enabled classifier configuration and proves that a prompt neither contacts a provider nor reserves spending. Plugin and standalone registrations retain SessionStart memory retrieval and per-message skill selection.
+Synthetic hook tests verify session listings, linked indexes including personal buckets, and unavailable memory. A regression exercises a legacy enabled classifier configuration and proves that a prompt neither contacts a provider nor reserves spending. Plugin and standalone registrations retain SessionStart memory retrieval and per-message skill selection.

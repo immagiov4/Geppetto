@@ -91,12 +91,12 @@ test('configured learning model and effort reach the CLI and the signal dispatch
   assert.equal(selection.model, 'gpt-6.1-terra'); assert.equal(selection.reasoningEffort, 'medium');
 });
 
-test('learner file boundary preserves edits while excluding private, secret and escaped paths', async t => {
+test('learner file boundary preserves edits while excluding secret and escaped paths', async t => {
   const root = fixture(t);
   await learningFileTool(root, 'Write', { path: 'docs/lesson.md', content: 'Use the owner.' });
   await learningFileTool(root, 'Edit', { path: 'docs/lesson.md', oldText: 'owner', newText: 'existing owner' });
   assert.equal(await learningFileTool(root, 'Read', { path: 'docs/lesson.md' }), 'Use the existing owner.');
-  for (const path of ['../escape', '.env', 'buckets/private/fact.md', '.git/config']) await assert.rejects(learningFileTool(root, 'Write', { path, content: 'blocked' }), /scope/);
+  for (const path of ['../escape', '.env', '.git/config']) await assert.rejects(learningFileTool(root, 'Write', { path, content: 'blocked' }), /scope/);
   await assert.rejects(learningFileTool(root, 'Write', { path: 'docs/lesson.md', content: 'blocked' }, true), /unavailable/);
   const messages = [{ id: 1, method: 'tools/list' }, { id: 2, method: 'tools/call', params: { name: 'Write', arguments: { path: 'docs/lesson.md', content: 'blocked' } } }];
   const result = invoke('learner-tools.mjs', [root, 'read-only', '["Read"]'], { cwd: root, input: messages.map(message => JSON.stringify({ jsonrpc: '2.0', ...message })).join('\n') + '\n' });

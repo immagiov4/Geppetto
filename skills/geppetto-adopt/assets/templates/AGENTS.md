@@ -22,7 +22,7 @@ Context is a budget: load the relevant owner through the map below. This file an
 - Product work starts with a failing behaviour test through `$geppetto-build`; exploratory prototypes declare their exemption.
 - Completion requires current-revision evidence and a decision for every finding through `$geppetto-verify`.
 - At any time, use `$geppetto-learn` to record meaningful recurring friction and its affected metric at the existing owner.
-- Memory procedures follow `$geppetto-memory`; retrieval respects bucket privacy.
+- Memory procedures follow `$geppetto-memory`; retrieval follows relevance and explicit access permissions.
 - Update each fact's existing owner in the same change. Keep explanations and procedures at their owners.
 
 ## Where to look

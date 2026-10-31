@@ -22,7 +22,6 @@ export function bucketCatalog(text) {
 }
 /** Read a bucket root index only after resolving its ownership boundary. */
 export async function memoryIndex(memory, bucket) {
-  if (bucket.toLowerCase() === 'private') throw new Error('The private bucket index is excluded from hooks');
   const expected = resolve(await realpath(memory.localPath), 'buckets', bucket, 'index.md');
   const canonical = await realpath(expected);
   const same = process.platform === 'win32' ? canonical.toLowerCase() === expected.toLowerCase() : canonical === expected;

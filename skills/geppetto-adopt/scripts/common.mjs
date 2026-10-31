@@ -6,7 +6,6 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync, spawn } from 'node:child_process';
 import { validateTurnPolicy, defaultTurnChecks } from './turn-checks.mjs';
 import { recoverProjectRecords } from './project-records.mjs';
-import { signalProvenance } from './learning-privacy.mjs';
 export async function launchLearning(event) {
   const child = spawn(process.execPath, [fileURLToPath(new URL('./learn-runner.mjs', import.meta.url))], { cwd: event.cwd, windowsHide: true, detached: true, shell: false, stdio: ['pipe', 'ignore', 'ignore'] }); await new Promise((done, reject) => { child.once('error', reject); child.once('spawn', done); });
   child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(event)); child.unref(); }
@@ -120,7 +119,6 @@ export async function ignoreLocalFiles(project, paths) {
 export async function appendRecord(root, name, row) {
   const path = resolve(await recoverProjectRecords(root), `${name}.jsonl`); await rejectSymlinks(path);
   if (dirname(path) === resolve(root, '.geppetto')) await ignoreLocalFiles(root, [`/${name}.jsonl`]);
-  if (name === 'signals') row = await signalProvenance(root, row);
   const revision = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root });
   await appendFile(path, JSON.stringify({ ...row, worktree: resolve(root), revision: revision.status === 0 ? revision.stdout.trim() : null }) + '\n', { mode: 0o600 });
 }

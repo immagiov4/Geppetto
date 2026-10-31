@@ -98,12 +98,12 @@ test('Windows hidden launcher propagates the actual child exit status', { skip: 
 test('maintenance runs the subscription CLI in the memory checkout with inherited settings and no API credentials', t => {
   const home = fixture(t), memory = fixture(t);
   put(home, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>{fs.writeFileSync('maintenance-proof.json',JSON.stringify({args:process.argv.slice(2),prompt,cwd:process.cwd(),key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD}));console.log('fixture complete');});`);
-  put(home, 'memory-prompt.md', 'Maintain only nonprivate memory.');
+  put(home, 'memory-prompt.md', 'Maintain relevant memory.');
   put(home, '.geppetto/machine.json', { memory: { localPath: memory }, jobs: { 'maintain-memory': { status: 'scheduled', host: 'codex', source: resolve(home, 'memory-prompt.md') } } });
   const result = invoke('maintenance.mjs', ['--run', 'maintain-memory'], { cwd: home, home, env: { PATH: home, OPENAI_API_KEY: 'synthetic-secret' } });
   assert.equal(result.status, 0, result.stderr);
   const proof = JSON.parse(get(memory, 'maintenance-proof.json'));
-  assert.equal(proof.cwd, memory); assert.match(proof.prompt, /nonprivate/); assert.equal(proof.key, undefined); assert.equal(proof.child, '1');
+  assert.equal(proof.cwd, memory); assert.match(proof.prompt, /maintain the buckets/); assert.equal(proof.key, undefined); assert.equal(proof.child, '1');
   assert.ok(proof.args.includes('exec')); assert.ok(proof.args.every(arg => !/--model|service_tier/.test(arg)));
   assert.ok(proof.args.includes('features.shell_tool=false')); assert.ok(proof.args.includes('features.multi_agent=false')); assert.ok(proof.args.includes('read-only'));
   assert.match(get(home, '.geppetto/maintain-memory.log'), /fixture complete/);

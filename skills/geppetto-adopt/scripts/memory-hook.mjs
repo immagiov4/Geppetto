@@ -54,7 +54,7 @@ async function sessionContext(memory) {
   const catalog = await memoryCatalog(memory);
   const global = catalog.filter(bucket => bucket.scope === 'global'); const project = catalog.filter(bucket => bucket.scope !== 'global');
   const parts = [`Memories live here: ${memory.localPath} (${memory.repo}). Read and update them through $geppetto-memory.`, 'Global buckets:', ...global.map(bucket => `${bucket.name} — ${bucket.description}`), 'Project buckets:', ...project.map(bucket => `${bucket.name} — ${bucket.description}`)];
-  for (const bucket of memory.buckets.filter(name => name.toLowerCase() !== 'private')) {
+  for (const bucket of memory.buckets) {
     let index;
     try { index = await memoryIndex(memory, bucket); }
     catch (error) { if (error.code !== 'ENOENT') throw error; index = `Unavailable: configured bucket index is missing (${bucket}).`; }

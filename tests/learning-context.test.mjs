@@ -30,7 +30,7 @@ test('learning sees current permitted project files without changing the user in
     assert.equal(get(cwd, 'app.mjs'), 'export const behavior = "current";\n');
     assert.equal(get(cwd, 'new-owner.mjs'), 'export const owner = "current untracked owner";\n');
     assert.equal(existsSync(resolve(cwd, 'removed.mjs')), false);
-    assert.equal(get(cwd, 'private/fact.md'), 'original private value\n');
+    assert.equal(get(cwd, 'private/fact.md'), 'changed private value\n');
     assert.equal(existsSync(resolve(cwd, '.env')), false);
     assert.equal(existsSync(resolve(cwd, 'ignored/cache.txt')), false);
     put(cwd, 'lesson.md', 'Retain the demonstrated improvement.\n');

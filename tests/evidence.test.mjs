@@ -41,25 +41,6 @@ test('the recording CLI starts its default worker at threshold and exits without
   await waitForWorker(home, deadline);
 });
 
-test('immediate and weekly learning retain transcript privacy provenance before a provider call', async t => {
-  const root = fixture(t, { maxRetries: 3 }), home = fixture(t, { maxRetries: 3 }), transcript = resolve(home, 'private-session.jsonl');
-  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(root, args);
-  put(root, 'README.md', '# Owner\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
-  put(root, '.geppetto/config.json', { hooks: { signalLearning: { host: 'codex' } }, memory: { choice: 'none' } });
-  put(home, 'private-session.jsonl', rows([{ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{"cmd":"cat D:/synthetic/buckets/private/facts.md"}' } }]));
-  put(root, '.geppetto/signals.jsonl', rows([{ id: 'seed', key: 'private-context', category: 'workflow', source: 'agent', session: 'one', status: 'open', text: 'First observation' }]));
-  await handleEvent({ cwd: root, session_id: 'two', turn_id: 'turn', transcript_path: transcript, hook_event_name: 'UserPromptSubmit' });
-  put(home, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('fs');process.stdin.resume();process.stdin.on('end',()=>{fs.writeFileSync(${JSON.stringify(resolve(home, 'provider-called'))},'yes');const a=process.argv.slice(2);fs.writeFileSync(a[a.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'Owner covers it.',owner:'README.md'}));});`);
-  const result = spawnSync(process.execPath, [resolve(scripts, 'signal.mjs'), 'Synthetic private summary without its path', '--key', 'private-context', '--category', 'workflow', '--session', 'two'], { cwd: root, windowsHide: true, encoding: 'utf8', timeout: 15000, env: { ...process.env, NODE_OPTIONS: observeWorker(home), HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex'), PATH: `${home}${delimiter}${process.env.PATH}` } });
-  assert.equal(result.status, 0, result.stderr);
-  const deadline = Date.now() + 15000;
-  while ((!existsSync(projectDataPath(root, 'hook-events.jsonl')) || existsSync(resolve(home, '.geppetto/learn.lock'))) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
-  assert.equal(existsSync(resolve(home, 'provider-called')), false);
-  assert.equal((await signalArchive(root)).find(row => row.key === 'private-context').status, 'open');
-  const weekly = await runLearning(root, { home, execute: () => assert.fail('Private provenance must also cover weekly backstop runs') });
-  assert.equal(weekly.skipped, 'private-memory');
-  await waitForWorker(home, deadline);
-});
 test('approved defaults preserve ordered assignment and secondary effects remain attributes', async t => {
   assert.deepEqual(defaultConfig().categories.map(row => row.id), ['security', 'verification', 'workflow', 'efficiency', 'communication', 'behavior']);
   const root = fixture(t), attributes = { episode: 'synthetic-episode', effects: ['frustration', 'rework'], note: 'token=synthetic-secret' };
@@ -81,7 +62,7 @@ test('agent threshold uses three distinct sessions when configured, and failed l
   assert.equal(calls.length, 1);
 });
 
-test('shell read telemetry ignores neighboring writes and listings and excludes private aliases', async t => {
+test('shell read telemetry ignores neighboring writes and listings and records personal aliases', async t => {
   const root = fixture(t), home = fixture(t), event = { cwd: root, session_id: 'shell-reads', hook_event_name: 'PostToolUse', tool_name: 'exec_command' };
   put(root, '.geppetto/config.json', { hooks: { learnNudge: { enabled: false }, signalLearning: { enabled: false } } });
   await handleEvent({ ...event, tool_input: { cmd: 'Get-Content "skills/read/SKILL.md"; Set-Content "skills/write/SKILL.md" x; rg --files "skills/list/SKILL.md"' } }, { home });
@@ -90,7 +71,7 @@ test('shell read telemetry ignores neighboring writes and listings and excludes 
   assert.equal(get(root, projectDataPath(root, 'reads.jsonl')).trim().split('\n').length, 1);
 });
 
-test('audit limits read observations by the selected window and keeps private evidence out of maintenance', async t => {
+test('audit limits read observations by the selected window and includes personal evidence in maintenance', async t => {
   const root = fixture(t), home = fixture(t), memory = fixture(t);
   put(home, '.geppetto/config.json', { memory: { localPath: memory, repo: memory } });
   put(memory, 'index.md', '# Index'); put(memory, 'buckets/preferences/page.md', '# Public'); put(memory, 'buckets/private/page.md', '# Private');
@@ -98,7 +79,7 @@ test('audit limits read observations by the selected window and keeps private ev
   put(root, '.geppetto/signals.jsonl', rows([{ id: 'private', key: 'private', session: 'one', status: 'open', category: 'other', evidence: resolve(memory, 'buckets/private/page.md'), text: 'PRIVATE_PAYLOAD' }]));
   assert.equal((await learningAudit(root, { home })).neverRead.includes(resolve(memory, 'buckets/preferences/page.md')), false);
   const report = await learningAudit(root, { home, since: '2026-10-02T00:00:00Z' });
-  assert.ok(report.neverRead.includes(resolve(memory, 'buckets/preferences/page.md'))); assert.doesNotMatch(JSON.stringify(report), /PRIVATE_PAYLOAD|buckets[/\\]+private/);
+  assert.ok(report.neverRead.includes(resolve(memory, 'buckets/preferences/page.md'))); assert.match(JSON.stringify(report), /PRIVATE_PAYLOAD/);
 });
 test('a flagged active user turn starts learning immediately before Stop writes the completed turn record', async t => {
   const root = fixture(t), starts = [];
@@ -209,7 +190,7 @@ test('category boundary lists supported categories and requires concrete evidenc
   assert.deepEqual(JSON.parse(invoke('signal.mjs', ['--list'], { cwd: root }).stdout), ['misc']);
 });
 
-test('PostToolUse records successful memory and skill reads only, with no contents or private paths', async t => {
+test('PostToolUse records successful memory and skill reads only, without retaining page contents', async t => {
   const root = fixture(t), home = fixture(t), memory = fixture(t);
   put(home, '.geppetto/config.json', { memory: { localPath: memory, repo: memory } });
   put(root, '.geppetto/config.json', { hooks: { signalLearning: { enabled: false }, learnNudge: { enabled: false } } });
@@ -219,8 +200,8 @@ test('PostToolUse records successful memory and skill reads only, with no conten
   await handleEvent({ ...event, tool_input: { file_path: 'skills/failed/SKILL.md' }, tool_response: { isError: true } }, { home });
   await handleEvent({ ...event, tool_name: 'Write', tool_input: { file_path: 'skills/write/SKILL.md' } }, { home });
   const reads = get(root, projectDataPath(root, 'reads.jsonl')).trim().split('\n').map(JSON.parse);
-  assert.deepEqual(reads.map(row => row.kind), ['skill', 'memory']); assert.ok(reads.every(row => row.session === 'reads' && row.ts && row.path));
-  assert.doesNotMatch(JSON.stringify(reads), /private|# Preference/);
+  assert.deepEqual(reads.map(row => row.kind), ['skill', 'memory', 'memory']); assert.ok(reads.every(row => row.session === 'reads' && row.ts && row.path));
+  assert.doesNotMatch(JSON.stringify(reads), /# Preference/);
 });
 
 test('outcome audit reopens evidence recurring after a change and flags changed pages never read since it', async t => {

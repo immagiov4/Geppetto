@@ -72,32 +72,6 @@ test('learning consumes shared evidence once and retains progress after the sour
   assert.equal(second.status, 'idle'); assert.equal(executions, 0);
 });
 
-test('a missing legacy transcript stays pending without blocking valid shared signals', async t => {
-  const { root, other, check } = repositories(t);
-  put(other, '.geppetto/signals.jsonl', JSON.stringify({ id: 'missing', key: 'missing', source: 'user', session: 'old', category: 'workflow', status: 'open', text: 'Unverified origin', transcript_path: resolve(other, 'gone.jsonl') }) + '\n');
-  await localRecords(root, 'signals'); check(root, ['worktree', 'remove', '--force', other]);
-  await appendRecord(root, 'signals', { id: 'valid', key: 'valid', source: 'user', session: 'new', category: 'workflow', status: 'open', text: 'Valid correction' });
-  let prompt;
-  const result = await runLearning(root, { home: fixture(t), context: { session_id: 'purged', transcript_path: resolve(other, 'gone.jsonl') }, execute: async request => { prompt = request.prompt; return { decision: 'no_change', reason: 'Already covered.', owner: 'README.md' }; } });
-  assert.equal(result.status, 'unchanged'); assert.match(prompt, /Valid correction/); assert.doesNotMatch(prompt, /Unverified origin/);
-  assert.equal((await signalArchive(root)).find(row => row.key === 'missing').status, 'open');
-});
-
-test('private source exclusion survives removal of an originating checkout and its memory alias', async t => {
-  const { root, other, check } = repositories(t), memory = fixture(t), home = fixture(t);
-  put(memory, 'buckets/private/facts.md', 'Synthetic private fact');
-  await symlink(resolve(memory, 'buckets/private'), resolve(other, 'linked-notes'), 'junction');
-  for (const worktree of [root, other]) put(worktree, '.geppetto/config.json', { memory: { repo: memory, localPath: memory } });
-  const transcript = resolve(home, 'external.jsonl');
-  put(home, 'external.jsonl', JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Read', input: { file_path: 'linked-notes/facts.md' } }] } }) + '\n');
-  await appendRecord(other, 'signals', { id: 'private', key: 'private-source', source: 'user', session: 'origin', category: 'workflow', status: 'open', text: 'SYNTHETIC_PRIVATE_SIGNAL', transcript_path: transcript });
-  assert.equal((await localRecords(root, 'signals'))[0].sourcePrivacy, 'private');
-  check(root, ['worktree', 'remove', '--force', other]);
-  let calls = 0;
-  await runLearning(root, { home, execute: async () => { calls++; } });
-  assert.equal(calls, 0);
-});
-
 test('reusing a removed checkout path cannot inherit its archived review approval', async t => {
   const { root, other, check } = repositories(t);
   const content = Array.from({ length: 40 }, (_, i) => `export const x${i} = ${i};\n`).join('');

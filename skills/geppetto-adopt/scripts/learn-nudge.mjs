@@ -6,7 +6,6 @@ import { exists, jsonFile, ignoreLocalFiles, learnNudgeDefaults, projectRoot, cl
 import { logHookEvent } from './hook-events.mjs';
 import { createReadStream } from 'node:fs';
 import { redact, eligibleSignals, signalArchive, learningPolicy, localRecords } from './signal.mjs';
-import { privateEvidence, privateTranscriptEvidence, privateContent, normalizePrivateText } from './learning-privacy.mjs';
 export { launchLearning } from './common.mjs';
 /** Record tool starts; completion adds learning context once per qualifying turn. */
 export async function learningEvent(event, now, launch = launchLearning) {
@@ -43,36 +42,36 @@ export async function learningEvent(event, now, launch = launchLearning) {
   const keys = (await signalArchive(root)).filter(row => row.status === 'open' && !row.legacy).map(row => row.key), categories = learningPolicy(await jsonFile(configPath, {})).categories;
   return { hookSpecificOutput: { hookEventName: kind, additionalContext: `Use $geppetto-learn for reusable lessons. Open keys: ${JSON.stringify(keys)}. Reuse one or open a short slug; record once per session with node "${fileURLToPath(new URL('./signal.mjs', import.meta.url)).replaceAll('\\', '/')}" "<lesson>" --key <key> --session ${JSON.stringify(event.session_id)} --category <id>. Assign one primary category per episode in configured order: ${categories.map(row => row.id).join(' > ')}; secondary effects go in --attributes <json-object>. other requires --evidence. User feedback/frustration provenance comes from the turn record. Keep this check internal and continue the task.` } }; }
 const sliceBytes = 40 * 1024;
-export const publicLearningRecords = (records, privateRoot, cwd) => records.filter(record => !privateEvidence(record, privateRoot, record.worktree ?? cwd));
 const errorOutput = value => /(?:"(?:is_error|isError)"\s*:\s*true|"(?:exit_code|exitCode)"\s*:\s*-?[1-9]\d*|Process exited with code -?[1-9]\d*|(?:^|\n)(?:Exit code:?\s*-?[1-9]\d*|Error:|ERROR\b|Traceback\b))/.test(value);
 /** Reduce complete JSONL records from a byte cursor; partial final records remain pending. */
-export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = [], privateRoot = null, cwd = process.cwd()) {
+export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = []) {
   if (start > (await stat(path)).size) start = 0;
-  const privateLines = await privateContent(privateRoot); const parts = []; let pending = Buffer.alloc(0), offset = 0, candidate = reviewBlocked, privateSeen = false; const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
+  const parts = []; let pending = Buffer.alloc(0), offset = 0, candidate = reviewBlocked; const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
   let preceding = decisions.findLast(turn => turn.transcriptOffset <= start);
-  const recent = decisions.filter(turn => turn.transcriptOffset > start), evidence = new Set(); const add = (role, text, limit) => { if (text) parts.push({ role, text: `${role}: ${redact(text).slice(0, limit)}\n` }); };
-  // Recheck provenance before the cursor: later summaries can quote private reads without a path.
+  const recent = decisions.filter(turn => turn.transcriptOffset > start), evidence = new Set();
+  const add = (role, text, limit) => {
+    if (!text) return;
+    parts.push({ role, text: `${role}: ${redact(text).slice(0, limit)}\n` });
+  };
   for await (const chunk of createReadStream(path)) {
     pending = Buffer.concat([pending, chunk]); let end;
     while ((end = pending.indexOf(10)) !== -1) {
       const lineStart = offset, line = pending.subarray(0, end).toString('utf8'); pending = pending.subarray(end + 1); offset += end + 1;
       if (!line.trim()) continue;
-      const record = JSON.parse(line); const directory = record.cwd ?? (['session_meta', 'turn_context'].includes(record.type) ? record.payload?.cwd : null);
-      if (typeof directory === 'string') cwd = resolve(cwd, directory);
-      if (privateTranscriptEvidence(record, privateRoot, cwd)) privateSeen = true;
-      if (privateSeen || lineStart < start) continue;
+      const record = JSON.parse(line);
+      if (lineStart < start) continue;
       while (recent[0]?.transcriptOffset <= lineStart) preceding = recent.shift();
       const message = record.type === 'response_item' ? record.payload : record.message;
       if (!message) continue;
       const role = message.role ?? record.type;
-      if (['function_call', 'custom_tool_call'].includes(message.type)) { add('tool', `${message.name} ${redact(String(message.arguments ?? message.input ?? '')).slice(0, 300)}`); continue; }
+      if (['function_call', 'custom_tool_call'].includes(message.type)) { add('tool', `${message.name} ${String(message.arguments ?? message.input ?? '')}`, 300); continue; }
       if (['function_call_output', 'custom_tool_call_output'].includes(message.type)) { const output = typeof message.output === 'string' ? message.output : JSON.stringify(message.output); if (errorOutput(output ?? '')) { candidate = true; add('error', output, 500); } continue; }
       if (!['user', 'assistant'].includes(role)) continue;
       const before = parts.length;
       if (typeof message.content === 'string') add(role, message.content);
       else for (const block of message.content ?? []) {
         if (['text', 'input_text', 'output_text'].includes(block.type)) add(role, block.text);
-        if (block.type === 'tool_use') add('tool', `${block.name} ${redact(JSON.stringify(block.input ?? {})).slice(0, 300)}`);
+        if (block.type === 'tool_use') add('tool', `${block.name} ${JSON.stringify(block.input ?? {})}`, 300);
         if (block.type === 'tool_result') { const output = typeof block.content === 'string' ? block.content : JSON.stringify(block.content); if (block.is_error || errorOutput(output ?? '')) { candidate = true; add('error', output, 500); } }
       }
       if (parts.slice(before).some(part => part.role === 'user') && preceding) {
@@ -81,9 +80,8 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       }
     }
   }
-  if (privateSeen) return { text: '', offset, candidate: false, turns: [], skipped: 'private-memory' };
   candidate ||= parts.some(part => part.role === 'user' && /\b(?:no|wrong|instead|actually|correction|incorrect|fix|sbagliato|invece|correggi|correzione|errore)\b/i.test(part.text));
-  let text = parts.map(part => part.text).join(''); if (privateLines.some(secret => normalizePrivateText(text).includes(secret))) return { text: '', offset, candidate: false, turns: [], skipped: 'private-memory' };
+  let text = parts.map(part => part.text).join('');
   if (Buffer.byteLength(text) > sliceBytes) {
     const users = parts.filter(part => part.role === 'user').map(part => part.text).join('');
     if (Buffer.byteLength(users) > sliceBytes) throw new Error('User messages exceed the learning slice budget; transcript cursor retained.');
@@ -97,4 +95,4 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       return decode(bytes.subarray(0, head)) + decode(bytes.subarray(tail));
     }).join('');
   }
-  return { text, offset, candidate, turns: publicLearningRecords([...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])], privateRoot, cwd) }; }
+  return { text, offset, candidate, turns: [...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])] }; }
