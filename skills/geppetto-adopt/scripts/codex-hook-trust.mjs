@@ -56,7 +56,7 @@ export function connectCodex({ cwd, command = learningCommand('codex'), env = pr
     interrupt() { fail(new Error('Codex hook approval interrupted.')); child.kill(); }
   };
 }
-const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
+export const samePath = (left, right) => process.platform === 'win32' ? resolve(left).toLowerCase() === resolve(right).toLowerCase() : resolve(left) === resolve(right);
 async function inventory(client, project) {
   const response = await client.request('hooks/list', { cwds: [project] });
   if (!Array.isArray(response?.data) || response.data.length !== 1 || !samePath(response.data[0].cwd, project)) throw new Error('Codex hooks/list returned an unexpected project inventory.');
@@ -82,12 +82,13 @@ function select(hooks, { plugin, source, keys }) {
 }
 const fingerprint = hooks => JSON.stringify(hooks.map(({ key, currentHash, enabled, isManaged }) => ({ key, currentHash, enabled, isManaged })).sort((a, b) => a.key.localeCompare(b.key, 'en')));
 /** Persist only the selected current definitions, then ask Codex to verify their trust. */
-export async function hookTrust(client, { project, plugin, source, keys, approve = false }) {
+export async function hookTrust(client, { project, plugin, source, keys, approve = false, expectedHashes }) {
   const selectors = [Boolean(plugin), Boolean(source), Boolean(keys?.length)].filter(Boolean).length;
   if (selectors > 1 || (approve && selectors !== 1)) throw new UsageError('Approval needs exactly one scope: --plugin, --source or --key.');
   const entry = await inventory(client, project);
   const hooks = select(entry.hooks, { plugin, source, keys });
   if (selectors && !hooks.length) throw new Error('No hooks matched. Check the plugin ID, registered source and project trust in /hooks.');
+  if (expectedHashes && (hooks.length !== expectedHashes.size || hooks.some(hook => expectedHashes.get(hook.key) !== hook.currentHash))) throw new Error('Selected hook content changed after scope verification; retry installation.');
   const result = { project, approved: 0, hooks, warnings: entry.warnings };
   if (!approve) return result;
   const candidates = hooks.filter(hook => hook.enabled && !hook.isManaged && hook.trustStatus !== 'trusted');

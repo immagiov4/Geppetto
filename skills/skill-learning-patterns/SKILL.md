@@ -57,7 +57,7 @@ To implement an authorized change:
 
 Run the skill validator available in the environment, check links and diffs, and execute any changed programs. Format validity and decision quality are separate checks.
 
-When an operational decision changes, test a realistic request that reproduces the problem and one that should retain previous behavior, using isolated resources. For high-impact instructions, use an independent evaluation when tools and authorization permit it. Distinguish a constructed test from a result observed in actual use.
+When an operational decision changes, test a realistic request that reproduces the problem and one that should retain previous behavior, using isolated resources. When claiming improvement beyond the reproduced case, read [evaluation design](../geppetto-measure-it/references/evaluation-design.md) through `$geppetto-measure-it`. For high-impact instructions, use an independent evaluation when tools and authorization permit it. Distinguish a constructed test from a result observed in actual use.
 
 Synchronize only authorized copies and compare their contents. When installation or curation changes hooks, complete [hook activation](../geppetto-adopt/assets/templates/hooks/README.md#activation) in each affected harness and project. For publication, follow the destination repository's rules: use a pull request when required, or the publication method already authorized by the owner. After uploading, reread remote files and verify the published revision.
 

@@ -9,7 +9,7 @@ const gateSha = 'a'.repeat(40);
 const digest = content => createHash('sha256').update(content).digest('hex');
 function legacy(t, targets = ['codex']) {
   const cwd = fixture(t), home = fixture(t), source = fixture(t);
-  for (const path of ['skills', 'hooks']) cpSync(resolve(repo, path), resolve(source, path), { recursive: true });
+  for (const path of ['skills', 'hooks', 'scripts', '.codex-plugin']) cpSync(resolve(repo, path), resolve(source, path), { recursive: true });
   put(source, 'package.json', { name: 'geppetto', version: '0.2.0' });
   const install = (target = 'codex', extra = [], root = cwd) => invoke(resolve(source, 'skills/geppetto-adopt/scripts/install.mjs'), ['--target', target, '--project', root, '--gate-sha', gateSha, ...extra], { cwd: root, home });
   assert.equal(install(targets[0], ['--begin']).status, 0);

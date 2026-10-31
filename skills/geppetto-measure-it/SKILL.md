@@ -7,7 +7,7 @@ description: "Measure before claiming or adding. Use for an optimisation, a slow
 
 If `~/.geppetto/integrations.md` has a section for this skill, read it.
 
-Every addition names the metric it improves and the metric it may worsen. A proposed metric needs a reason and approval before it becomes a decision rule. Read [metrics](references/metrics.md) when selecting or reviewing measures; all defaults are editable.
+Every addition names the metric it improves and the metric it may worsen. A proposed metric needs a reason and approval before it becomes a decision rule. Read [metrics](references/metrics.md) when selecting or reviewing measures; all defaults are editable. Read [evaluation design](references/evaluation-design.md) before comparing behaviour, instructions, injected context or judged quality across cases.
 
 Establish the baseline before the change, run the treatment on comparable cases and inspect regressions in other metrics. Build the measurement tool appropriate to the task; this principle prescribes evidence, not a benchmark framework. Keep versions, inputs, configuration, actual work and observation method identifiable. Verify that the observed result measures the intended work rather than a cache, omitted path, load difference or failed operation.
 

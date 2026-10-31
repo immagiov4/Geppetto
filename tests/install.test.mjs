@@ -93,6 +93,7 @@ test('adoption instructions preserve consent, recap and same-session bootstrap w
 function source(t) {
   const root = fixture(t); cpSync(scripts, resolve(root, 'skills/geppetto-adopt/scripts'), { recursive: true });
   cpSync(resolve(repo, 'hooks'), resolve(root, 'hooks'), { recursive: true });
+  for (const path of ['scripts', '.codex-plugin']) cpSync(resolve(repo, path), resolve(root, path), { recursive: true });
   put(root, 'package.json', { name: 'geppetto', version: '0.1.0' });
   put(root, 'skills/geppetto-adopt/SKILL.md', '---\nname: geppetto-adopt\ndescription: Adopt\n---\nAdopt');
   put(root, 'skills/geppetto-example/SKILL.md', '---\nname: geppetto-example\ndescription: Example\n---\nOriginal');
@@ -306,4 +307,22 @@ test('rerunning one target retires legacy bin scripts shared by multiple owned t
   const result = invoke(install, ['--target', 'codex', '--project', cwd, '--plugin-hooks'], { cwd, home }); assert.equal(result.status, 0, result.stderr);
   assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);
   for (const entry of Object.values(JSON.parse(get(cwd, '.geppetto/install.json')).installations)) assert.equal(entry.files[path], undefined);
+});
+
+test('dry-run and uninstall never start approval; final approval sees reconciled hashes', t => {
+  const cwd = fixture(t), home = fixture(t), log = resolve(home, 'trust-starts.log');
+  const args = ['--target', 'codex', '--project', cwd, '--gate-sha', 'a'.repeat(40)], options = { cwd, home, env: { INSTALL_TRUST_LOG: log } };
+  let result = invoke('install.mjs', [...args, '--dry-run'], options); assert.equal(result.status, 0, result.stderr); assert.equal(existsSync(log), false);
+  result = invoke('install.mjs', args, options); assert.equal(result.status, 0, result.stderr); assert.ok(existsSync(log));
+  const state = JSON.parse(get(cwd, '.geppetto/install.json'));
+  assert.equal(state.installations.codex.files['.geppetto/config.json'], createHash('sha256').update(get(cwd, '.geppetto/config.json')).digest('hex'));
+  const before = get(home, 'trust-starts.log');
+  result = invoke('install.mjs', [...args, '--uninstall'], options); assert.equal(result.status, 0, result.stderr); assert.equal(get(home, 'trust-starts.log'), before);
+});
+
+test('unsupported approval returns non-success and preserves installed files with a retry', t => {
+  const cwd = fixture(t), home = fixture(t);
+  const result = invoke('install.mjs', ['--target', 'agents', '--project', cwd, '--gate-sha', 'a'.repeat(40)], {cwd,home,env:{INSTALL_TRUST_UNSUPPORTED:'1'}});
+  assert.equal(result.status, 1); assert.match(result.stderr, /blocked:.*unsupported hooks\/list/); assert.match(result.stderr, /Retry: node/);
+  assert.ok(existsSync(resolve(cwd, '.agents/skills/geppetto-build/SKILL.md'))); assert.ok(existsSync(resolve(cwd, '.geppetto/install.json')));
 });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- Add proportionate evaluation design guidance for behavioural improvements and learning.
+- Finalize Codex hook approval after installation writes, preserving unrelated hooks and reporting blocked approval with a retry command.
+
 ## 0.6.0
 
 - Personal memory buckets follow the same retrieval, maintenance and learning rules as other buckets; the name private does not block access or discard conversations.

@@ -5,12 +5,16 @@ import { fileURLToPath } from 'node:url';
 import { isUtf8 } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { cli, isMain, parseArgs, UsageError, exists, rejectSymlinks, filesUnder, filterHooks, contained, jsonFile, atomicJson, userHome, ignoreLocalFiles, defaultConfig, run, gitOutput, foundationReport } from './common.mjs';
+import { connectCodex, hookTrust, samePath } from './codex-hook-trust.mjs';
 import { reconcileMachine } from './machine.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
 import { memoryQuestion, memoryDescription } from './memory-setup.mjs';
 import { maintenanceJobs, compileIntegrations } from './maintenance.mjs';
 import { validateTurnPolicy } from './turn-checks.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+// Git checkouts can differ in text line endings while containing the same package.
+const payloadHash = bytes => hash(isUtf8(bytes) && !bytes.includes(0) ? bytes.toString('utf8').replaceAll('\r\n', '\n') : bytes);
+const shellQuote = value => `'${value.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`;
 const portable = path => path.split(sep).join('/');
 const generatedPaths = new Set(['AGENTS.md', 'CLAUDE.md', '.geppetto/config.json', '.geppetto/authorizations', '.claude/settings.json', '.codex/hooks.json', '.github/workflows/pr-gate.yml']);
 // A copied skill must not turn an installation path into a write outside its root.
@@ -134,6 +138,43 @@ async function applyInstallation({ root, manifest, statePath, uninstall, source,
     await atomicJson(statePath, manifest);
   } finally { await lock.close(); await unlink(lockPath); }
 }
+/** Approve only owned definitions after the last installation write. */
+export async function approveCodexHooks(project, source, installed, connect = connectCodex, retryInstall) {
+  let client, scope, expectedHashes;
+  try {
+    client = connect({ cwd: project }); await client.initialize();
+    const inventory = await hookTrust(client, { project });
+    if (installed.source === 'plugin') {
+      const metadata = await jsonFile(resolve(source.path, '.codex-plugin/plugin.json'));
+      const ids = [...new Set(inventory.hooks.filter(hook => hook.pluginId?.split('@')[0] === metadata.name).map(hook => hook.pluginId))];
+      if (ids.length !== 1) throw new Error(ids.length ? 'ambiguous: multiple plugin identities' : 'not-found: install the plugin through Codex first');
+      const hooks = inventory.hooks.filter(hook => hook.pluginId === ids[0]), pluginRoot = resolve(dirname(hooks[0].sourcePath), '..');
+      // Names alone cannot establish authorization for executable plugin content.
+      for (const directory of ['hooks', 'skills', 'scripts', '.codex-plugin']) {
+        const expected = filesUnder(resolve(source.path, directory)).map(path => relative(source.path, path));
+        const actual = filesUnder(resolve(pluginRoot, directory)).map(path => relative(pluginRoot, path));
+        if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new Error('Plugin payload differs from the authorized package; update it through Codex first');
+        for (const path of expected) if (payloadHash(await readFile(resolve(source.path, path))) !== payloadHash(await readFile(resolve(pluginRoot, path)))) throw new Error(`Plugin payload differs: ${path}; update it through Codex first`);
+      }
+      if (hooks.some(hook => !samePath(hook.sourcePath, resolve(pluginRoot, 'hooks/hooks.json')))) throw new Error('Unexpected plugin hook source');
+      expectedHashes = new Map(hooks.map(hook => [hook.key, hook.currentHash]));
+      scope = { plugin: ids[0] };
+    } else {
+      const keys = inventory.hooks.filter(hook => samePath(hook.sourcePath, installed.source) && installed.commands.includes(hook.command)).map(hook => hook.key);
+      if (!keys.length) throw new Error('not-found: owned user commands are absent');
+      expectedHashes = new Map(inventory.hooks.filter(hook => keys.includes(hook.key)).map(hook => [hook.key, hook.currentHash]));
+      scope = { keys };
+    }
+    const result = await hookTrust(client, { project, ...scope, approve: true, expectedHashes });
+    if (result.hooks.some(hook => hook.enabled && !['trusted', 'managed'].includes(hook.trustStatus))) throw new Error('Final inventory is not trusted');
+    console.log(`Codex hooks: trusted (${result.approved} approved, ${result.hooks.filter(hook => hook.trustStatus === 'trusted').length - result.approved} already approved)`);
+    for (const hook of result.hooks) console.log(JSON.stringify({ pluginId: hook.pluginId, key: hook.key, currentHash: hook.currentHash, sourcePath: hook.sourcePath, trustStatus: hook.trustStatus }));
+    if (scope.plugin) console.log('After a plugin update through Codex, rerun the installer to approve its new content.');
+    return 0;
+  } catch (error) {
+    console.error(`Codex hooks: blocked: ${error.message}\nRetry: ${retryInstall ?? `node ${shellQuote(fileURLToPath(import.meta.url))} --target codex --project ${shellQuote(project)}`}`); return 1;
+  } finally { if (client) await client.close(); }
+}
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--target', '--project', '--scheduler-jobs', '--memory', '--gate-sha'], repeat: ['--record-generated', '--add-job'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks', '--begin', '--commit'] }); const target = opts['--target'];
   if (opts._.length || !['claude', 'codex', 'agents'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents> (--project <dir> | --user) [--dry-run] [--uninstall]');
@@ -169,7 +210,7 @@ export async function main(args) {
     const choice = opts['--memory']; const preview = choice && choice !== memory?.choice ? { choice, localPath: resolve(userHome(), 'geppetto-memory'), repo: choice === 'github' ? 'private GitHub repository' : resolve(userHome(), 'geppetto-memory') } : memory;
     console.log(`Memory: ${memoryDescription(preview)}; change with --memory <local|github|native|none>.`);
   }
-  if (opts['--dry-run']) return 0;
+  if (opts['--dry-run']) { if (!opts['--uninstall'] && plans.some(owner => owner.target !== 'claude')) console.log('Codex hooks: would approve the installed plugin identity or owned command keys after final writes.'); return 0; }
   if (!opts['--uninstall']) await applyInstallation({ root, manifest, statePath, uninstall: false, source, plans });
   let machine;
   try { for (const owner of plans) machine = await reconcileMachine(root, owner.target, source, { pluginHooks: owner.plugin, uninstall: opts['--uninstall'], uninstallMemory: ['native', 'none'].includes(memory?.choice) ? null : memory, memoryChoice: opts['--memory'], addJobs: opts['--add-job'], jobs: opts['--scheduler-jobs'] ? await jsonFile(opts['--scheduler-jobs']) : {} }); }
@@ -193,6 +234,10 @@ export async function main(args) {
   console.log(`Choices (.geppetto/config.json): hooks=${JSON.stringify(choices.hooks ?? {})}; screen.shareSource=${choices.screen?.shareSource === true}; learner=${JSON.stringify(choices.hooks?.signalLearning ?? {})}; review=${JSON.stringify(choices.review ?? {})}; maintenance.enabled=${choices.maintenance?.enabled !== false}; jobs=${JSON.stringify(machine.jobs)}; ci.enabled=${choices.ci?.enabled !== false}. Source sharing: python <screen>/scripts/screen.py --repo <project> --share-source yes|no; key: OPENROUTER_API_KEY in the launching environment.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
+  if (!opts['--uninstall'] && plans.some(owner => owner.target !== 'claude')) {
+    const retry = `node ${[fileURLToPath(import.meta.url), ...args].map(shellQuote).join(' ')}`;
+    return approveCodexHooks(root, source, machine.hooks.codex, connectCodex, retry);
+  }
   return 0; }
 async function installationGit(root, manifest, opts) {
   const git = args => gitOutput(root, args, { label: 'Installation Git operation' }), branch = 'geppetto-install';
