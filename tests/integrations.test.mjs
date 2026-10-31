@@ -20,6 +20,10 @@ test('compiled view includes only installed companions and their applicable skil
 
 test('plugin-cache skill folders and installed CLI plugins qualify without accepting merely available plugins', async t => {
   const home = fixture(t), root = fixture(t), catalog = fixture(t);
+  const previousPath = process.env.PATH;
+  put(home, 'node_modules/@openai/codex/bin/codex.js', '// Fixture CLI, executed through the injected inventory.');
+  process.env.PATH = home;
+  t.after(() => { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; });
   put(home, '.codex/plugins/cache/vendor/skill-diet/1.0/skills/skill-diet/SKILL.md', '# Installed');
   for (const name of ['skill-diet', 'TokenEconomizer', 'available']) put(catalog, name + '.md', `# ${name}\n\n## With geppetto-learn\nUse ${name}.\n`);
   const report = await compileIntegrations(root, { home, catalog, roots: [], execute: () => ({ status: 0, stdout: JSON.stringify([{ id: 'TokenEconomizer@vendor', enabled: true }, { id: 'skill-diet@vendor', installed: true }, { id: 'available@vendor', installed: false }]) }) });
