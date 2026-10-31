@@ -1,6 +1,6 @@
 # Metrics
 
-Choose the smallest set that can decide the current hypothesis. These defaults are editable; name the improved metric and the one at risk. Define units, observation method, cases, baseline revision and decision rationale. Seek approval for a new decision metric.
+Choose the smallest set that can decide the current hypothesis. These defaults are editable; name the improved metric and the one at risk. Define units, observation method, cases, baseline revision and decision rationale. For temporary checks derived from the agreed outcome, use the task’s existing authority. A new standing decision metric, stricter acceptance limit or policy beyond that outcome needs a reason and approval before adoption.
 
 Learning signals choose one primary problem category from project `categories`, whose ordered entries contain `id`, `definition` and `score` (the measurement method). Category counts identify observed keys and sessions; normalized scores require confirmed episodes and the denominator stated by their method. Preserve false positives, false negatives, pre-release findings and post-release regressions where applicable. Missing denominators, baseline minutes or token/cost observations stay unknown. Secondary effects belong in signal attributes; existing free-form metric fields remain legacy evidence without an inferred category mapping.
 

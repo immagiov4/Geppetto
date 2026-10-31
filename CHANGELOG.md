@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1
+
+- Record learning verification before editing, based on the actual scope of shared defaults and cross-cutting changes.
+- Preserve concrete affected and unchanged behavior cases with the execution blocker when checks cannot run.
+
+- Use existing task authority for temporary outcome checks; require approval for new standing metrics and acceptance policies.
+
 ## 0.8.0
 
 - Add proportionate evaluation design guidance for behavioural improvements and learning.
