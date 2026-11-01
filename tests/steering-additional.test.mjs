@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { validateTurnPolicy } from '../skills/geppetto-adopt/scripts/turn-checks.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -134,5 +136,52 @@ test('a duplicate prompt without a native turn ID preserves human provenance', a
 
 
 test('custom checks cannot shadow archived human-assessment metadata', () => {
-  assert.throws(()=>validateTurnPolicy({turnChecks:{checks:[{id:'userDecisionIndex',question:'A custom decision?',skill:'custom-skill'}]}}),/Invalid turnChecks/);
+  for (const id of ['userDecisionIndex', 'transcriptPath']) assert.throws(()=>validateTurnPolicy({turnChecks:{checks:[{id,question:'A custom decision?',skill:'custom-skill'}]}}),/Invalid turnChecks/);
+});
+
+
+test('a parent pending assessment and transcript cursor survive a child with its own transcript', async t => {
+  const { cwd,transcript,event,submit,write }=setup(t);
+  await writeFile(transcript,JSON.stringify({type:'response_item',payload:{role:'assistant',content:'x'.repeat(1024*1024)}})+'\n'+message('Original request'));
+  await submit();await recordTurn(cwd,event.session_id,event.turn_id,decision);
+  const correction=message('You changed an agreed requirement.');await appendFile(transcript,correction);
+  await handleEvent({...event,hook_event_name:'PreToolUse',tool_name:'Read',tool_input:{path:resolve(cwd,'app.mjs')}});
+  const childTranscript=resolve(fixture(t),'child.jsonl');await writeFile(childTranscript,message('Review the change.'));
+  const child={...event,turn_id:'review-child',transcript_path:childTranscript};
+  await handleEvent({...child,hook_event_name:'UserPromptSubmit'});await recordTurn(cwd,event.session_id,child.turn_id,decision);
+  assert.equal((await write()).hookSpecificOutput?.permissionDecision,'deny');
+  const observations=(await localRecords(cwd,'hook-events')).filter(row=>row.hook==='turnGate'&&row.status==='user-message'&&row.turnId===event.turn_id);
+  assert.equal(observations.length,1,'resuming the parent preserves its already observed user message');
+  assert.equal(observations[0].bytesRead,Buffer.byteLength(correction));
+  await recordTurn(cwd,event.session_id,event.turn_id,{...decision,feedback:{applies:true,on:'Changed agreed behavior.',action:'Restore the agreed behavior.'}});
+  assert.equal((await recordSignal(cwd,{key:'parent-pending',session:event.session_id,turn:event.turn_id,category:'workflow',text:'Real user correction.'})).source,'user');
+});
+
+
+test('explicit records and signals use the parent state while a child owns the active pointer', async t => {
+  const { cwd,transcript,event,submit }=setup(t);
+  await writeFile(transcript,message('Original request'));await submit();await recordTurn(cwd,event.session_id,event.turn_id,decision);
+  await appendFile(transcript,message('You changed the approved behavior.'));await handleEvent({...event,hook_event_name:'PreToolUse',tool_name:'Read',tool_input:{path:resolve(cwd,'app.mjs')}});
+  const path=resolve(fixture(t),'review.jsonl');await writeFile(path,message('Review only.'));const child={...event,turn_id:'child-active',transcript_path:path};
+  await handleEvent({...child,hook_event_name:'UserPromptSubmit'});await recordTurn(cwd,event.session_id,child.turn_id,decision);
+  const signal={key:'paused-human',session:event.session_id,turn:event.turn_id,category:'workflow',text:'The parent user correction.'};
+  await assert.rejects(recordSignal(cwd,signal),/Record the new user message/);
+  await recordTurn(cwd,event.session_id,event.turn_id,{...decision,feedback:{applies:true,on:'Changed approved behavior.',action:'Restore it.'}});
+  const recorded=await recordSignal(cwd,signal);assert.equal(recorded.source,'user');assert.equal(recorded.transcript_path,transcript);
+  assert.equal((await recordSignal(cwd,{...signal,key:'child-observation',turn:child.turn_id})).source,'agent');
+});
+
+
+test('returning to an assessed parent does not reopen its consumed transcript', async t => {
+  const { cwd,transcript,event,submit,write }=setup(t);
+  await writeFile(transcript,JSON.stringify({type:'response_item',payload:{role:'assistant',content:'x'.repeat(1024*1024)}})+'\n'+message('Original request'));
+  await submit();await recordTurn(cwd,event.session_id,event.turn_id,decision);
+  await appendFile(transcript,message('You changed the agreed behavior.'));assert.equal((await write()).hookSpecificOutput?.permissionDecision,'deny');
+  await recordTurn(cwd,event.session_id,event.turn_id,{...decision,feedback:{applies:true,on:'Changed behavior.',action:'Restore it.'}});
+  const childPath=resolve(fixture(t),'child.jsonl');await writeFile(childPath,message('Review only.'));const child={...event,turn_id:'child-reader',transcript_path:childPath};
+  await handleEvent({...child,hook_event_name:'UserPromptSubmit'});await recordTurn(cwd,event.session_id,child.turn_id,decision);
+  const original=fs.createReadStream,reads=[];
+  fs.createReadStream=(path,...args)=>{if(path===transcript)reads.push(args[0]);return original(path,...args);};syncBuiltinESMExports();
+  try{assert.deepEqual(await handleEvent({...event,hook_event_name:'PreToolUse',tool_name:'Read',tool_input:{path:resolve(cwd,'app.mjs')}}),{});assert.deepEqual(reads,[],'the unchanged parent body is not read on return');assert.equal((await localRecords(cwd,'hook-events')).findLast(row=>row.hook==='turnGate'&&row.status==='resumed'&&row.turnId===event.turn_id).bytesRead,0);}
+  finally{fs.createReadStream=original;syncBuiltinESMExports();}
 });

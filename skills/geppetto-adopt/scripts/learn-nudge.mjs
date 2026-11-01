@@ -1,3 +1,4 @@
+import { readTurnState } from './turn-messages.mjs';
 import { learningDelivery } from './learning-delivery.mjs';
 import { appendFile, mkdir, readFile, unlink, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -27,13 +28,13 @@ async function learningActivity(event, now, launch = launchLearning) {
   if (!config.enabled && !(kind === 'Stop' && (await localRecords(root, 'signals')).length > 0)) return {};
   for (const key of ['minToolCalls', 'minDurationMs']) if (!Number.isSafeInteger(config[key]) || config[key] <= 0) throw new Error(`${configPath}:1: hooks.learnNudge.${key} must be a positive integer`);
   const session = createHash('sha256').update(event.session_id).digest('hex'); const state = resolve(root, '.geppetto/hook-state', session); const activity = resolve(state, 'activity.jsonl');
-  const active = await jsonFile(resolve(root, '.geppetto/hook-state', `review-turn-${session}.json`), {}), messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
+  const active = (await readTurnState(root, event.session_id, event.turn_id)) ?? {}, messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
   if (!['PostToolUse', 'Stop'].includes(kind)) {
     await mkdir(state, { recursive: true });
     await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);
     await appendFile(activity, `${JSON.stringify({ kind, at: now(), id: event.tool_use_id ?? randomUUID(), turn: messageTurn ?? null })}\n`, { mode: 0o600 });
     return {};   }
-  const records = await exists(activity) ? (await readFile(activity, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse) : []; const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit'); const calls = records.slice(lastPrompt + 1).filter(record => record.kind === 'PreToolUse' && (!messageTurn || record.turn === messageTurn)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
+  const records = await exists(activity) ? (await readFile(activity, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse) : []; const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit' && (!messageTurn || record.turn === messageTurn)); const calls = records.slice(lastPrompt + 1).filter(record => record.kind === 'PreToolUse' && (!messageTurn || record.turn === messageTurn)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
   const elapsedMs = unique.length ? now() - Math.min(...unique.map(call => call.at)) : 0; const qualified = config.enabled && (unique.length >= config.minToolCalls || elapsedMs >= config.minDurationMs); const signals = kind === 'Stop' && (await eligibleSignals(root)).length > 0;
   if (!qualified && !signals) return {};
   const turn = messageTurn || unique[0]?.turn || records[lastPrompt]?.id || unique[0]?.id || 'signals'; const turnHash = createHash('sha256').update(turn).digest('hex'); const fired = resolve(state, `fired-${turnHash}`);
@@ -50,26 +51,25 @@ async function learningActivity(event, now, launch = launchLearning) {
   try { await logHookEvent(root, entry, event); }
   catch (error) { await unlink(fired); throw error; }
   const keys = (await signalArchive(root)).filter(row => row.status === 'open' && !row.legacy).map(row => row.key), categories = learningPolicy(await jsonFile(configPath, {})).categories;
-  return { hookSpecificOutput: { hookEventName: kind, additionalContext: `Use $geppetto-learn for reusable lessons. Open keys: ${JSON.stringify(keys)}. Reuse one or open a short slug; record once per session with node "${fileURLToPath(new URL('./signal.mjs', import.meta.url)).replaceAll('\\', '/')}" "<lesson>" --key <key> --session ${JSON.stringify(event.session_id)} --category <id>. Assign one primary category per episode in configured order: ${categories.map(row => row.id).join(' > ')}; secondary effects go in --attributes <json-object>. other requires --evidence. User feedback/frustration provenance comes from the turn record. Keep this check internal and continue the task.` } }; }
+  return { hookSpecificOutput: { hookEventName: kind, additionalContext: `Use $geppetto-learn for reusable lessons. Open keys: ${JSON.stringify(keys)}. Reuse one or open a short slug; record once per session with node "${fileURLToPath(new URL('./signal.mjs', import.meta.url)).replaceAll('\\', '/')}" "<lesson>" --key <key> --session ${JSON.stringify(event.session_id)}${event.turn_id || active.turn ? ` --turn ${JSON.stringify(event.turn_id || active.turn)}` : ''} --category <id>. Assign one primary category per episode in configured order: ${categories.map(row => row.id).join(' > ')}; secondary effects go in --attributes <json-object>. other requires --evidence. User feedback/frustration provenance comes from the turn record. Keep this check internal and continue the task.` } }; }
 const sliceBytes = 40 * 1024;
 const errorOutput = value => /(?:"(?:is_error|isError)"\s*:\s*true|"(?:exit_code|exitCode)"\s*:\s*-?[1-9]\d*|Process exited with code -?[1-9]\d*|(?:^|\n)(?:Exit code:?\s*-?[1-9]\d*|Error:|ERROR\b|Traceback\b))/.test(value);
 /** Reduce complete JSONL records from a byte cursor; partial final records remain pending. */
 export async function transcriptSlice(path, start = 0, reviewBlocked = false, turns = []) {
   if (start > (await stat(path)).size) start = 0;
-  const parts = []; let pending = Buffer.alloc(0), offset = 0, candidate = reviewBlocked; const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
+  const parts = []; let pending = Buffer.alloc(0), offset = start, bytesRead = 0, candidate = reviewBlocked; const decisions = turns.filter(turn => Number.isSafeInteger(turn.transcriptOffset) && typeof turn.transcriptPath === 'string' && resolve(turn.transcriptPath) === resolve(path)).sort((a, b) => a.transcriptOffset - b.transcriptOffset);
   let preceding = decisions.findLast(turn => turn.transcriptOffset <= start);
   const recent = decisions.filter(turn => turn.transcriptOffset > start), evidence = new Set();
   const add = (role, text, limit) => {
     if (!text) return;
     parts.push({ role, text: `${role}: ${redact(text).slice(0, limit)}\n` });
   };
-  for await (const chunk of createReadStream(path)) {
-    pending = Buffer.concat([pending, chunk]); let end;
+  for await (const chunk of createReadStream(path, { start })) {
+    bytesRead += chunk.length; pending = Buffer.concat([pending, chunk]); let end;
     while ((end = pending.indexOf(10)) !== -1) {
       const lineStart = offset, line = pending.subarray(0, end).toString('utf8'); pending = pending.subarray(end + 1); offset += end + 1;
       if (!line.trim()) continue;
       const record = JSON.parse(line);
-      if (lineStart < start) continue;
       while (recent[0]?.transcriptOffset <= lineStart) preceding = recent.shift();
       const message = record.type === 'response_item' ? record.payload : record.message;
       if (!message) continue;
@@ -105,4 +105,4 @@ export async function transcriptSlice(path, start = 0, reviewBlocked = false, tu
       return decode(bytes.subarray(0, head)) + decode(bytes.subarray(tail));
     }).join('');
   }
-  return { text, offset, candidate, turns: [...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])] }; }
+  return { text, offset, bytesRead, candidate, turns: [...new Set([...evidence, ...decisions.filter(turn => turn.transcriptOffset > start && turn.transcriptOffset <= offset)])] }; }

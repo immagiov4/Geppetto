@@ -5,7 +5,7 @@ export const turnPolicy = ({ turnChecks }) => ({ ...defaultTurnChecks, ...(Array
 export function validateTurnPolicy(config) {
   const supplied = config.turnChecks, policy = turnPolicy(config);
   const valid = text => typeof text === 'string' && text.trim() && !/[\r\n]/.test(text);
-  const reserved = ['continuation', 'review', 'userCorrection', 'requestedAt', 'decidedAt', 'decisions', 'userDecisionIndex', 'addedSeconds', 'edited', 'sessionId', 'turnId', 'previousTurnId', 'ts', 'transcriptOffset', '__proto__', 'constructor', 'prototype'];
+  const reserved = ['continuation', 'review', 'userCorrection', 'requestedAt', 'decidedAt', 'decisions', 'userDecisionIndex', 'addedSeconds', 'edited', 'sessionId', 'turnId', 'previousTurnId', 'ts', 'transcriptPath', 'transcriptOffset', '__proto__', 'constructor', 'prototype'];
   if (supplied !== undefined && !Array.isArray(supplied) && (!supplied || typeof supplied !== 'object' || Object.keys(supplied).some(key => !['checks', 'rearmOn'].includes(key))) || !Array.isArray(policy.checks) || policy.checks.some(check => !check || !/^[a-z][\w-]*$/.test(check.id) || reserved.includes(check.id) || !valid(check.question) || !valid(check.skill)) || new Set(policy.checks.map(check => check.id)).size !== policy.checks.length) throw new UsageError('Invalid turnChecks: use unique {id, question, skill} checks.');
   if (!Array.isArray(policy.rearmOn)) throw new UsageError('Invalid turnChecks.rearmOn: use tool rules with optional command, gh or script intent.');
   for (const rule of policy.rearmOn) {

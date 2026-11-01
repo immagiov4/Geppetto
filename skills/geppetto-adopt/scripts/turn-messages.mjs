@@ -1,9 +1,17 @@
 import { createReadStream } from 'node:fs';
 import { stat, mkdir, writeFile, readFile, link, unlink } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { jsonFile } from './common.mjs';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
+
+const digest = text => createHash('sha256').update(text).digest('hex');
+export const turnStatePath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}${turn ? '-' + digest(turn) : ''}.json`);
+export async function readTurnState(root, session, turn) {
+  const active = await jsonFile(turnStatePath(root, session), null);
+  return !turn || active?.turn === turn ? active : jsonFile(turnStatePath(root, session, turn), null);
+}
 
 /** Read appended complete records, retaining only cursor and user-message identity. */
 export async function messageCheckpoint(path, cursor) {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.3
+
+- Preserve parent-turn assessments and transcript cursors while subagents run in the same session, avoiding repeated full transcript reads on return.
+- Resolve explicit turn recording and learning signals against their own saved state.
+- Preserve learning qualification and background transcript cursors across alternating turns; report resumed transcript reads.
+- Pair archived transcript positions with their source paths, keeping parent and subagent calibration evidence separate.
+
 ## 0.10.2
 
 - Recognize user messages received during an active native turn before the next edit, and attribute learning signals to their current user assessment.

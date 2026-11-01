@@ -123,3 +123,14 @@ test('plugin reminder signal command runs from a project with no vendored script
   assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'signals.jsonl'))).text, 'Use the existing owner');
   assert.equal(existsSync(resolve(cwd, '.geppetto/bin')), false);
 });
+
+
+test('a child prompt does not discard the parent learning activity before its threshold', async t => {
+  const cwd=fixture(t), starts=[];put(cwd,'.geppetto/config.json',{...config(),hooks:{learnNudge:{enabled:true,minToolCalls:3,minDurationMs:1000}}});
+  const send=(kind,turn,id)=>handleEvent({cwd,session_id:'alternating',turn_id:turn,hook_event_name:kind,tool_name:'Read',tool_input:{},tool_use_id:id},{now:()=>1,launchLearning:async request=>starts.push(request)});
+  await send('UserPromptSubmit','parent','p');
+  for(const id of ['one','two']){await send('PreToolUse','parent',id);assert.deepEqual(await send('PostToolUse','parent',id),{});}
+  await send('UserPromptSubmit','child','c');await send('PreToolUse','child','child-one');assert.deepEqual(await send('PostToolUse','child','child-one'),{});
+  await send('PreToolUse','parent','three');assert.match((await send('PostToolUse','parent','three')).hookSpecificOutput?.additionalContext??'',/geppetto-learn/);
+  await send('Stop','parent','stop');assert.equal(starts.length,1);assert.equal(starts[0].learning_qualified,true);
+});

@@ -1,3 +1,4 @@
+import { localRecords } from '../skills/geppetto-adopt/scripts/signal.mjs';
 import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -100,7 +101,7 @@ test('learner admits scope and frustration calibration across cursor boundaries 
     const root = project(t), home = fixture(t), path = resolve(root, 'chat.jsonl'); let prompt;
     const old = encode([user('Inspect the project.'), assistant('Done.')]); put(root, 'chat.jsonl', old);
     const event = { cwd: root, session_id: 'calibration', transcript_path: path, learning_qualified: true };
-    put(root, '.geppetto/turns.jsonl', encode([{ sessionId: 'calibration', turnId: 'one', transcriptOffset: Buffer.byteLength(old), requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false }, review: { status: 'below-threshold' } }]));
+    put(root, '.geppetto/turns.jsonl', encode([{ sessionId: 'calibration', turnId: 'one', transcriptPath: path, transcriptOffset: Buffer.byteLength(old), requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false }, review: { status: 'below-threshold' } }]));
     assert.equal((await runLearning(root, { home, context: event })).status, 'no-candidate');
     put(root, 'chat.jsonl', old + encode([user(correction), assistant('I will correct it.')]));
     put(root, '.geppetto/signals.jsonl', encode([{ id: 'explicit-calibration', key: 'explicit-calibration', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: correction }]));
@@ -116,7 +117,7 @@ test('learner admits scope and frustration calibration across cursor boundaries 
 test('turn evidence excludes other sessions and records without a following user message do not admit a candidate', async t => {
   const root = project(t), home = fixture(t), path = resolve(root, 'chat.jsonl');
   const text = encode([user('Inspect the project.'), assistant('Done.')]); put(root, 'chat.jsonl', text);
-  put(root, '.geppetto/turns.jsonl', encode([{ sessionId: 'foreign', transcriptOffset: 0, requirements: { changes: false }, frustration: { applies: false }, secret: 'OTHER_SESSION' }, { sessionId: 'this', transcriptOffset: Buffer.byteLength(text), continuation: true }]));
+  put(root, '.geppetto/turns.jsonl', encode([{ sessionId: 'foreign', transcriptPath: path, transcriptOffset: 0, requirements: { changes: false }, frustration: { applies: false }, secret: 'OTHER_SESSION' }, { sessionId: 'this', transcriptPath: path, transcriptOffset: Buffer.byteLength(text), continuation: true }]));
   let calls = 0;
   const result = await runLearning(root, { home, context: { cwd: root, session_id: 'this', transcript_path: path, learning_qualified: true }, execute: async () => { calls++; } });
   assert.equal(result.status, 'no-candidate'); assert.equal(calls, 0);
@@ -170,4 +171,42 @@ test('a candidate awaiting eligible signals explains the skipped attempt without
   assert.deepEqual(JSON.parse(get(root, cursor)), { path: transcript, offset: 0 });
   assert.equal((await runLearning(root, { home, execute: () => assert.fail('idle call must not call a model') })).status, 'idle');
   assert.equal(get(root, journal), text, 'An empty idle call should not add another event');
+});
+
+
+test('learning keeps independent cursors when parent and child transcripts alternate', async t => {
+  const root=project(t),home=fixture(t),parent=resolve(root,'parent.jsonl'),child=resolve(root,'child.jsonl');let calls=0;
+  put(root,'parent.jsonl',encode([user('Inspect the parent.')])) ;put(root,'child.jsonl',encode([user('Inspect the child.')]));
+  const run=path=>runLearning(root,{home,context:{cwd:root,session_id:'same-session',transcript_path:path,learning_qualified:true},execute:async()=>{calls++;}});
+  assert.equal((await run(parent)).status,'no-candidate');assert.equal((await run(child)).status,'no-candidate');
+  assert.equal((await run(parent)).status,'idle');assert.equal((await run(child)).status,'idle');assert.equal(calls,0);
+});
+
+test('learning reads only the appended bytes after a large consumed transcript', async t => {
+  const root=fixture(t),path=resolve(root,'large.jsonl'),old=encode([assistant('x'.repeat(1024*1024))]);put(root,'large.jsonl',old);
+  const first=await transcriptSlice(path),added=encode([user('Inspect the added request.')]);put(root,'large.jsonl',old+added);
+  const next=await transcriptSlice(path,first.offset);assert.equal(next.bytesRead,Buffer.byteLength(added));assert.equal((await transcriptSlice(path,next.offset)).bytesRead,0);
+});
+
+
+test('background evaluation receives only turn records from the parent transcript', async t => {
+  const root=project(t),home=fixture(t),parent=resolve(root,'parent-provenance.jsonl'),child=resolve(root,'child-provenance.jsonl');
+  const initial=encode([user('Inspect the parent.')]);put(root,'parent-provenance.jsonl',initial);put(root,'child-provenance.jsonl',encode([user('Review '+'x'.repeat(180))]));
+  const value={requirements:{changes:false},feedback:{applies:false},frustration:{applies:false}},event={cwd:root,session_id:'provenance',turn_id:'parent',transcript_path:parent};
+  const options={launchLearning:async()=>{}};
+  await handleEvent({...event,hook_event_name:'UserPromptSubmit'},options);await recordTurn(root,event.session_id,event.turn_id,value);await handleEvent({...event,hook_event_name:'Stop'},options);
+  const review={...event,turn_id:'child',transcript_path:child};await handleEvent({...review,hook_event_name:'UserPromptSubmit'},options);await recordTurn(root,review.session_id,review.turn_id,value);await handleEvent({...review,hook_event_name:'Stop'},options);
+  assert.equal((await runLearning(root,{home,context:{...event,learning_qualified:true}})).status,'no-candidate');
+  put(root,'parent-provenance.jsonl',initial+encode([assistant('p'.repeat(500)),user('Routine follow-up')]));
+  put(root,'.geppetto/signals.jsonl',encode([{id:'provenance-signal',key:'provenance-signal',session:'source',source:'user',category:'workflow',status:'open',text:'A user correction.'}]));
+  let prompt;const result=await runLearning(root,{home,context:{...event,learning_qualified:true},execute:async request=>{prompt=request.prompt;return{decision:'no_change',reason:'Existing owner covers the correction.',owner:'README.md'};}});
+  assert.equal(result.status,'unchanged');const supplied=JSON.parse(prompt.match(/Turn records: ([^\n]+)/)[1]);assert.deepEqual(supplied.map(row=>row.turnId),['parent']);
+  const archived=await localRecords(root,'turns');assert.equal(archived.find(row=>row.turnId==='parent').transcriptPath,parent);assert.equal(archived.find(row=>row.turnId==='child').transcriptPath,child);
+});
+
+test('bare legacy offsets and child offsets cannot supply parent calibration evidence', async t => {
+  const root=fixture(t),parent=resolve(root,'source.jsonl'),child=resolve(root,'foreign.jsonl');put(root,'source.jsonl',encode([user('Routine request')]));
+  const record={turnId:'legacy',transcriptOffset:0,requirements:{changes:false},frustration:{applies:false}};
+  const unknown=await transcriptSlice(parent,0,false,[record,{...record,turnId:'child',transcriptPath:child}]);assert.equal(unknown.candidate,false);assert.deepEqual(unknown.turns,[]);
+  const known=await transcriptSlice(parent,0,false,[{...record,turnId:'parent',transcriptPath:parent}]);assert.equal(known.candidate,true);assert.deepEqual(known.turns.map(row=>row.turnId),['parent']);
 });

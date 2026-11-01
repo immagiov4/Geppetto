@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, exists } from './common.mjs';
-import { messageCheckpoint, withTurnLock } from './turn-messages.mjs';
+import { messageCheckpoint, withTurnLock, turnStatePath, readTurnState } from './turn-messages.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
 import { redact, localRecords } from './signal.mjs';
@@ -18,7 +18,6 @@ function sectionFeedback(body, cwd, runCommand) {
   if (result.status === 0) return 'Geppetto: PR sections pass.';
   return `Geppetto PR feedback: ${redact(result.stderr?.trim() || result.error?.message || 'Section check failed')}. Update the PR body before publishing; CI repeats this check.`; }
 const digest = text => createHash('sha256').update(text).digest('hex');
-const turnStatePath = (root, session) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}.json`);
 const decisionPath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `decision-${digest(session)}-${digest(turn)}.json`);
 const currentState = state => state && typeof state.turn === 'string' && typeof state.epoch === 'string' && typeof state.worktree === 'string' && typeof state.base === 'string' && typeof state.snapshot === 'string' ? state : null;
 const currentDecision = decision => decision && typeof decision.epoch === 'string' && decision.value && Array.isArray(decision.decisions) && decision.decisions.length ? decision : null;
@@ -54,7 +53,7 @@ function turnDecision(value, checks) {
   }
   return value; }
 export async function recordTurn(root, session, turn, value) { return withTurnLock(`${turnStatePath(root, session)}.lock`, async () => {
-  const state = currentState(await jsonFile(turnStatePath(root, session), null)); turn ??= state?.turn;
+  const state = currentState(await readTurnState(root, session, turn)); turn ??= state?.turn;
   if (!state || state.turn !== turn) throw new UsageError('No matching active session and turn; use the command supplied by PreToolUse.');
   const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && state.epoch !== state.userEpoch && previous !== null; const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
   if ((renewed || state.epoch === state.userEpoch) && value?.continuation) throw new UsageError('A new user message or renewed feedback requires explicit decisions.');
@@ -133,7 +132,12 @@ async function completionEvent(event) {
   if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return {};
   if (!Number.isSafeInteger(policy.threshold) || policy.threshold <= 0 || ![policy.docGlobs, policy.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string'))) throw new UsageError('Invalid hooks.reviewGate threshold or globs.');
   return withTurnLock(`${turnStatePath(root, event.session_id)}.lock`, async () => {
-  const statePath = turnStatePath(root, event.session_id); let state = currentState(await jsonFile(statePath, null)), fresh = false, checkpoint, checkpointError;
+  const statePath = turnStatePath(root, event.session_id); let state = currentState(await jsonFile(statePath, null)), fresh = false, resumedTurn = false, checkpoint, checkpointError;
+  if (state && event.turn_id && state.turn !== event.turn_id) {
+    await atomicJson(turnStatePath(root, event.session_id, state.turn), state);
+    const resumed = currentState(await jsonFile(turnStatePath(root, event.session_id, event.turn_id), null));
+    if (resumed) { state = resumed; resumedTurn = true; await atomicJson(statePath, state); }
+  }
   if (kind === 'UserPromptSubmit' && !event.turn_id && state?.transcript_path) {
     try { checkpoint = await messageCheckpoint(event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state.transcript_path, state.promptCursor); }
     catch (error) { checkpointError = error; }
@@ -153,6 +157,7 @@ async function completionEvent(event) {
       if (!state.messageError) { state.messageError = error.code ?? 'invalid-transcript'; await atomicJson(statePath, state); await logHookEvent(root, { hook: 'turnGate', status: 'transcript-unavailable', reason: state.messageError, modelCalls: 0 }, event); }
     }
     if (checkpoint) {
+      if (resumedTurn) await logHookEvent(root, { hook: 'turnGate', status: 'resumed', bytesRead: checkpoint.bytesRead, modelCalls: 0 }, event);
       if (checkpoint.userMessage && state.initialMessagePending) {
         state.initialMessagePending = false;
         const prior = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null));
@@ -189,8 +194,8 @@ async function completionEvent(event) {
   await logHookEvent(root, { hook: 'reviewGate', status, lines, sinceReview, hash: current.hash }, event);
   if (staged && !block) {
     const marker = `${decisionPath(root, event.session_id, state.turn)}.recorded`; if (await claimFile(marker)) try {
-      const transcriptOffset = event.transcript_path ? (await lstat(event.transcript_path)).size : null; const decisions = staged.decisions, first = decisions[0]; const edited = await lstat(`${decisionPath(root, event.session_id, state.turn)}.edited`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
-      await appendRecord(root, 'turns', { ...staged.value, requestedAt: first.requestedAt, decidedAt: first.decidedAt, decisions, userDecisionIndex: staged.userDecisionIndex ?? 0, edited, addedSeconds: decisions.reduce((sum, d) => sum + Math.max(0, Date.parse(d.decidedAt) - Date.parse(d.requestedAt)) / 1000, 0), review: { status, lines, sinceReview, hash: current.hash }, sessionId: event.session_id, turnId: state.turn, previousTurnId: state.previousTurnId, ts: new Date().toISOString(), transcriptOffset });
+      const transcriptPath = state.transcript_path ?? null, transcriptOffset = transcriptPath ? (await lstat(transcriptPath)).size : null; const decisions = staged.decisions, first = decisions[0]; const edited = await lstat(`${decisionPath(root, event.session_id, state.turn)}.edited`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
+      await appendRecord(root, 'turns', { ...staged.value, requestedAt: first.requestedAt, decidedAt: first.decidedAt, decisions, userDecisionIndex: staged.userDecisionIndex ?? 0, edited, addedSeconds: decisions.reduce((sum, d) => sum + Math.max(0, Date.parse(d.decidedAt) - Date.parse(d.requestedAt)) / 1000, 0), review: { status, lines, sinceReview, hash: current.hash }, sessionId: event.session_id, turnId: state.turn, previousTurnId: state.previousTurnId, ts: new Date().toISOString(), transcriptPath, transcriptOffset });
       await logHookEvent(root, { hook: 'turnGate', status: 'recorded' }, event);
     } catch (error) { await unlink(marker); throw error; }
   }

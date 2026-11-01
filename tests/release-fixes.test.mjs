@@ -23,12 +23,12 @@ test('learner provider input redacts untruncated secrets in transcripts, signals
   const root = project(t), home = fixture(t), secret = 'sk-proj-SYNTHETIC0123456789ABCDEF';
   put(root, '.geppetto/config.json', config());
   put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'secret', key: 'secret', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: `No, fix api_key=${secret}` }]));
-  put(root, '.geppetto/turns.jsonl', jsonl([{ ...decision, feedback: { applies: true, on: secret, action: 'Correct the credential owner.' }, sessionId: 'privacy', transcriptOffset: 0 }]));
   const transcript = resolve(home, 'transcript.jsonl');
+  put(root, '.geppetto/turns.jsonl', jsonl([{ ...decision, feedback: { applies: true, on: secret, action: 'Correct the credential owner.' }, sessionId: 'privacy', transcriptPath: transcript, transcriptOffset: 0 }]));
   put(home, 'transcript.jsonl', jsonl([user(`No, fix api_key=${secret}`), { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: `echo ${secret}` } }, { type: 'tool_result', is_error: true, content: `Error: ${secret}` }] } }, { type: 'response_item', payload: { type: 'function_call_output', output: `Error: ${secret}` } }, user('No, keep this correction.')]));
   let captured;
   const result = await runLearning(root, { home, context: { learning_qualified: true, session_id: 'privacy', transcript_path: transcript }, execute: async request => { captured = request.prompt; return { decision: 'no_change', reason: 'Synthetic evidence already covered.', owner: 'app.mjs' }; } });
-  assert.equal(result.status, 'unchanged'); assert.ok(captured.includes('keep this correction'));
+  assert.equal(result.status, 'unchanged'); assert.ok(captured.includes('keep this correction')); assert.ok(captured.includes('Correct the credential owner.'));
   assert.ok(!captured.includes(secret), captured); assert.match(captured, /REDACTED/);
   const pem = '-----BEGIN PRIVATE KEY-----\n' + 'SYNTHETIC_KEY_MATERIAL'.repeat(40) + '\n-----END PRIVATE KEY-----';
   put(home, 'pem.jsonl', jsonl([{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { text: pem } }, { type: 'tool_result', is_error: true, content: pem }] } }]));

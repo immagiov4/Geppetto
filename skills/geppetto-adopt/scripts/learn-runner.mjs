@@ -86,16 +86,17 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
     const { path: statePath, state } = await learningState(root);
     const pending = await eligibleSignals(root); let slice, cursorPath;
     if ((event.learning_qualified || pending.length) && event.transcript_path && event.session_id) {
-      cursorPath = resolve(root, '.geppetto/hook-state', createHash('sha256').update(event.session_id).digest('hex'), 'transcript.json');
-      const cursor = await jsonFile(cursorPath, {}); const turns = (await localRecords(root, 'turns', { currentWorktree: true })).filter(turn => turn.sessionId === event.session_id);
-      try { slice = await transcriptSlice(event.transcript_path, cursor.path === event.transcript_path ? cursor.offset : 0, event.review_blocked, turns); } catch (error) { await logHookEvent(root, { hook: 'learning', status: 'blocked', reason: 'Event transcript unavailable.', error: error.code ?? 'invalid-transcript', modelCalls: 0 }, event); slice = null; }
+      const directory = resolve(root, '.geppetto/hook-state', createHash('sha256').update(event.session_id).digest('hex')), transcript = resolve(event.transcript_path);
+      cursorPath = resolve(directory, `transcript-${createHash('sha256').update(transcript).digest('hex')}.json`);
+      const cursor = await jsonFile(cursorPath, null) ?? await jsonFile(resolve(directory, 'transcript.json'), {}); const turns = (await localRecords(root, 'turns', { currentWorktree: true })).filter(turn => turn.sessionId === event.session_id);
+      try { slice = await transcriptSlice(transcript, cursor.path && resolve(cursor.path) === transcript ? cursor.offset : 0, event.review_blocked, turns); } catch (error) { await logHookEvent(root, { hook: 'learning', status: 'blocked', reason: 'Event transcript unavailable.', error: error.code ?? 'invalid-transcript', modelCalls: 0 }, event); slice = null; }
       if (slice?.skipped) {
         await logHookEvent(root, { hook: 'learning', status: 'idle', skipped: slice.skipped, modelCalls: 0 }, event);
-        await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: event.transcript_path, offset: slice.offset });
+        await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: resolve(event.transcript_path), offset: slice.offset });
         return { status: 'idle', skipped: slice.skipped };       }
       if (slice && !slice.candidate) {
-        if (slice.text) await logHookEvent(root, { hook: 'learning', status: 'no-candidate', bytes: Buffer.byteLength(slice.text), modelCalls: 0 }, event);
-        await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: event.transcript_path, offset: slice.offset });
+        if (slice.text) await logHookEvent(root, { hook: 'learning', status: 'no-candidate', bytes: Buffer.byteLength(slice.text), bytesRead: slice.bytesRead, modelCalls: 0 }, event);
+        await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: resolve(event.transcript_path), offset: slice.offset });
         if (!pending.length) return { status: slice.text ? 'no-candidate' : 'idle' };
         slice = null;
       }
@@ -130,7 +131,7 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
     const result = { status, branch, path, ...context, sessionContext, assessment, evidence, lastId: pending.at(-1)?.id ?? state.lastId ?? null };
     if (status !== 'staged' && evidence.length) await resolveSignals(root, evidence, { reference: status === 'committed' ? git(path, ['rev-parse', 'HEAD']).trim() : `no-change:${id}`, paths, through: Object.fromEntries(pending.map(row => [row.key, row.id])), reason: assessment.reason });
     await atomicJson(statePath, result); await logHookEvent(root, { hook: 'learning', ...result }, event);
-    if (slice) { await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: event.transcript_path, offset: slice.offset }); }
+    if (slice) { await ignoreLocalFiles(root, ['/hook-state/']); await atomicJson(cursorPath, { path: resolve(event.transcript_path), offset: slice.offset }); }
     return result;
   } finally { await lock.close(); await unlink(lockPath); }
 }
