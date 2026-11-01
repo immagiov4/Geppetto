@@ -1,3 +1,4 @@
+import { learningDelivery } from './learning-delivery.mjs';
 import { appendFile, mkdir, readFile, unlink, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,14 @@ import { redact, eligibleSignals, signalArchive, learningPolicy, localRecords } 
 export { launchLearning } from './common.mjs';
 /** Record tool starts; completion adds learning context once per qualifying turn. */
 export async function learningEvent(event, now, launch = launchLearning) {
+  const result = await learningActivity(event, now, launch);
+  const delivery = await learningDelivery(event);
+  if (!delivery) return result;
+  if (result.hookSpecificOutput) result.hookSpecificOutput.additionalContext += '\n' + delivery;
+  else result.hookSpecificOutput = { hookEventName: event.hook_event_name, additionalContext: delivery };
+  return result;
+}
+async function learningActivity(event, now, launch = launchLearning) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const kind = event.hook_event_name ?? 'PreToolUse';
   if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active && kind !== 'Stop') return {};

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.3
+
+- Deliver retained background learning commits through internal tool context so the working session can verify and integrate them.
+- Preserve pending proposals across later runs and record integration decisions separately for each checkout.
+
 ## 0.8.2
 
 - Let background learning inspect redacted session messages, successful tool results and project configuration through its existing read-only file capability.
