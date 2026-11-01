@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.2
+
+- Let background learning inspect redacted session messages, successful tool results and project configuration through its existing read-only file capability.
+- Keep additional context in indexed pages loaded on demand; report missing sources and preserve the project-only write boundary.
+
 ## 0.8.1
 
 - Record learning verification before editing, based on the actual scope of shared defaults and cross-cutting changes.

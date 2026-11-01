@@ -50,14 +50,23 @@ export async function recordSignal(root, input, { launch } = {}) {
   if (previous?.category && previous.category !== input.category) throw new UsageError(`Key ${previous.key} uses category ${previous.category}; maintenance owns category changes.`);
   if (previous?.status.startsWith('merged-into:')) throw new UsageError(`Use ${previous.status.slice('merged-into:'.length)} instead.`);
   if (source !== 'user' && previous?.status === 'open' && previous.sessions.includes(input.session)) return { duplicate: true, key: input.key };
-  const clean = value => typeof value === 'string' ? redact(value) : Array.isArray(value) ? value.map(clean) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, child]) => [key, clean(child)])) : value; const entry = clean({ ...input, transcript_path: active.transcript_path, source, id: randomUUID(), ts: new Date().toISOString(), status: 'open' });
+  const entry = redactValue({ ...input, transcript_path: active.transcript_path, source, id: randomUUID(), ts: new Date().toISOString(), status: 'open' });
   await appendRecord(root, 'signals', entry);
   if (policy.enabled !== false && process.env.GEPPETTO_LEARNING_CHILD !== '1' && (await eligibleSignals(root)).some(row => row.key === input.key)) await (launch ?? launchLearning)({ cwd: root, session_id: input.session, turn_id: input.turn ?? active.turn, transcript_path: active.transcript_path, signal_qualified: true });
   return entry; }
+const credentialName = String.raw`[a-z\d_]*(?:api[_-]?key|token|secret|password)`;
+const credentialProperty = new RegExp(String.raw`\b${credentialName}$`, 'i');
+const credentialAssignment = new RegExp(String.raw`\b(${credentialName})["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)`, 'gi');
+export function redactValue(value) {
+  if (typeof value === 'string') return redact(value);
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, credentialProperty.test(key) ? '[REDACTED]' : redactValue(child)]));
+  return value;
+}
 export function redact(text) {
   return text.replace(/\b(?:sk-(?:proj-|or-v1-)?[a-z\d_-]{12,}|gh[pousr]_[a-z\d_]{12,}|github_pat_[a-z\d_]{12,}|AKIA[A-Z\d]{16})\b/gi, '[REDACTED]')
     .replace(/\b(Bearer)\s+[^\s"']+/gi, '$1 [REDACTED]')
-    .replace(/\b([a-z\d_]*(?:api[_-]?key|token|secret|password))["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)/gi, '$1=[REDACTED]')
+    .replace(credentialAssignment, '$1=[REDACTED]')
     .replace(/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )?PRIVATE KEY-----/g, '[REDACTED]')
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[REDACTED]@');
 }

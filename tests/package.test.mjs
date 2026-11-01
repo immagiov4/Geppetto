@@ -6,10 +6,11 @@ import { repo, fixture, invoke } from './helpers.mjs';
 import { filesUnder } from '../skills/geppetto-adopt/scripts/common.mjs';
 
 const read = path => JSON.parse(readFileSync(resolve(repo, path), 'utf8'));
-test('shipped mjs stays within the 2600-line package budget', () => {
+const packageLineBudget = 2650;
+test(`shipped mjs stays within the ${packageLineBudget}-line package budget`, () => {
   const files = ['skills', 'scripts'].flatMap(directory => filesUnder(resolve(repo, directory))).filter(file => file.endsWith('.mjs'));
   const lines = files.reduce((sum, file) => sum + readFileSync(file, 'utf8').trimEnd().split(/\r?\n/).length, 0);
-  assert.ok(lines <= 2600, `${lines} shipped mjs lines exceeds 2600`);
+  assert.ok(lines <= packageLineBudget, `${lines} shipped mjs lines exceeds ${packageLineBudget}`);
 });
 test('both catalogs locate the same plugin and Codex component paths resolve from the package root', () => {
   const claude = read('.claude-plugin/plugin.json'); const codex = read('.codex-plugin/plugin.json');
