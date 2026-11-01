@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+
+- Complete authorized memory updates with commits and remote synchronization, including scheduled maintenance; preserve explicitly local-only delivery.
+
 ## 0.10.0
 
 - Make question generation followed by investigation the default code-review strategy across runtimes and the CLI; retain the generic strategy for explicit requests and comparisons.
