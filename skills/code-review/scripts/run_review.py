@@ -68,13 +68,9 @@ def validate(value, schema):
         require(value >= schema.get("minimum", 0), "Number outside range")
 
 
-def location(case, finding, changed):
-    relative = finding["file"]
-    side = "after" if (case / "after" / relative).exists() else "before"
-    path = case / side / relative
-    require(relative in changed and Path(relative).as_posix() == relative,
-            "Finding outside changed paths")
-    require(path.resolve().is_relative_to(case / side) and path.is_file(), "Finding without source")
+def location(case, finding):
+    path = question_source(case, finding["file"])
+    side = "after" if path.is_relative_to(case / "after") else "before"
     lines = len(path.read_text(encoding="utf-8").splitlines())
     require(1 <= finding["line_start"] <= finding["line_end"] <= lines,
             "Finding range outside source")
@@ -86,7 +82,7 @@ def validate_search(case, response, changed, schema):
     ids = [finding["id"] for finding in response["findings"]]
     require(len(ids) == len(set(ids)), "Duplicate identifiers")
     for finding in response["findings"]:
-        location(case, finding, changed)
+        location(case, finding)
     covered = [entry["file"] for entry in response["coverage"]]
     require(len(covered) == len(set(covered)) and set(covered) == set(changed),
             "Coverage differs from changed paths")
@@ -309,7 +305,7 @@ def verify_response(case, response, candidates, changed, schema):
         if decision["decision"] != "accept":
             require(decision["canonical_id"] == "-", "Excluded decision has a canonical reference")
     for finding in accepted:
-        location(case, finding, changed)
+        location(case, finding)
     return accepted
 
 
@@ -397,7 +393,7 @@ def main(args):
         lines += [f"Sum of serial call durations: {summary['elapsed_seconds']} seconds.",
                   f"Total recorded usage: {json.dumps(summary['usage'], ensure_ascii=False)}.", ""]
         for finding in findings:
-            side = location(args.case, finding, changed)
+            side = location(args.case, finding)
             lines += [f"- {finding['severity']} {side}/{finding['file']}:{finding['line_start']} — {finding['title']}",
                       f"  {finding['trigger']} → {finding['consequence']}", f"  Evidence: {finding['evidence']}",
                       f"  Contract: {finding['contract_basis']}"]
@@ -463,10 +459,10 @@ def selfcheck():
         require(verify_response(case, valid, [first, second], ["a.py"], schema) == [first], "Valid deduplication rejected")
         (case / "before").mkdir()
         source.rename(case / "before/a.py")
-        require(location(case, first, ["a.py"]) == "before", "Incorrect deleted-file location")
+        require(location(case, first) == "before", "Incorrect deleted-file location")
         require(verify_response(case, valid, [first, second], ["a.py"], schema) == [first], "Valid deleted-file finding rejected")
         try:
-            location(case, invalid, ["a.py"])
+            location(case, invalid)
         except ValueError:
             pass
         else:

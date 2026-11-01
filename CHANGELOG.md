@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.4
+
+- Keep review findings anchored in unchanged consumers eligible for separate confirmation, while validating source paths and line ranges.
+
 ## 0.10.3
 
 - Preserve parent-turn assessments and transcript cursors while subagents run in the same session, avoiding repeated full transcript reads on return.

@@ -161,6 +161,27 @@ class ReviewStrategyTests(unittest.TestCase):
         self.assertEqual(set(result), {'findings','decisions','coverage','limitations'})
         self.assertIn('C-1', self.calls[2][1])
 
+    def test_consumer_finding_reaches_confirmation_and_final_report(self):
+        finding = {'id': 'C-1', 'severity': 'P2', 'file': 'consumer.py', 'line_start': 1, 'line_end': 1,
+                   'title': 'Changed producer breaks existing consumer', 'trigger': 'Changed value reaches consumer',
+                   'consequence': 'Wrong output', 'evidence': 'producer.py:1 → consumer.py:1',
+                   'contract_basis': 'Preserve the consuming behavior.'}
+        self.report['findings'] = [finding]
+        self.triage['status'] = 'reported'
+        self.outputs['verify'] = {'accepted_findings': [finding], 'decisions': [
+            {'id': 'C-1', 'decision': 'accept', 'evidence': 'Confirmed changed producer breaks consumer.',
+             'canonical_id': 'C-1'}], 'limitations': []}
+        result = self.run_review()
+        self.assertEqual([label for label, _ in self.calls], ['questions', 'investigate', 'verify'])
+        self.assertEqual(result['findings'], [finding])
+        self.assertIn('consumer.py', (self.args.output / 'report.md').read_text(encoding='utf8'))
+
+    def test_finding_source_cannot_escape_case_or_exceed_real_lines(self):
+        for relative, line in (('../contract.md', 1), ('missing.py', 1), ('consumer.py', 2)):
+            with self.subTest(relative=relative, line=line):
+                with self.assertRaises(ValueError):
+                    runner.location(self.case, {'file': relative, 'line_start': line, 'line_end': line})
+
     def test_question_cannot_escape_case(self):
         self.question['file'] = '../contract.md'
         self.assert_failure('source path', ['questions'])
