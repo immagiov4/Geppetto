@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0
+
+- Make question generation followed by investigation the default code-review strategy across runtimes and the CLI; retain the generic strategy for explicit requests and comparisons.
+
 ## 0.9.0
 
 - Add a selectable question-generation and investigation strategy to code review, followed by independent finding confirmation.

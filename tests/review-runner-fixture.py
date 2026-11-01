@@ -4,6 +4,8 @@ from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -80,6 +82,22 @@ class ReviewStrategyTests(unittest.TestCase):
         self.args.strategy = 'generic'
         self.run_review()
         self.assertEqual([label for label, _ in self.calls], ['search-1', 'search-2', 'verify'])
+
+    def test_cli_defaults_to_questions_and_preserves_explicit_generic(self):
+        for strategy, first in ((None, 'questions'), ('generic', 'search-1')):
+            with self.subTest(strategy=strategy):
+                output = self.case.parent / (strategy or 'default-output')
+                command = [sys.executable, '-B', str(SOURCE), '--case', str(self.case), '--output', str(output),
+                           '--codex', str(self.case.parent / 'missing-codex-executable'), '--timeout-seconds', '1']
+                if strategy:
+                    command += ['--strategy', strategy]
+                result = subprocess.run(command, capture_output=True, text=True,
+                                        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), timeout=30)
+                self.assertEqual(result.returncode, 1)
+                metrics = json.loads((output / 'metrics.json').read_text(encoding='utf8'))
+                self.assertEqual(metrics['strategy'], strategy or 'questions')
+                self.assertEqual(metrics['calls'][0]['stage'], first)
+                self.assertEqual(metrics['calls'][0]['status'], 'failed')
 
     def test_no_questions_still_investigates_and_confirms(self):
         self.outputs['questions']['questions'] = []

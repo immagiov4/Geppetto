@@ -533,7 +533,8 @@ if __name__ == "__main__":
         parser.add_argument("--model", default=MODEL, help=f"Codex model (default: {MODEL})")
         parser.add_argument("--effort", choices=("medium", "xhigh"), default="medium")
         parser.add_argument("--effort-reason")
-        parser.add_argument("--strategy", choices=("generic", "questions"), default="generic")
+        parser.add_argument("--strategy", choices=("generic", "questions"), default="questions",
+                            help="Review strategy (default: questions; generic for explicit comparisons or requests)")
         parser.add_argument("--tool-budget", type=int, default=24, help="Instructed tool calls per session; not a hard cap")
         try:
             main(parser.parse_args())

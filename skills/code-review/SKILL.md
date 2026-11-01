@@ -7,7 +7,7 @@ description: "Review a branch, PR or local changes with an available verificatio
 
 Produce a report on an identified change, with findings supported by real paths, checked locations, coverage and limitations. Use the runtime selected during adoption or discover a suitable installed CLI, application or harness. The result is an assisted review of the change, with the evidence level stated for each finding.
 
-Use this as the baseline code-review procedure. Fix sources and contract, run independent searches and verify each candidate before confirming it. Read [process execution](../geppetto-adopt/references/processes.md) before launching tools; the current task's model, service-tier and delegation restrictions govern invocation.
+Use this as the baseline code-review procedure: generate source-based questions, investigate them in a fresh session and independently verify each candidate. Use the generic two-search strategy only for an explicit request or a comparison. Read [process execution](../geppetto-adopt/references/processes.md) before launching tools; the current task's model, service-tier and delegation restrictions govern invocation.
 
 ## Choose the review runtime
 
@@ -45,13 +45,13 @@ If applicable instructions request another model, record the authorized decision
 
 The script selects `gpt-6.1-sol` by default; use `--model <model>` to select the authorized model. It passes the selected model with `-m`, sets `review_model` in the same process and uses `model_reasoning_effort=medium`. It verifies model and effort in session `turn_context` data. A different model, missing context or failed request stops the procedure. `--effort xhigh` requires `--effort-reason` and complexity justifying the authorized level.
 
-Choose `--strategy questions` for source-based question generation followed by investigation; `generic` remains the default. Both use two discovery sessions and a separate confirmation. `--tool-budget` defaults to 24 instructed calls per session; `--timeout-seconds` sets the enforced process deadline. A tool-count instruction is not an enforced cap. The same model, effort, frozen source and limits apply to every stage.
+The runner defaults to `--strategy questions`: source-based question generation followed by investigation. Use `--strategy generic` only for an explicit request or a comparison. Both use two discovery sessions and a separate confirmation. `--tool-budget` defaults to 24 instructed calls per session; `--timeout-seconds` sets the enforced process deadline. A tool-count instruction is not an enforced cap. The same model, effort, frozen source and limits apply to every stage.
 
 `--ignore-user-config` keeps overrides within the run and reuses existing authentication. `--sandbox read-only` and `-a never` regulate reviewer tools. Instructions restrict reads to the case; read-only protection prevents writes but permits external reads. The coordinator checks transcripts for actual scope.
 
 ## Assess evidence
 
-For `generic`, run two searches in distinct sessions: contract and correctness; flows, regressions and security. The second receives the same material as the first.
+Use `questions` by default through every review runtime. For an explicit `generic` request or comparison, run two searches in distinct sessions: contract and correctness; flows, regressions and security. The second receives the same material as the first.
 
 For `questions`, the first fresh session reads the change and relevant consumers, producing up to 20 concrete questions without padding or asserting defects. Each gives a source anchor, observed fact, question, evidence needed and relationship examined. The second fresh session receives the same case, every valid question and the ordinary review brief. Questions are leads, not proof. Follow the value, error or readiness condition through handoffs to its effective consumer or observable outcome. Forwarding it intact does not settle downstream behavior. For regressions compare the previously successful path with the target, including reused results and fast returns. Account for each question as `reported`, `no_issue`, `suspected_unverified` or `not_examined`, with checked sources and the last checked consumer. A necessary untraced handoff stays uncertain or unexamined. Material test defects require a concrete assertion or fixture blind spot. Retain public source observations, not private reasoning transcripts. Keep ordinary findings separate from question dispositions.
 
