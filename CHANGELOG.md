@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.2
+
+- Recognize user messages received during an active native turn before the next edit, and attribute learning signals to their current user assessment.
+- Read appended transcript records through a local cursor, preserving separate handling for tool results and review feedback.
+- Keep learning reminders eligible for qualifying steering messages within the same native turn.
+
 ## 0.10.1
 
 - Complete authorized memory updates with commits and remote synchronization, including scheduled maintenance; preserve explicitly local-only delivery.

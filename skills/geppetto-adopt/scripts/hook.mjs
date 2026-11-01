@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, exists } from './common.mjs';
+import { messageCheckpoint, withTurnLock } from './turn-messages.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
 import { redact, localRecords } from './signal.mjs';
@@ -35,7 +36,7 @@ async function sessionStart(event, options) {
   const policy = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); if (!policy.checks.length) return memory;
   await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
   if (!await claimFile(`${turnStatePath(root, event.session_id)}.startup`)) return memory;
-  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }])); const text = `Before the first file-modifying tool call of a turn, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\n${foundationReminder} Judge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
+  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }])); const text = `Before the first file-modifying tool call after each user message, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\n${foundationReminder} Judge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
   try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
   catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; }
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
@@ -52,17 +53,17 @@ function turnDecision(value, checks) {
     for (const name of reasons) if ((section[flag] || name in section) && (typeof section[name] !== 'string' || /[\r\n]/.test(section[name]) || section[flag] && placeholderReason(section[name]))) throw new UsageError(`Turn ${id}.${name} needs a meaningful one-line reason.`);
   }
   return value; }
-export async function recordTurn(root, session, turn, value) {
+export async function recordTurn(root, session, turn, value) { return withTurnLock(`${turnStatePath(root, session)}.lock`, async () => {
   const state = currentState(await jsonFile(turnStatePath(root, session), null)); turn ??= state?.turn;
   if (!state || state.turn !== turn) throw new UsageError('No matching active session and turn; use the command supplied by PreToolUse.');
-  const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && previous !== null; const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
-  if (renewed && value?.continuation) throw new UsageError('Renewed feedback requires an explicit decision.');
+  const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && state.epoch !== state.userEpoch && previous !== null; const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
+  if ((renewed || state.epoch === state.userEpoch) && value?.continuation) throw new UsageError('A new user message or renewed feedback requires explicit decisions.');
   turnDecision(value, renewed && value && Object.keys(value).every(key => ['feedback', 'userCorrection'].includes(key)) ? required : checks);
   const decidedAt = new Date().toISOString(); let requestedAt = decidedAt;
   try { requestedAt = await readFile(`${path}.${state.epoch}.requested`, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const merged = renewed ? { ...previous?.value, ...value } : value; if (renewed) delete merged.continuation; const history = previous?.epoch === state.epoch ? previous.decisions.slice(0, -1) : previous?.decisions ?? []; const decisions = [...history, { requestedAt, decidedAt, decision: merged }];
-  await atomicJson(path, { value: merged, epoch: state.epoch, decisions }, { mode: 0o600 }); return merged;
-}
+  await atomicJson(path, { value: merged, epoch: state.epoch, userEpoch: state.userEpoch, userDecisionIndex: state.userDecisionIndex ?? 0, decisions }, { mode: 0o600 }); return merged;
+}); }
 async function editingEvent(root, state, statePath, event, policy) {
   const path = decisionPath(root, event.session_id, state.turn), staged = currentDecision(await jsonFile(path, null));
   if (event.hook_event_name === 'PostToolUse') {
@@ -72,12 +73,13 @@ async function editingEvent(root, state, statePath, event, policy) {
       state.worktree = worktree; await atomicJson(statePath, state);
     }
     if (policy.checks.some(check => check.id === 'feedback') && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
+      if (state.epoch === state.userEpoch && staged?.epoch !== state.epoch) return {};
       const epoch = randomUUID(); await atomicJson(statePath, { ...state, epoch, ...(state.shellPending === state.epoch ? { shellPending: epoch } : {}) }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event);
     } return {};
   }
   if (!modifyingTool(event) && state.shellPending !== state.epoch) return {};
   if (policy.checks.length && staged?.epoch !== state.epoch && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString())) {
-    const needed = !staged || state.epoch === 'initial' ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
+    const needed = !staged || state.epoch === 'initial' || state.epoch === state.userEpoch ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
     await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: needed.map(check => check.id) }, event);
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${foundationReminder} Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };   }
   await claimFile(`${path}.edited`); return {};
@@ -130,14 +132,45 @@ async function completionEvent(event) {
   const root = await projectRoot(event.cwd ?? '.'); const policy = await reviewPolicy(root);
   if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return {};
   if (!Number.isSafeInteger(policy.threshold) || policy.threshold <= 0 || ![policy.docGlobs, policy.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string'))) throw new UsageError('Invalid hooks.reviewGate threshold or globs.');
-  const statePath = turnStatePath(root, event.session_id); let state = currentState(await jsonFile(statePath, null));
-  if (kind === 'UserPromptSubmit' || !state || event.turn_id && state.turn !== event.turn_id) {
+  return withTurnLock(`${turnStatePath(root, event.session_id)}.lock`, async () => {
+  const statePath = turnStatePath(root, event.session_id); let state = currentState(await jsonFile(statePath, null)), fresh = false, checkpoint, checkpointError;
+  if (kind === 'UserPromptSubmit' && !event.turn_id && state?.transcript_path) {
+    try { checkpoint = await messageCheckpoint(event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state.transcript_path, state.promptCursor); }
+    catch (error) { checkpointError = error; }
+  }
+  if (!state || (event.turn_id ? state.turn !== event.turn_id : kind === 'UserPromptSubmit' && (!checkpoint || checkpoint.userMessage))) {
     await ignoreLocalFiles(root, ['/turns.jsonl', '/reviews.jsonl', '/hook-state/', '/hook-events.jsonl']);
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
-    state = { transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: 'initial', base, worktree: await worktreeFingerprint(root), ...(await reviewSnapshot(root, base, policy)) };
-    await atomicJson(statePath, state); if (kind === 'UserPromptSubmit') return {};
+    const prior = event.turn_id ? currentDecision(await jsonFile(decisionPath(root, event.session_id, event.turn_id), null)) : null;
+    fresh = !prior;
+    state = { transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), ...(await reviewSnapshot(root, base, policy)) };
+    await atomicJson(statePath, state);
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
+  if (policy.enabled !== false && turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})).checks.length) {
+    try { if (checkpointError) throw checkpointError; checkpoint ??= await messageCheckpoint(state.transcript_path, state.promptCursor); }
+    catch (error) {
+      if (!state.messageError) { state.messageError = error.code ?? 'invalid-transcript'; await atomicJson(statePath, state); await logHookEvent(root, { hook: 'turnGate', status: 'transcript-unavailable', reason: state.messageError, modelCalls: 0 }, event); }
+    }
+    if (checkpoint) {
+      if (checkpoint.userMessage && state.initialMessagePending) {
+        state.initialMessagePending = false;
+        const prior = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null));
+        if (!fresh && checkpoint.userMessages === 1 && !prior?.value?.continuation) checkpoint.userMessage = null;
+      }
+      if (!fresh && checkpoint.userMessage && state.userEpoch !== `user-${checkpoint.userMessage}`) {
+        const prior = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null));
+        state.userEpoch = `user-${checkpoint.userMessage}`; state.epoch = state.userEpoch;
+        state.userDecisionIndex = prior?.userEpoch === state.userEpoch ? prior.userDecisionIndex : prior?.decisions.length ?? 0;
+        if (state.shellPending) state.shellPending = state.epoch;
+        await logHookEvent(root, { hook: 'turnGate', status: 'user-message', bytesRead: checkpoint.bytesRead, modelCalls: 0 }, event);
+      }
+      if (JSON.stringify(checkpoint.cursor) !== JSON.stringify(state.promptCursor) || state.messageError) {
+        state.promptCursor = checkpoint.cursor; delete state.messageError; await atomicJson(statePath, state);
+      }
+    }
+  }
+  if (kind === 'UserPromptSubmit') return {};
   if (policy.enabled === false) return {}; if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})));
   if (kind !== 'Stop') return {};
   const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
@@ -157,12 +190,12 @@ async function completionEvent(event) {
   if (staged && !block) {
     const marker = `${decisionPath(root, event.session_id, state.turn)}.recorded`; if (await claimFile(marker)) try {
       const transcriptOffset = event.transcript_path ? (await lstat(event.transcript_path)).size : null; const decisions = staged.decisions, first = decisions[0]; const edited = await lstat(`${decisionPath(root, event.session_id, state.turn)}.edited`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
-      await appendRecord(root, 'turns', { ...staged.value, requestedAt: first.requestedAt, decidedAt: first.decidedAt, decisions, edited, addedSeconds: decisions.reduce((sum, d) => sum + Math.max(0, Date.parse(d.decidedAt) - Date.parse(d.requestedAt)) / 1000, 0), review: { status, lines, sinceReview, hash: current.hash }, sessionId: event.session_id, turnId: state.turn, previousTurnId: state.previousTurnId, ts: new Date().toISOString(), transcriptOffset });
+      await appendRecord(root, 'turns', { ...staged.value, requestedAt: first.requestedAt, decidedAt: first.decidedAt, decisions, userDecisionIndex: staged.userDecisionIndex ?? 0, edited, addedSeconds: decisions.reduce((sum, d) => sum + Math.max(0, Date.parse(d.decidedAt) - Date.parse(d.requestedAt)) / 1000, 0), review: { status, lines, sinceReview, hash: current.hash }, sessionId: event.session_id, turnId: state.turn, previousTurnId: state.previousTurnId, ts: new Date().toISOString(), transcriptOffset });
       await logHookEvent(root, { hook: 'turnGate', status: 'recorded' }, event);
     } catch (error) { await unlink(marker); throw error; }
   }
   let review_blocked = false; try { review_blocked = !['reviewed', 'below-threshold'].includes(status) && (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked }; }
+  return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked }; }); }
 async function dispatch(event, { runCommand = run, now = Date.now, home, launchLearning } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   if (process.env.GEPPETTO_LEARNING_CHILD !== '1') await logReads(event, { home });

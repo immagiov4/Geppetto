@@ -27,15 +27,16 @@ async function learningActivity(event, now, launch = launchLearning) {
   if (!config.enabled && !(kind === 'Stop' && (await localRecords(root, 'signals')).length > 0)) return {};
   for (const key of ['minToolCalls', 'minDurationMs']) if (!Number.isSafeInteger(config[key]) || config[key] <= 0) throw new Error(`${configPath}:1: hooks.learnNudge.${key} must be a positive integer`);
   const session = createHash('sha256').update(event.session_id).digest('hex'); const state = resolve(root, '.geppetto/hook-state', session); const activity = resolve(state, 'activity.jsonl');
+  const active = await jsonFile(resolve(root, '.geppetto/hook-state', `review-turn-${session}.json`), {}), messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
   if (!['PostToolUse', 'Stop'].includes(kind)) {
     await mkdir(state, { recursive: true });
     await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);
-    await appendFile(activity, `${JSON.stringify({ kind, at: now(), id: event.tool_use_id ?? randomUUID(), turn: event.turn_id ?? null })}\n`, { mode: 0o600 });
+    await appendFile(activity, `${JSON.stringify({ kind, at: now(), id: event.tool_use_id ?? randomUUID(), turn: messageTurn ?? null })}\n`, { mode: 0o600 });
     return {};   }
-  const records = await exists(activity) ? (await readFile(activity, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse) : []; const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit'); const calls = records.slice(lastPrompt + 1).filter(record => record.kind === 'PreToolUse' && (!event.turn_id || record.turn === event.turn_id)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
+  const records = await exists(activity) ? (await readFile(activity, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse) : []; const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit'); const calls = records.slice(lastPrompt + 1).filter(record => record.kind === 'PreToolUse' && (!messageTurn || record.turn === messageTurn)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
   const elapsedMs = unique.length ? now() - Math.min(...unique.map(call => call.at)) : 0; const qualified = config.enabled && (unique.length >= config.minToolCalls || elapsedMs >= config.minDurationMs); const signals = kind === 'Stop' && (await eligibleSignals(root)).length > 0;
   if (!qualified && !signals) return {};
-  const turn = event.turn_id || unique[0]?.turn || records[lastPrompt]?.id || unique[0]?.id || 'signals'; const turnHash = createHash('sha256').update(turn).digest('hex'); const fired = resolve(state, `fired-${turnHash}`);
+  const turn = messageTurn || unique[0]?.turn || records[lastPrompt]?.id || unique[0]?.id || 'signals'; const turnHash = createHash('sha256').update(turn).digest('hex'); const fired = resolve(state, `fired-${turnHash}`);
   if (kind === 'Stop' && (event.transcript_path || signals || launch !== launchLearning) && (await jsonFile(configPath, {})).hooks?.signalLearning?.enabled !== false) {
     await mkdir(state, { recursive: true }); await ignoreLocalFiles(root, ['/hook-state/']);
     const started = resolve(state, `started-${turnHash}`);

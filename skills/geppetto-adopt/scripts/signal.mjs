@@ -1,3 +1,4 @@
+import { withTurnLock } from './turn-messages.mjs';
 import { userTurnDecision } from './turn-checks.mjs';
 import { projectRecords } from './project-records.mjs';
 import { resolve } from 'node:path';
@@ -43,7 +44,14 @@ export async function recordSignal(root, input, { launch } = {}) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.key ?? '') || !input.session?.trim() || !input.text?.trim()) throw new UsageError('Signal needs a slug key, session and text.');
   if (input.category === 'other' && !input.evidence?.trim()) throw new UsageError('other requires concrete evidence.');
   if (input.attributes !== undefined && (!input.attributes || typeof input.attributes !== 'object' || Array.isArray(input.attributes))) throw new UsageError('Secondary effects must be an attributes object.');
-  const hash = text => createHash('sha256').update(text).digest('hex'), sessionHash = hash(input.session); const active = await jsonFile(resolve(root, '.geppetto/hook-state', `review-turn-${sessionHash}.json`), {}); const decision = active.turn && (!input.turn || active.turn === input.turn) ? await jsonFile(resolve(root, '.geppetto/hook-state', `decision-${sessionHash}-${hash(active.turn)}.json`), {}) : {}; const turn = userTurnDecision(decision.decisions?.length ? decision : (await localRecords(root, 'turns')).findLast(row => row.sessionId === input.session && (!input.turn || row.turnId === input.turn)));
+  const hash = text => createHash('sha256').update(text).digest('hex'), sessionHash = hash(input.session), statePath = resolve(root, '.geppetto/hook-state', `review-turn-${sessionHash}.json`);
+  const { active, turn } = await withTurnLock(`${statePath}.lock`, async () => {
+    const active = await jsonFile(statePath, {}), current = active.turn && (!input.turn || active.turn === input.turn);
+    const decision = current ? await jsonFile(resolve(root, '.geppetto/hook-state', `decision-${sessionHash}-${hash(active.turn)}.json`), {}) : {};
+    if (current && active.userEpoch && active.userEpoch === active.epoch && decision.epoch !== active.epoch) throw new UsageError('Record the new user message with hook.mjs --record-turn before classifying its signal.');
+    const row = decision.decisions?.length ? decision : (await localRecords(root, 'turns')).findLast(row => row.sessionId === input.session && (!input.turn || row.turnId === input.turn));
+    return { active, turn: userTurnDecision(row?.decisions?.length ? { decisions: row.decisions.slice(row.userDecisionIndex ?? 0) } : row) };
+  });
   const flagged = turn?.feedback?.applies === true || turn?.frustration?.applies === true, source = input.source ?? (flagged ? 'user' : 'agent');
   if (!['user', 'agent'].includes(source) || source === 'user' && !flagged) throw new UsageError('source must agree with the flagged feedback/frustration in the turn record.');
   const previous = (await signalArchive(root)).find(row => row.key === input.key);

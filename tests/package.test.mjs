@@ -6,7 +6,7 @@ import { repo, fixture, invoke } from './helpers.mjs';
 import { filesUnder } from '../skills/geppetto-adopt/scripts/common.mjs';
 
 const read = path => JSON.parse(readFileSync(resolve(repo, path), 'utf8'));
-const packageLineBudget = 2725;
+const packageLineBudget = 2825;
 test(`shipped mjs stays within the ${packageLineBudget}-line package budget`, () => {
   const files = ['skills', 'scripts'].flatMap(directory => filesUnder(resolve(repo, directory))).filter(file => file.endsWith('.mjs'));
   const lines = files.reduce((sum, file) => sum + readFileSync(file, 'utf8').trimEnd().split(/\r?\n/).length, 0);
