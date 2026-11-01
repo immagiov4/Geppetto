@@ -9,7 +9,7 @@ import { connectCodex, hookTrust, samePath } from './codex-hook-trust.mjs';
 import { reconcileMachine } from './machine.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
 import { memoryQuestion, memoryDescription } from './memory-setup.mjs';
-import { maintenanceJobs, compileIntegrations } from './maintenance.mjs';
+import { maintenanceJobs, compileIntegrations, integrationFiles } from './maintenance.mjs';
 import { validateTurnPolicy } from './turn-checks.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 // Git checkouts can differ in text line endings while containing the same package.
@@ -54,7 +54,7 @@ async function desiredFiles({ target, uninstall, root, source, previous, install
     if (keepProjectPR && name.startsWith('write-pr/')) continue;
     desired.set(`${skillDir}/${name}`, await readFile(source));
   }
-  if (!plugin && await exists(resolve(sourceRoot, 'integrations'))) for (const path of filesUnder(resolve(sourceRoot, 'integrations'))) desired.set(`${skillDir}/geppetto-adopt/integrations/${portable(relative(resolve(sourceRoot, 'integrations'), path))}`, await readFile(path));
+  if (!plugin && await exists(resolve(sourceRoot, 'integrations'))) for (const path of integrationFiles(resolve(sourceRoot, 'integrations'))) desired.set(`${skillDir}/geppetto-adopt/integrations/${portable(relative(resolve(sourceRoot, 'integrations'), path))}`, await readFile(path));
   const workflow = '.github/workflows/pr-gate.yml';
   if (gateSha && (await jsonFile(resolve(root, '.geppetto/config.json'), {})).ci?.enabled !== false) desired.set(workflow, Buffer.from((await readFile(resolve(sourceRoot, 'skills/geppetto-adopt/assets/templates/ci/pr-gate.yml'), 'utf8')).replaceAll('{{GEPPETTO_SHA}}', gateSha)));
   if (!await exists(resolve(root, '.geppetto/config.json'))) desired.set('.geppetto/config.json', Buffer.from(`${JSON.stringify(defaultConfig(), null, 2)}\n`));

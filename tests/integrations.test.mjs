@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, cpSync, existsSync } from 'node:fs';
 import { fixture, put, get, repo, invoke } from './helpers.mjs';
 import { compileIntegrations } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
 import { ownSkills } from '../scripts/check-skills.mjs';
@@ -78,4 +78,24 @@ test('design companions resolve from project skills without activating unrelated
   const view = get(home, '.geppetto/integrations.md');
   for (const name of report.installed) assert.ok(view.includes(resolve(repo, `integrations/${name}.md`).replaceAll('\\', '/')));
   assert.ok(!view.includes(resolve(repo, 'integrations/pstack-principles.md').replaceAll('\\', '/')));
+});
+
+test('generated catalogs copy Markdown guides without importing unrelated source payloads', t => {
+  const root = fixture(t), home = fixture(t), source = fixture(t);
+  for (const path of ['skills', 'integrations', 'hooks', 'scripts', '.codex-plugin', '.claude-plugin']) cpSync(resolve(repo, path), resolve(source, path), { recursive: true });
+  cpSync(resolve(repo, 'package.json'), resolve(source, 'package.json'));
+  put(source, 'integrations/session-evidence/index.json', '{"synthetic":"session index"}');
+  put(source, 'integrations/session-evidence/part-001.txt', 'SYNTHETIC_SESSION_PAYLOAD');
+  put(source, 'integrations/custom/guide.md', '# Custom guide\n\n## With geppetto-learn\nUse the selected local procedure.\n');
+  put(root, '.agents/skills/local-procedure/SKILL.md', '# Existing local procedure\n');
+  const result = invoke(resolve(source, 'skills/geppetto-adopt/scripts/install.mjs'), ['--target', 'agents', '--project', root, '--gate-sha', 'a'.repeat(40)], { cwd: root, home });
+  assert.equal(result.status, 0, result.stderr);
+  const catalog = '.agents/skills/geppetto-adopt/integrations/';
+  assert.equal(existsSync(resolve(root, catalog + 'session-evidence/index.json')), false);
+  assert.equal(existsSync(resolve(root, catalog + 'session-evidence/part-001.txt')), false);
+  assert.equal(get(root, catalog + 'custom/guide.md'), get(source, 'integrations/custom/guide.md'));
+  assert.equal(get(root, catalog + 'TokenEconomizer.md'), get(source, 'integrations/TokenEconomizer.md'));
+  assert.equal(get(root, '.agents/skills/local-procedure/SKILL.md'), '# Existing local procedure\n');
+  assert.equal(get(root, '.agents/skills/code-review/references/report.schema.json'), get(source, 'skills/code-review/references/report.schema.json'));
+  assert.equal(get(source, 'integrations/session-evidence/part-001.txt'), 'SYNTHETIC_SESSION_PAYLOAD');
 });

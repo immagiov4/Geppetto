@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.4
+
+- Copy only Markdown companion guides when installing the integration catalog, leaving unrelated working files in the source checkout.
+
 ## 0.8.3
 
 - Deliver retained background learning commits through internal tool context so the working session can verify and integrate them.

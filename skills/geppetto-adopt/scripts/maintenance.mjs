@@ -11,6 +11,7 @@ const cadence = 'weekly Monday 09:00 (local time)';
 const cronCadence = '0 9 * * 1';
 const psQuote = text => `'${text.replaceAll("'", "''")}'`;
 const shQuote = text => `'${text.replaceAll("'", "'\\''")}'`;
+export const integrationFiles = (root, options) => filesUnder(root, options).filter(path => path.endsWith('.md'));
 /** Refresh file-only companion context; CLI inventory never starts a model session. */
 export async function compileIntegrations(project, { home = userHome(), catalog, roots = [], execute = run } = {}) {
   catalog ??= fileURLToPath(new URL(await exists(new URL('../../../integrations', import.meta.url)) ? '../../../integrations' : '../integrations', import.meta.url));
@@ -29,7 +30,7 @@ export async function compileIntegrations(project, { home = userHome(), catalog,
     try { collect(JSON.parse(result.stdout)); } catch { gaps.push(`${host}: plugin inventory is not JSON`); }
   }
   for (const root of caches) if (await exists(root)) for (const path of filesUnder(root, { skipLinks: true, excludeDirs: ['.git', 'node_modules'] })) if (basename(path) === 'SKILL.md' && installed.has(relative(root, path).replaceAll('\\', '/').split('/')[1]?.toLowerCase())) installed.add(basename(dirname(path)).toLowerCase());
-  if (await exists(catalog)) for (const path of filesUnder(catalog, { skipLinks: true }).filter(path => path.endsWith('.md'))) {
+  if (await exists(catalog)) for (const path of integrationFiles(catalog, { skipLinks: true })) {
     const text = await readFile(path, 'utf8'), name = basename(path, '.md'), aliases = /^Skills: (.+)$/m.exec(text)?.[1].split(',').map(name => name.trim().toLowerCase()) ?? [name.toLowerCase()];
     if (![name.toLowerCase(), ...aliases].some(name => installed.has(name))) { suggestions.push(name); continue; }
     selected.push(name);
