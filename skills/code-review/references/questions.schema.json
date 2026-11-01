@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "file": { "type": "string", "description": "Path relative to after/ or before/, without either prefix." },
+          "line": { "type": "integer", "minimum": 1 },
+          "observation": { "type": "string" },
+          "question": { "type": "string" },
+          "needed_evidence": { "type": "string" },
+          "relation_type": { "type": "string" }
+        },
+        "required": ["id", "file", "line", "observation", "question", "needed_evidence", "relation_type"],
+        "additionalProperties": false
+      }
+    },
+    "limitations": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["questions", "limitations"],
+  "additionalProperties": false
+}

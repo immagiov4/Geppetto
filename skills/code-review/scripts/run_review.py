@@ -14,6 +14,7 @@ from unittest.mock import patch
 MODEL = "gpt-6.1-sol"
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = ("before", "after", "diff.patch", "contract.md", "manifest.json")
+MAX_QUESTIONS = 20
 
 
 def require(condition, message):
@@ -134,6 +135,8 @@ def check_completion(exit_code, events):
 
 def run_call(args, frozen, label, prompt, schema_path, metrics):
     unchanged(args.case, frozen)
+    prompt += f"\nBudget: up to {getattr(args, 'tool_budget', 24)} effective tool calls and {args.timeout_seconds:g} seconds per session. Tool count is an instructed limit.\n"
+    (args.output / f"{label}.prompt.txt").write_text(prompt, encoding="utf-8")
     response_path = args.output / f"{label}.json"
     command = [args.codex, "--no-daemon", "-a", "never",
                "-c", 'windows.sandbox="unelevated"', "-c", f"review_model={json.dumps(args.model)}",
@@ -142,8 +145,11 @@ def run_call(args, frozen, label, prompt, schema_path, metrics):
                "--output-schema", str(schema_path), "-o", str(response_path), "-"]
     started = time.monotonic()
     record = {"stage": label, "requested_model": args.model, "requested_effort": args.effort,
+              "started_at": time.time(), "status": "running",
+              "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
               "exit_code": None, "elapsed_seconds": None, "usage": None, "effective": None}
     metrics["calls"].append(record)
+    save(args.output / "metrics.json", metrics)
     process = subprocess.Popen(command, cwd=args.case, stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                encoding="utf-8", errors="strict",
@@ -173,17 +179,30 @@ def run_call(args, frozen, label, prompt, schema_path, metrics):
     require(threads[0] not in metrics["thread_ids"], "Session context reused")
     metrics["thread_ids"].append(threads[0])
     record["effective"] = effective_context(threads[0], args.model, args.effort)
-    return json.loads(response_path.read_text(encoding="utf-8"))
+    data = response_path.read_bytes()
+    record["response_sha256"] = hashlib.sha256(data).hexdigest()
+    record["status"] = "returned"
+    save(args.output / "metrics.json", metrics)
+    return json.loads(data)
 
 
-def prompt_base(case, changed):
-    return f"""Perform a local read-only audit in English of this case: {case}.
+def prompt_base(case, changed, questions=False):
+    common = f"""Perform a local read-only audit in English of this case: {case}.
 Read only before/, after/, diff.patch, contract.md, manifest.json and AGENTS.md files included in the case.
 The contract defines intended behaviour. Respect applicable instructions
 and authorized decisions recorded in the contract; retain unresolved conflicts in limitations.
 Use case reads only: no network, accounts, configuration, builds, tests,
 tool writes or delegation. Return only the requested JSON.
 Changed paths: {json.dumps(changed)}.
+"""
+    if questions:
+        return common + f"""Generate up to {MAX_QUESTIONS} concrete questions from the changed source and relevant consumers, without padding or asserting bugs.
+Each question has a unique ID, a file relative to the source root and a line (after/, or before/ for a deleted file).
+Use file 'route.js', never 'after/route.js' or 'before/route.js'. Also provide
+an observed source fact, an investigable question, needed evidence and the relationship examined.
+Return questions and limitations only. Do not include proposed findings or historical reviewer reports.
+"""
+    return common + """
 Every finding describes a concrete defect with cause, triggering condition,
 consequence and evidence in source and diff. Use the path relative to after/
 and actual after/ lines. If a file was deleted and is absent from after/, use lines
@@ -191,6 +210,82 @@ from the existing before/ file and state in the evidence that they refer to befo
 Cover every changed path once, with examined aspects and specific evidence.
 Distinguish defects from preferences; record static-inspection limitations.
 """
+
+
+def question_source(case, relative):
+    path = Path(relative)
+    require(not path.is_absolute() and path.as_posix() == relative and ".." not in path.parts,
+            "Invalid question source path")
+    side = "after" if (case / "after" / path).exists() else "before"
+    source = case / side / path
+    require(source.resolve().is_relative_to(case / side) and source.is_file(), "Missing question source")
+    return source
+
+
+def validate_questions(case, response, schema):
+    validate(response, schema)
+    questions = response["questions"]
+    require(len(questions) <= MAX_QUESTIONS, f"More than {MAX_QUESTIONS} questions")
+    ids = [question["id"] for question in questions]
+    require(len(ids) == len(set(ids)), "Duplicate question identifiers")
+    for question in questions:
+        source = question_source(case, question["file"])
+        require(1 <= question["line"] <= len(source.read_text(encoding="utf-8").splitlines()),
+                "Question line outside source")
+    return questions
+
+
+def validate_triage(case, triage, questions, schema):
+    validate(triage, schema)
+    entries = triage["questions"]
+    ids = [entry["id"] for entry in entries]
+    require(len(ids) == len(set(ids)) and set(ids) == {question["id"] for question in questions},
+            "Incomplete, duplicate or unrelated question accounting")
+    for entry in entries:
+        for source in entry["checked_sources"]:
+            question_source(case, source)
+        if entry["status"] in ("no_issue", "reported"):
+            require(entry["checked_sources"] and entry["last_consumer"].strip().lower() != "none",
+                    "Closed question without checked consumer")
+
+
+def question_discovery(args, frozen, changed, schemas, metrics):
+    questions_response = run_call(args, frozen, "questions", prompt_base(args.case, changed, questions=True),
+                                  ROOT / "references/questions.schema.json", metrics)
+    questions = validate_questions(args.case, questions_response, schemas["questions"])
+    metrics["calls"][-1]["status"] = "completed"
+    metrics["question_count"] = len(questions)
+    prompt = prompt_base(args.case, changed) + """
+Investigate the supplied questions alongside the ordinary review brief. They are leads, not proof.
+For each question you investigate, follow the relevant value, error or readiness condition through
+handoffs to its effective consumer or observable outcome. A forwarding service passing a value
+intact is not sufficient to close a downstream-behavior question. For potential regressions,
+compare a concrete previously successful path with the target, including reuse/fast-return branches.
+Record the last checked consumer and why it settles the question. If a necessary handoff was not
+traced, use suspected_unverified or not_examined, never no_issue. Prioritize within the same budget;
+do not invent defects or trace irrelevant modules. Test defects need a concrete fixture/assertion
+blind spot, not a generic request for coverage. Use checked-source observations, not private reasoning.
+Return the normal report separately from triage in the requested wrapper. Prefix finding IDs with C-.
+Account for every supplied question once, including those you could not examine.
+checked_sources paths are relative to after/ (before/ for a deleted file), with no after/ or before/ prefix.
+Questions:
+""" + json.dumps(questions, ensure_ascii=False)
+    response = run_call(args, frozen, "investigate", prompt, args.output / "investigation.schema.json", metrics)
+    validate(response, schemas["investigation"])
+    report, triage = response["report"], response["triage"]
+    validate_search(args.case, report, changed, schemas["report"])
+    require(all(finding["id"].startswith("C-") for finding in report["findings"]), "Incorrect ID prefix")
+    validate_triage(args.case, triage, questions, schemas["investigation"]["properties"]["triage"])
+    require(report["findings"] or not any(entry["status"] == "reported" for entry in triage["questions"]),
+            "Question marked reported without a finding")
+    metrics["calls"][-1]["status"] = "completed"
+    save(args.output / "triage.json", triage)
+    limitations = questions_response["limitations"] + report["limitations"] + triage["limitations"]
+    for entry in triage["questions"]:
+        if entry["status"] in ("suspected_unverified", "not_examined"):
+            limitations.append(f"{entry['id']}: {entry['status']}: {entry['observation']}")
+    metrics["candidate_count"] = len(report["findings"])
+    return report["findings"], [{"search": 2, "files": report["coverage"]}], limitations
 
 
 def verify_response(case, response, candidates, changed, schema):
@@ -237,6 +332,8 @@ def main(args):
     require(args.effort != "xhigh" or bool(args.effort_reason and args.effort_reason.strip()),
             "xhigh requires an explicit rationale with --effort-reason")
     require(math.isfinite(args.timeout_seconds) and args.timeout_seconds > 0, "Invalid time limit")
+    require(args.strategy in ("generic", "questions"), "Invalid review strategy")
+    require(type(args.tool_budget) is int and args.tool_budget > 0, "Invalid instructed tool budget")
     require(not args.output.exists(), "Output directory must be new")
     frozen = fingerprint(args.case)
     changed = changed_paths(args.case)
@@ -245,19 +342,29 @@ def main(args):
             sorted(manifest["changed_files"]) == changed, "Manifest differs from changed paths")
     args.output.mkdir(parents=True)
     schemas = {name: json.loads((ROOT / "references" / f"{name}.schema.json").read_text(encoding="utf-8"))
-               for name in ("report", "verification")}
+               for name in ("report", "verification", "questions", "triage")}
+    schemas["investigation"] = {"type": "object", "properties": {"report": schemas["report"], "triage": schemas["triage"]},
+                                "required": ["report", "triage"], "additionalProperties": False}
+    if args.strategy == "questions":
+        save(args.output / "investigation.schema.json", schemas["investigation"])
     metrics = {"status": "running", "case_fingerprint": frozen, "changed_paths": changed,
+               "strategy": args.strategy, "instructed_tool_budget": args.tool_budget,
+               "timeout_seconds": args.timeout_seconds,
                "effort_reason": args.effort_reason, "calls": [], "thread_ids": []}
     accepted, decisions, coverage, limitations = [], [], [], []
     try:
         base = prompt_base(args.case, changed)
         candidates = []
-        for index, focus in enumerate(("contract and correctness", "flows, regressions and security"), 1):
+        if args.strategy == "questions":
+            candidates, coverage, limitations = question_discovery(args, frozen, changed, schemas, metrics)
+        for index, focus in enumerate(("contract and correctness", "flows, regressions and security")
+                                      if args.strategy == "generic" else (), 1):
             response = run_call(args, frozen, f"search-{index}", base +
                                 f"\nIndependent search: {focus}. Prefix IDs with S{index}-.",
                                 ROOT / "references/report.schema.json", metrics)
             validate_search(args.case, response, changed, schemas["report"])
             require(all(f["id"].startswith(f"S{index}-") for f in response["findings"]), "Incorrect ID prefix")
+            metrics["calls"][-1]["status"] = "completed"
             candidates.extend(response["findings"])
             coverage.append({"search": index, "files": response["coverage"]})
             limitations.extend(response["limitations"])
@@ -265,6 +372,8 @@ def main(args):
         response = run_call(args, frozen, "verify", base +
             "\nIndependently verify every candidate against sources and diff. "
             "Decide accept, reject or unverified for every ID with specific evidence. "
+            "Distinguish regressions, incomplete new behavior, material test defects and preexisting issues. "
+            "Do not present a preexisting issue as introduced by this change. "
             "Deduplicate only defects with the same demonstrated cause, trigger and consequence. "
             "accepted_findings contains demonstrated findings with checked locations and an "
             "original canonical ID. Every accept decision points to that canonical_id; "
@@ -272,6 +381,7 @@ def main(args):
             "reject and unverified use canonical_id '-'. Keep distinct defects separate.\n" +
             json.dumps(candidates, ensure_ascii=False), ROOT / "references/verification.schema.json", metrics)
         accepted.extend(verify_response(args.case, response, candidates, changed, schemas["verification"]))
+        metrics["calls"][-1]["status"] = "completed"
         decisions.extend(response["decisions"])
         limitations.extend(response["limitations"])
         findings = sorted(accepted, key=lambda f: (f["severity"], f["file"], f["line_start"], f["id"]))
@@ -298,12 +408,20 @@ def main(args):
             for entry in search["files"]:
                 lines.append(f"- Search {search['search']}, {entry['file']}: " +
                              "; ".join(entry["aspects"]) + f". Evidence: {entry['evidence']}")
+        if args.strategy == "questions":
+            triage = json.loads((args.output / "triage.json").read_text(encoding="utf-8"))
+            lines += ["", "## Question dispositions", ""]
+            for entry in triage["questions"]:
+                lines.append(f"- {entry['id']}: {entry['status']}; last consumer: {entry['last_consumer']}; "
+                             f"sources: {', '.join(entry['checked_sources']) or 'none'}. {entry['observation']}")
         lines += ["", "## Limitations", ""] + [f"- {limit}" for limit in limitations]
         (args.output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
         metrics["status"] = "complete"
     except Exception as error:
         metrics["status"] = "failed"
         metrics["failure"] = str(error)
+        if metrics["calls"] and metrics["calls"][-1].get("status") != "completed":
+            metrics["calls"][-1]["status"] = "failed"
         raise
     finally:
         metrics["totals"] = totals(metrics)
@@ -388,6 +506,7 @@ def selfcheck():
             for stage in ("search-1", "search-2", "verify"):
                 run_call(args, fingerprint(case), stage, "prompt", root / "schema.json", metrics)
         for command, record in zip(commands, metrics["calls"]):
+            require(record["status"] == "returned", "Unvalidated response marked completed")
             require(command[command.index("-m") + 1] == model, "Chosen model not passed to CLI")
             require(f"review_model={json.dumps(model)}" in command, "Chosen model not safely configured")
             require(record["requested_model"] == model and record["effective"]["model"] == model,
@@ -414,6 +533,8 @@ if __name__ == "__main__":
         parser.add_argument("--model", default=MODEL, help=f"Codex model (default: {MODEL})")
         parser.add_argument("--effort", choices=("medium", "xhigh"), default="medium")
         parser.add_argument("--effort-reason")
+        parser.add_argument("--strategy", choices=("generic", "questions"), default="generic")
+        parser.add_argument("--tool-budget", type=int, default=24, help="Instructed tool calls per session; not a hard cap")
         try:
             main(parser.parse_args())
         except Exception as error:

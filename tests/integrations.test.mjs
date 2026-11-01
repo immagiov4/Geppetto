@@ -96,6 +96,9 @@ test('generated catalogs copy Markdown guides without importing unrelated source
   assert.equal(get(root, catalog + 'custom/guide.md'), get(source, 'integrations/custom/guide.md'));
   assert.equal(get(root, catalog + 'TokenEconomizer.md'), get(source, 'integrations/TokenEconomizer.md'));
   assert.equal(get(root, '.agents/skills/local-procedure/SKILL.md'), '# Existing local procedure\n');
-  assert.equal(get(root, '.agents/skills/code-review/references/report.schema.json'), get(source, 'skills/code-review/references/report.schema.json'));
+  for (const name of ['report', 'questions', 'triage']) {
+    const path = `code-review/references/${name}.schema.json`;
+    assert.equal(get(root, `.agents/skills/${path}`), get(source, `skills/${path}`));
+  }
   assert.equal(get(source, 'integrations/session-evidence/part-001.txt'), 'SYNTHETIC_SESSION_PAYLOAD');
 });

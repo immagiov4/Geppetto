@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+- Add a selectable question-generation and investigation strategy to code review, followed by independent finding confirmation.
+- Retain source-anchored questions, complete dispositions, stage progress and failure evidence alongside the existing review report.
+
 ## 0.8.5
 
 - Record background-learning attempts that are waiting for eligible evidence in the existing journal.

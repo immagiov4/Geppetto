@@ -1,0 +1,56 @@
+{
+  "type": "object",
+  "properties": {
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_examined",
+              "no_issue",
+              "suspected_unverified",
+              "reported"
+            ]
+          },
+          "checked_sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "last_consumer": {
+            "type": "string"
+          },
+          "observation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "checked_sources",
+          "last_consumer",
+          "observation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "questions",
+    "limitations"
+  ],
+  "additionalProperties": false
+}
