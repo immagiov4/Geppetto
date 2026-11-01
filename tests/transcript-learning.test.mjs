@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve, delimiter } from 'node:path';
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fixture, put, get, git, config, invoke } from './helpers.mjs';
 import { transcriptSlice } from '../skills/geppetto-adopt/scripts/learn-nudge.mjs';
 import { runLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
@@ -144,4 +145,29 @@ test('the shipped Stop dispatch launches a detached worker for eligible evidence
     await new Promise(done => setTimeout(done, 25));
   }
   assert.fail('the detached worker did not exit after releasing its lock');
+});
+
+
+test('a candidate awaiting eligible signals explains the skipped attempt without changing its assessment', async t => {
+  const root = project(t), home = fixture(t), transcript = resolve(home, 'candidate.jsonl');
+  const previous = { status: 'unchanged', lastId: 'previous', assessment: { decision: 'no_change', owner: 'README.md' } };
+  put(root, projectDataPath(root, 'learning.json'), previous);
+  put(root, '.geppetto/signals.jsonl', encode([{ id: 'one', key: 'one', session: 'one', source: 'agent', category: 'workflow', status: 'open', text: 'One observed episode.' }]));
+  put(home, 'candidate.jsonl', encode([user('No, preserve the requested scope. SYNTHETIC_CHAT_CONTENT_DO_NOT_LOG'), assistant('I will correct it.')]));
+  const event = { cwd: root, session_id: 'waiting-session', turn_id: 'waiting-turn', transcript_path: transcript, learning_qualified: true };
+  const cursor = resolve(root, '.geppetto/hook-state', createHash('sha256').update(event.session_id).digest('hex'), 'transcript.json');
+  put(root, cursor, { path: transcript, offset: 0 });
+  const result = await runLearning(root, { home, context: event, execute: () => assert.fail('ineligible evidence must not call a model') });
+  assert.equal(result.status, 'awaiting-evidence');
+  const journal = projectDataPath(root, 'hook-events.jsonl');
+  assert.ok(existsSync(journal), 'The skipped attempt must be observable in the existing journal');
+  const text = get(root, journal), events = text.trim().split('\n').map(JSON.parse);
+  assert.equal(events.length, 1); assert.equal(events[0].hook, 'learning'); assert.equal(events[0].status, 'awaiting-evidence');
+  assert.match(events[0].reason, /eligible.*source.*session/i); assert.equal(events[0].modelCalls, 0);
+  assert.equal(events[0].sessionId, event.session_id); assert.equal(events[0].turnId, event.turn_id);
+  assert.doesNotMatch(text, /SYNTHETIC_CHAT_CONTENT_DO_NOT_LOG/);
+  assert.deepEqual(JSON.parse(get(root, projectDataPath(root, 'learning.json'))), previous);
+  assert.deepEqual(JSON.parse(get(root, cursor)), { path: transcript, offset: 0 });
+  assert.equal((await runLearning(root, { home, execute: () => assert.fail('idle call must not call a model') })).status, 'idle');
+  assert.equal(get(root, journal), text, 'An empty idle call should not add another event');
 });

@@ -100,7 +100,10 @@ export async function runLearning(root, { home = userHome(), execute = executeLe
         slice = null;
       }
     }
-    if (!pending.length) return { status: slice?.text ? 'awaiting-evidence' : 'idle' };
+    if (!pending.length) {
+      if (slice?.text) await logHookEvent(root, { hook: 'learning', status: 'awaiting-evidence', reason: 'No eligible signals meet the configured source/session policy.', modelCalls: 0 }, event);
+      return { status: slice?.text ? 'awaiting-evidence' : 'idle' };
+    }
     if (!learningGitReady(root)) throw new Error(initialCommitAction);
     const id = randomUUID(); const branch = `geppetto/learn-${id}`; const path = resolve(directory, 'worktrees', id); const context = await learningContext(root, resolve(directory, `context-${id}.index`));
     await mkdir(resolve(path, '..'), { recursive: true });

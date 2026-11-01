@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.5
+
+- Record background-learning attempts that are waiting for eligible evidence in the existing journal.
+
 ## 0.8.4
 
 - Copy only Markdown companion guides when installing the integration catalog, leaving unrelated working files in the source checkout.
