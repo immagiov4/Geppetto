@@ -2,11 +2,11 @@ import { mkdir, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
+import { turnStatePath, readTurnState, withTurnLock } from './turn-messages.mjs';
 import { projectRecords } from './project-records.mjs';
 import { cli, isMain, parseArgs, UsageError, run, projectRoot, claimFile, ignoreLocalFiles, jsonFile, atomicJson } from './common.mjs';
 import { redact } from './signal.mjs';
 import { logHookEvent } from './hook-events.mjs';
-
 const outcomePath = (root, reference) => resolve(root, '.geppetto/hook-state', 'learning-outcome-' + reference + '.json');
 const commitReference = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 /** Read append-only resolutions: a later run or reopened key cannot erase a retained commit. */
@@ -40,7 +40,7 @@ export async function learningDelivery(event) {
   if (!references.length) return '';
   const digest = text => createHash('sha256').update(text).digest('hex');
   const state = resolve(root, '.geppetto/hook-state', digest(event.session_id));
-  const active = await jsonFile(resolve(root, '.geppetto/hook-state', 'review-turn-' + digest(event.session_id) + '.json'), {});
+  const active = (await withTurnLock(`${turnStatePath(root, event.session_id)}.lock`, () => readTurnState(root, event.session_id))) ?? {};
   const turn = event.turn_id || active.turn || event.session_id;
   await mkdir(state, { recursive: true }); await ignoreLocalFiles(root, ['/hook-state/']);
   const claimed = [];

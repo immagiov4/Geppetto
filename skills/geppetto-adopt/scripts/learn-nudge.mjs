@@ -1,4 +1,4 @@
-import { readTurnState } from './turn-messages.mjs';
+import { readTurnState, withTurnLock, turnStatePath } from './turn-messages.mjs';
 import { learningDelivery } from './learning-delivery.mjs';
 import { appendFile, mkdir, readFile, unlink, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -28,7 +28,8 @@ async function learningActivity(event, now, launch = launchLearning) {
   if (!config.enabled && !(kind === 'Stop' && (await localRecords(root, 'signals')).length > 0)) return {};
   for (const key of ['minToolCalls', 'minDurationMs']) if (!Number.isSafeInteger(config[key]) || config[key] <= 0) throw new Error(`${configPath}:1: hooks.learnNudge.${key} must be a positive integer`);
   const session = createHash('sha256').update(event.session_id).digest('hex'); const state = resolve(root, '.geppetto/hook-state', session); const activity = resolve(state, 'activity.jsonl');
-  const active = (await readTurnState(root, event.session_id, event.turn_id)) ?? {}, messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
+  const snapshot = turnStatePath(root, event.session_id), hasState = await exists(snapshot) || event.turn_id && await exists(turnStatePath(root, event.session_id, event.turn_id));
+  const active = hasState ? (await withTurnLock(`${snapshot}.lock`, () => readTurnState(root, event.session_id, event.turn_id))) ?? {} : {}, messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
   if (!['PostToolUse', 'Stop'].includes(kind)) {
     await mkdir(state, { recursive: true });
     await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);

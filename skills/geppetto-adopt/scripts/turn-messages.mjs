@@ -2,9 +2,8 @@ import { createReadStream } from 'node:fs';
 import { stat, mkdir, writeFile, readFile, link, unlink } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { jsonFile } from './common.mjs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createHash } from 'node:crypto';
 
 const digest = text => createHash('sha256').update(text).digest('hex');
 export const turnStatePath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}${turn ? '-' + digest(turn) : ''}.json`);
@@ -34,7 +33,6 @@ export async function messageCheckpoint(path, cursor) {
   }
   return { cursor: { path, identity, offset }, userMessage, userMessages, bytesRead };
 }
-
 
 /** Serialize one session's state changes; an abandoned owner is reported for recovery. */
 export async function withTurnLock(path, action) {

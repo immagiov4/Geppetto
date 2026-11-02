@@ -1,4 +1,4 @@
-import { readFile, lstat, mkdir, rename, writeFile, appendFile, open } from 'node:fs/promises';
+import { readFile, lstat, mkdir, rename, writeFile, appendFile, open, unlink } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -68,8 +68,16 @@ export async function jsonFile(path, fallback) {
 }
 export async function atomicJson(path, value, { mode } = {}) {
   await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.${process.pid}.tmp`; await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx', mode });
-  await rename(temp, path);
+  const temp = `${path}.${process.pid}.tmp`, handle = await open(temp, 'wx', mode);
+  try {
+    let failure; try { await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`); } catch (error) { failure = error; }
+    try { await handle.close(); } catch (error) { if (!failure) throw error; throw new AggregateError([failure, error], `${failure.message}; close failed: ${error.message}`, { cause: failure }); }
+    if (failure) throw failure;
+    await rename(temp, path);
+  } catch (error) {
+    try { await unlink(temp); } catch (cleanup) { if (cleanup.code !== 'ENOENT') throw new AggregateError([error, cleanup], `${error.message}; temporary cleanup failed: ${cleanup.message}`, { cause: error }); }
+    throw error;
+  }
 }
 /** Claim an exclusive marker and close it before returning, including on write failure. */
 export async function claimFile(path, text = '') {

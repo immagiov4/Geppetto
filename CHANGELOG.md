@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.5
+
+- Coordinate learning-state reads with the existing session lock so Windows state replacement does not race an open reader.
+- Remove only owned JSON temporaries after failed publication, allowing recovery in the same process.
+
 ## 0.10.4
 
 - Keep review findings anchored in unchanged consumers eligible for separate confirmation, while validating source paths and line ranges.

@@ -239,7 +239,7 @@ export async function handleEvent(event, options) {
     if (event?.hook_event_name !== 'Stop') throw error;
     try {
       const root = await projectRoot(event.cwd ?? '.'); const statePath = turnStatePath(root, event.session_id ?? 'unknown');
-      const state = await jsonFile(statePath, null).catch(() => null); // Diagnostic recovery must tolerate the broken state itself.
+      const state = await withTurnLock(`${statePath}.lock`, () => jsonFile(statePath, null)).catch(() => null); // Diagnostic recovery must tolerate the broken state itself.
       await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
       const marker = `${statePath}.${digest(event.turn_id ?? state?.turn ?? 'unknown')}.error`; if (await claimFile(marker)) try { await logHookEvent(root, { hook: 'completion', status: 'error', error: redact(error.message) }, event); }
       catch (cause) { await unlink(marker); throw cause; }
