@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, exists } from './common.mjs';
-import { messageCheckpoint, withTurnLock, turnStatePath, readTurnState } from './turn-messages.mjs';
+import { messageCheckpoint, withTurnLock, turnStatePath, readTurnState, decisionPath, currentDecision } from './turn-messages.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
 import { redact, localRecords } from './signal.mjs';
@@ -18,9 +18,7 @@ function sectionFeedback(body, cwd, runCommand) {
   if (result.status === 0) return 'Geppetto: PR sections pass.';
   return `Geppetto PR feedback: ${redact(result.stderr?.trim() || result.error?.message || 'Section check failed')}. Update the PR body before publishing; CI repeats this check.`; }
 const digest = text => createHash('sha256').update(text).digest('hex');
-const decisionPath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `decision-${digest(session)}-${digest(turn)}.json`);
 const currentState = state => state && typeof state.turn === 'string' && typeof state.epoch === 'string' && typeof state.worktree === 'string' && typeof state.base === 'string' && typeof state.snapshot === 'string' ? state : null;
-const currentDecision = decision => decision && typeof decision.epoch === 'string' && decision.value && Array.isArray(decision.decisions) && decision.decisions.length ? decision : null;
 async function worktreeFingerprint(root) {
   const status = gitOutput(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--', '.', ':(exclude).geppetto/.gitignore'], { trim: false }); const gitRoot = gitOutput(root, ['rev-parse', '--show-toplevel']), hash = createHash('sha256').update(status), entries = status.split('\0').filter(Boolean);
   for (let i = 0; i < entries.length; i++) {
@@ -151,7 +149,7 @@ async function completionEvent(event) {
     await atomicJson(statePath, state);
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
-  if (policy.enabled !== false && turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})).checks.length) {
+  const turnConfig = await jsonFile(resolve(root, '.geppetto/config.json'), {}); if ((policy.enabled !== false && turnPolicy(turnConfig).checks.length) || (state.transcript_path && turnConfig.hooks?.learnNudge?.enabled !== false)) {
     try { if (checkpointError) throw checkpointError; checkpoint ??= await messageCheckpoint(state.transcript_path, state.promptCursor); }
     catch (error) {
       if (!state.messageError) { state.messageError = error.code ?? 'invalid-transcript'; await atomicJson(statePath, state); await logHookEvent(root, { hook: 'turnGate', status: 'transcript-unavailable', reason: state.messageError, modelCalls: 0 }, event); }
@@ -175,8 +173,8 @@ async function completionEvent(event) {
       }
     }
   }
-  if (kind === 'UserPromptSubmit') return {};
-  if (policy.enabled === false) return {}; if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})));
+  if (kind === 'UserPromptSubmit' || policy.enabled === false) return {};
+  if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(turnConfig));
   if (kind !== 'Stop') return {};
   const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
   const last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy); const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null); const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);

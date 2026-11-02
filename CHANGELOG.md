@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.6
+
+- Remind the agent to consider reusable lessons after recorded feedback or frustration, even in short turns.
+
 ## 0.10.5
 
 - Coordinate learning-state reads with the existing session lock so Windows state replacement does not race an open reader.

@@ -134,3 +134,102 @@ test('a child prompt does not discard the parent learning activity before its th
   await send('PreToolUse','parent','three');assert.match((await send('PostToolUse','parent','three')).hookSpecificOutput?.additionalContext??'',/geppetto-learn/);
   await send('Stop','parent','stop');assert.equal(starts.length,1);assert.equal(starts[0].learning_qualified,true);
 });
+import { recordTurn } from '../skills/geppetto-adopt/scripts/hook.mjs';
+import { appendFile } from 'node:fs/promises';
+
+const userMessage = text => JSON.stringify({ type: 'response_item', payload: { role: 'user', content: [{ type: 'input_text', text }] } }) + '\n';
+const noFeedback = { requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false } };
+const positiveFeedback = { ...noFeedback, feedback: { applies: true, on: 'A draft was lost.', action: 'Preserve the latest draft.' } };
+const positiveFrustration = { ...noFeedback, frustration: { applies: true, cause: 'Repeated loss of a draft.', prevention: 'Preserve the latest draft.' } };
+
+async function decisionFixture(t, learnNudge = {}) {
+  const cwd = fixture(t);
+  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(cwd, args);
+  put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge, signalLearning: { enabled: false } } });
+  git(cwd, ['add', '.']); git(cwd, ['commit', '-qm', 'Baseline']);
+  const transcript = resolve(fixture(t), 'synthetic.jsonl'); put(cwd, transcript, userMessage('Initial request'));
+  const event = { cwd, session_id: 'decision', turn_id: 'parent', transcript_path: transcript, tool_name: 'Read', tool_input: {}, tool_use_id: 'call' };
+  const send = (kind, extra = {}) => handleEvent({ ...event, ...extra, hook_event_name: kind }, { now: () => 100 });
+  await send('UserPromptSubmit');
+  return { cwd, transcript, event, send };
+}
+
+test('current feedback and frustration trigger one reminder on tool completion, not Stop', async t => {
+  for (const [index, value] of [positiveFeedback, positiveFrustration].entries()) {
+    const { cwd, event, send } = await decisionFixture(t);
+    await recordTurn(cwd, event.session_id, event.turn_id, value);
+    await send('PreToolUse');
+    assert.match((await send('PostToolUse')).hookSpecificOutput?.additionalContext ?? '', /\$geppetto-learn/, `positive decision ${index}`);
+    assert.deepEqual(await send('PostToolUse'), {}); assert.deepEqual(await send('Stop'), {});
+  }
+  const { cwd, event, send } = await decisionFixture(t);
+  await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback);
+  assert.deepEqual(await send('Stop'), {}, 'tool-free Stop remains silent');
+  await send('PreToolUse'); assert.deepEqual(await send('Stop'), {});
+});
+
+test('ordinary, stale and foreign decisions stay silent; new prompt may remind again', async t => {
+  const { cwd, transcript, event, send } = await decisionFixture(t);
+  await recordTurn(cwd, event.session_id, event.turn_id, noFeedback); await send('PreToolUse'); assert.deepEqual(await send('PostToolUse'), {});
+  await appendFile(transcript, userMessage('Correction one')); await send('PreToolUse');
+  await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback);
+  assert.match((await send('PostToolUse')).hookSpecificOutput?.additionalContext ?? '', /\$geppetto-learn/);
+  await appendFile(transcript, userMessage('Correction two')); await send('PreToolUse');
+  assert.deepEqual(await send('PostToolUse'), {}, 'old positive decision does not qualify new epoch');
+  await recordTurn(cwd, event.session_id, event.turn_id, noFeedback); assert.deepEqual(await send('PostToolUse'), {});
+  await appendFile(transcript, userMessage('Correction three')); await send('PreToolUse');
+  await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback);
+  assert.match((await send('PostToolUse')).hookSpecificOutput?.additionalContext ?? '', /\$geppetto-learn/);
+  const child = { turn_id: 'child' }; await send('UserPromptSubmit', child);
+  await recordTurn(cwd, event.session_id, 'child', noFeedback); await send('PreToolUse', child);
+  assert.deepEqual(await send('PostToolUse', child), {}, 'parent decision cannot qualify child');
+  await recordTurn(cwd, event.session_id, 'child', positiveFeedback);
+  assert.match((await send('PostToolUse', child)).hookSpecificOutput?.additionalContext ?? '', /\$geppetto-learn/);
+  assert.deepEqual(await send('PostToolUse'), {}, 'returning parent keeps its own fired marker');
+});
+
+test('disabled and learning-child turns do not inject feedback reminders', async t => {
+  const { cwd, event, send } = await decisionFixture(t, { enabled: false });
+  await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback); await send('PreToolUse'); assert.deepEqual(await send('PostToolUse'), {});
+  const child = await decisionFixture(t); await recordTurn(child.cwd, child.event.session_id, child.event.turn_id, positiveFeedback);
+  const before = process.env.GEPPETTO_LEARNING_CHILD; process.env.GEPPETTO_LEARNING_CHILD = '1';
+  try { await child.send('PreToolUse'); assert.deepEqual(await child.send('PostToolUse'), {}); }
+  finally { if (before === undefined) delete process.env.GEPPETTO_LEARNING_CHILD; else process.env.GEPPETTO_LEARNING_CHILD = before; }
+});
+
+test('learning message identity stays current with review or turn checks disabled', async t => {
+  for (const mode of ['review-disabled', 'checks-disabled']) {
+    const { cwd, transcript, event, send } = await decisionFixture(t);
+    await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback);
+    const settings = JSON.parse(get(cwd, '.geppetto/config.json'));
+    if (mode === 'review-disabled') settings.hooks.reviewGate = { enabled: false };
+    else settings.turnChecks = [];
+    put(cwd, '.geppetto/config.json', settings);
+    assert.deepEqual(await send('Stop'), {});
+    await appendFile(transcript, userMessage('An ordinary next request'));
+    await send('PreToolUse');
+    assert.deepEqual(await send('PostToolUse'), {}, `${mode}: previous feedback cannot qualify a new message`);
+    if (mode === 'review-disabled') {
+      await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback);
+      assert.match((await send('PostToolUse')).hookSpecificOutput?.additionalContext ?? '', /\$geppetto-learn/);
+      assert.deepEqual(await send('PostToolUse'), {});
+      await appendFile(transcript, userMessage('Another ordinary request'));
+      await send('PreToolUse');
+      assert.deepEqual(await send('PostToolUse'), {});
+    }
+  }
+});
+
+test('an unreadable current message cannot reuse old feedback with review disabled', async t => {
+  const { cwd, transcript, event, send } = await decisionFixture(t);
+  await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback);
+  const settings = JSON.parse(get(cwd, '.geppetto/config.json'));
+  settings.hooks.reviewGate = { enabled: false }; put(cwd, '.geppetto/config.json', settings);
+  await appendFile(transcript, 'invalid complete record\n');
+  await send('PreToolUse'); assert.deepEqual(await send('PostToolUse'), {});
+  const recovered = resolve(fixture(t), 'recovered.jsonl');
+  put(cwd, recovered, userMessage('A readable correction after recovery'));
+  await send('PreToolUse', { transcript_path: recovered });
+  await recordTurn(cwd, event.session_id, event.turn_id, positiveFeedback);
+  assert.match((await send('PostToolUse', { transcript_path: recovered })).hookSpecificOutput?.additionalContext ?? '', /\$geppetto-learn/);
+});

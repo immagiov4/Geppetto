@@ -5,8 +5,8 @@ import { jsonFile } from './common.mjs';
 import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const digest = text => createHash('sha256').update(text).digest('hex');
-export const turnStatePath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}${turn ? '-' + digest(turn) : ''}.json`);
+const digest = text => createHash('sha256').update(text).digest('hex'); export const decisionPath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `decision-${digest(session)}-${digest(turn)}.json`);
+export const currentDecision = decision => decision && typeof decision.epoch === 'string' && decision.value && Array.isArray(decision.decisions) && decision.decisions.length ? decision : null; export const turnStatePath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}${turn ? '-' + digest(turn) : ''}.json`);
 export async function readTurnState(root, session, turn) {
   const active = await jsonFile(turnStatePath(root, session), null);
   return !turn || active?.turn === turn ? active : jsonFile(turnStatePath(root, session, turn), null);

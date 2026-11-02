@@ -1,6 +1,6 @@
 # Hook operation
 
-The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings and the turn-record command and schema; UserPromptSubmit captures the turn boundary without adding context; PreToolUse gates native file edits and pending shell effects and checks PR text; PostToolUse observes Git changes, re-arms feedback after configured review results and supplies internal learning reminders; Stop checks independent review, then starts background learning through the same dispatch.
+The plugin supplies global hooks. The installer reuses them with `--plugin-hooks`, or merges one shared hook set into user settings. `~/.geppetto/machine.json` records the source. SessionStart injects memory listings and the turn-record command and schema; UserPromptSubmit captures the turn boundary without adding context; PreToolUse gates native file edits and pending shell effects and checks PR text; PostToolUse observes Git changes, re-arms feedback after configured review results and supplies one internal learning reminder per user prompt after a current positive feedback or frustration decision, or a qualifying long turn; Stop checks independent review, then starts background learning through the same dispatch.
 
 ## Activation
 

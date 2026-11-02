@@ -1,4 +1,4 @@
-import { readTurnState, withTurnLock, turnStatePath } from './turn-messages.mjs';
+import { readTurnState, withTurnLock, turnStatePath, decisionPath, currentDecision } from './turn-messages.mjs';
 import { learningDelivery } from './learning-delivery.mjs';
 import { appendFile, mkdir, readFile, unlink, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -29,7 +29,10 @@ async function learningActivity(event, now, launch = launchLearning) {
   for (const key of ['minToolCalls', 'minDurationMs']) if (!Number.isSafeInteger(config[key]) || config[key] <= 0) throw new Error(`${configPath}:1: hooks.learnNudge.${key} must be a positive integer`);
   const session = createHash('sha256').update(event.session_id).digest('hex'); const state = resolve(root, '.geppetto/hook-state', session); const activity = resolve(state, 'activity.jsonl');
   const snapshot = turnStatePath(root, event.session_id), hasState = await exists(snapshot) || event.turn_id && await exists(turnStatePath(root, event.session_id, event.turn_id));
-  const active = hasState ? (await withTurnLock(`${snapshot}.lock`, () => readTurnState(root, event.session_id, event.turn_id))) ?? {} : {}, messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
+  const { active, decision } = hasState ? await withTurnLock(`${snapshot}.lock`, async () => {
+    const active = await readTurnState(root, event.session_id, event.turn_id) ?? {}; const decision = kind === 'PostToolUse' && active.turn ? currentDecision(await jsonFile(decisionPath(root, event.session_id, active.turn), null)) : null;
+    return { active, decision }; }) : { active: {}, decision: null };
+  const messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
   if (!['PostToolUse', 'Stop'].includes(kind)) {
     await mkdir(state, { recursive: true });
     await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);
@@ -37,8 +40,8 @@ async function learningActivity(event, now, launch = launchLearning) {
     return {};   }
   const records = await exists(activity) ? (await readFile(activity, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse) : []; const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit' && (!messageTurn || record.turn === messageTurn)); const calls = records.slice(lastPrompt + 1).filter(record => record.kind === 'PreToolUse' && (!messageTurn || record.turn === messageTurn)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
   const elapsedMs = unique.length ? now() - Math.min(...unique.map(call => call.at)) : 0; const qualified = config.enabled && (unique.length >= config.minToolCalls || elapsedMs >= config.minDurationMs); const signals = kind === 'Stop' && (await eligibleSignals(root)).length > 0;
-  if (!qualified && !signals) return {};
-  const turn = messageTurn || unique[0]?.turn || records[lastPrompt]?.id || unique[0]?.id || 'signals'; const turnHash = createHash('sha256').update(turn).digest('hex'); const fired = resolve(state, `fired-${turnHash}`);
+  const assessed = kind === 'PostToolUse' && config.enabled && !active.messageError && decision?.epoch === active.epoch && decision?.userEpoch === active.userEpoch && (decision?.userDecisionIndex ?? 0) === (active.userDecisionIndex ?? 0) && (decision?.value.feedback?.applies === true || decision?.value.frustration?.applies === true);
+  if (!qualified && !signals && !assessed) return {}; const turn = messageTurn || unique[0]?.turn || records[lastPrompt]?.id || unique[0]?.id || 'signals'; const turnHash = createHash('sha256').update(turn).digest('hex'); const fired = resolve(state, `fired-${turnHash}`);
   if (kind === 'Stop' && (event.transcript_path || signals || launch !== launchLearning) && (await jsonFile(configPath, {})).hooks?.signalLearning?.enabled !== false) {
     await mkdir(state, { recursive: true }); await ignoreLocalFiles(root, ['/hook-state/']);
     const started = resolve(state, `started-${turnHash}`);
@@ -46,8 +49,7 @@ async function learningActivity(event, now, launch = launchLearning) {
     try { await launch({ ...event, learning_qualified: qualified }); }
     catch (error) { await unlink(started); throw error; }
   }
-  if (!qualified) return {};
-  if (!await claimFile(fired)) return {};
+  if (!qualified && !assessed) return {}; if (!await claimFile(fired)) return {};
   const entry = { hook: 'learnNudge', event: kind, session, turn, ts: new Date(now()).toISOString(), toolCalls: unique.length, elapsedMs, modelCalls: 0, costUsd: 0 };
   try { await logHookEvent(root, entry, event); }
   catch (error) { await unlink(fired); throw error; }
