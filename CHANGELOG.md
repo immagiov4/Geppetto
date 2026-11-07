@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.7
+
+- Limit the global review gate to projects with a Geppetto configuration.
+- Restrict requirements mapping to substantial software product changes; exclude tiny local edits and unrelated research or prose work.
+
 ## 0.10.6
 
 - Remind the agent to consider reusable lessons after recorded feedback or frustration, even in short turns.

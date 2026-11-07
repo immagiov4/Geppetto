@@ -2,7 +2,7 @@
   "checks": [
     {
       "id": "requirements",
-      "question": "Does this request change the agreed requirements, including first documentation or diagnostics requiring foundation choices through geppetto-spec?",
+      "question": "Does this software product request substantially change behavior or agreed requirements? Exclude tiny localized edits, standalone documentary research, prose work and tasks unrelated to product development.",
       "skill": "requirements-blast-radius"
     },
     {

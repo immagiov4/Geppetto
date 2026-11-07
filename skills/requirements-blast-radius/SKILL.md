@@ -1,9 +1,11 @@
 ---
 name: requirements-blast-radius
-description: Map implicit requirements before implementing a substantial new request or steering that changes the agreed outcome. Find every surface delivering the capability and the lifecycle boundaries needed to make the request true for the user.
+description: Map implicit requirements for substantial software product changes. Use for a new capability or steering that materially changes product behavior. Exclude tiny localized edits, standalone documentary research, prose work and tasks unrelated to product development.
 ---
 
 # Requirements blast radius
+
+Use this procedure for substantial software product development. Handle tiny localized changes directly. Standalone documentary research, prose work and tasks outside product development do not require this skill. A prototype needs a map only when it introduces substantial product requirements; editing a prototype alone is not sufficient.
 
 Geppetto records this decision in the [turn record](../geppetto-adopt/assets/templates/hooks/README.md#turn-record).
 

@@ -126,7 +126,9 @@ export async function recordReview(root, base, outcome) {
 async function completionEvent(event) {
   const kind = event.hook_event_name;
   if (process.env.GEPPETTO_LEARNING_CHILD === '1' || !event.session_id || !['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind)) return {};
-  const root = await projectRoot(event.cwd ?? '.'); const policy = await reviewPolicy(root);
+  const root = await projectRoot(event.cwd ?? '.');
+  if (!await exists(resolve(root, '.geppetto/config.json'))) return {};
+  const policy = await reviewPolicy(root);
   if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return {};
   if (!Number.isSafeInteger(policy.threshold) || policy.threshold <= 0 || ![policy.docGlobs, policy.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string'))) throw new UsageError('Invalid hooks.reviewGate threshold or globs.');
   return withTurnLock(`${turnStatePath(root, event.session_id)}.lock`, async () => {

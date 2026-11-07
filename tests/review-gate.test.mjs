@@ -7,6 +7,15 @@ import { fixture, put, get, git, invoke, config } from './helpers.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 
 const lines = (n, prefix = 'line') => Array.from({ length: n }, (_, i) => `${prefix} ${i}\n`).join('');
+test('global review hook leaves an unadopted repository alone', async t => {
+  const cwd = fixture(t);
+  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) assert.equal(git(cwd, args).status, 0);
+  put(cwd, 'app.mjs', lines(40)); git(cwd, ['add', '.']); git(cwd, ['commit', '-qm', 'baseline']);
+  const event = { cwd, session_id: 'unadopted', turn_id: 'one' };
+  await handleEvent({ ...event, hook_event_name: 'UserPromptSubmit' });
+  put(cwd, 'app.mjs', lines(100));
+  assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop' }), {});
+});
 function project(t) {
   const cwd = fixture(t);
   for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) assert.equal(git(cwd, args).status, 0);
