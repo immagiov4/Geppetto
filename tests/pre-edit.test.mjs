@@ -3,20 +3,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fixture, put, get, git, invoke, config } from './helpers.mjs';
+import { fixture, put, get, git, invoke, config, restoreEnv } from './helpers.mjs';
 import { spawnSync } from 'node:child_process';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 const decision = { requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false } };
 function project(t, settings = {}, nested = false) {
-  const root = fixture(t), cwd = nested ? resolve(root, 'app') : root;
+  const root = fixture(t), home = fixture(t), cwd = nested ? resolve(root, 'app') : root;
   for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(root, args);
   put(cwd, 'README.md', '# Fixture'); put(cwd, '.geppetto/config.json', { ...config(), memory: { choice: 'none' }, hooks: { learnNudge: { enabled: false }, signalLearning: { enabled: false } }, ...settings });
   git(cwd, ['add', '.']); git(cwd, ['commit', '-qm', 'baseline']);
-  const send = (kind, extra = {}) => handleEvent({ cwd, session_id: 'session', turn_id: 'turn', hook_event_name: kind, ...extra });
+  const send = (kind, extra = {}) => handleEvent({ cwd, session_id: 'session', turn_id: 'turn', hook_event_name: kind, ...extra }, { home });
   const edit = (extra = {}) => send('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: 'README.md' }, ...extra });
   const record = (value, session = 'session', turn = 'turn') => invoke('hook.mjs', ['--record-turn', JSON.stringify(value), '--session', session, '--turn', turn], { cwd });
   const rows = () => get(cwd, projectDataPath(cwd, 'turns.jsonl')).trim().split('\n').map(JSON.parse);
-  return { root, cwd, send, edit, record, rows };
+  return { root, cwd, home, send, edit, record, rows };
 }
 const denied = result => result.hookSpecificOutput?.permissionDecision === 'deny';
 test('F1: PreToolUse and PostToolUse errors fail open with one diagnostic; audit/install validate config', async t => {
@@ -164,8 +164,11 @@ test('native file writes gate, while shell and recording commands remain availab
   for (const command of ['node hook.mjs --record-turn - --session session', 'echo "x > y"', 'rg "Set-Content" .', 'rg "writeFileSync" .', 'echo title > README.md', 'Set-Content README.md title', 'sed -i s/a/b/ README.md', 'python -c "open(\'README.md\',\'w\').write(\'title\')"']) assert.deepEqual(await send('PreToolUse', { tool_name: 'Bash', tool_input: { command } }), {});
 });
 test('configuration generates questions, validation and custom skill instructions; empty checks stay quiet', async t => {
-  const { send, edit, record, rows } = project(t, { turnChecks: [{ id: 'privacy', question: 'Does this edit expose private material?', skill: 'privacy-review' }] });
+  const { cwd, home, send, edit, record, rows } = project(t, { turnChecks: [{ id: 'privacy', question: 'Does this edit expose private material?', skill: 'privacy-review' }] });
+  const originalEnvironment = { ...process.env }; t.after(() => restoreEnv(originalEnvironment));
+  Object.assign(process.env, { HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex') });
   const text = (await send('SessionStart')).hookSpecificOutput.additionalContext;
+  assert.equal(get(home, '.geppetto/integrations.md').split('\n').find(line => line.startsWith('Project: ')), `Project: ${cwd.replaceAll('\\', '/')}`);
   assert.match(text, /Does this edit expose private material\?/); assert.match(text, /\$privacy-review/); assert.match(text, /"privacy":\{"applies":false\}/); assert.doesNotMatch(text, /\$requirements-blast-radius/);
   await send('UserPromptSubmit'); assert.equal(record(decision).status, 2); assert.equal(record({ privacy: { applies: true, reason: 'none' } }).status, 2);
   assert.equal(record({ privacy: { applies: true, reason: 'The export includes account details.' } }).status, 0);

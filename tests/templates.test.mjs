@@ -9,8 +9,8 @@ import { fixture, put, get, invoke, repo, git, config } from './helpers.mjs';
 const templates = resolve(repo, 'skills/geppetto-adopt/assets/templates');
 test('both shipped hook fragments deliver internal context from nested directories and leave Stop for background learning', t => {
   for (const path of ['hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json']) {
-    const cwd = fixture(t);
-    const installed = invoke('install.mjs', ['--target', path.includes('/claude/') ? 'claude' : 'codex', '--project', cwd], { cwd });
+    const cwd = fixture(t), home = fixture(t);
+    const installed = invoke('install.mjs', ['--target', path.includes('/claude/') ? 'claude' : 'codex', '--project', cwd], { cwd, home });
     assert.equal(installed.status, 0, installed.stderr);
     mkdirSync(resolve(cwd, 'apps/backend'), { recursive: true });
     put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: true, benchmark: null, minToolCalls: 1, minDurationMs: 300000 } } });
@@ -18,7 +18,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     const event = (name, extra = {}) => {
       const command = hooks[name][0].hooks[0].command.replaceAll('${CLAUDE_PLUGIN_ROOT}', repo);
       assert.match(command, /^node ".*"$/);
-      const result = spawnSync(process.execPath, [command.slice('node "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: name, session_id: 'template', cwd: resolve(cwd, 'apps/backend'), tool_name: 'Read', tool_input: {}, ...extra }), encoding: 'utf8', windowsHide: true });
+      const result = spawnSync(process.execPath, [command.slice('node "'.length, -1)], { cwd: resolve(cwd, 'apps/backend'), input: JSON.stringify({ hook_event_name: name, session_id: 'template', cwd: resolve(cwd, 'apps/backend'), tool_name: 'Read', tool_input: {}, ...extra }), encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex') } });
       assert.equal(result.status, 0, result.stderr); return JSON.parse(result.stdout);
     };
     assert.deepEqual(event('UserPromptSubmit'), {});
@@ -36,6 +36,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     const memory = fixture(t); git(memory, ['init', '-q']); put(memory, 'index.md', '| Bucket | Scope | Holds |\n|---|---|---|\n| preferences | global | Working preferences. |\n');
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
     assert.match(event('SessionStart').hookSpecificOutput.additionalContext, /preferences — Working preferences/);
+    assert.equal(get(home, '.geppetto/integrations.md').split('\n').find(line => line.startsWith('Project: ')), `Project: ${cwd.replaceAll('\\', '/')}`);
     assert.equal(hooks.UserPromptSubmit.flatMap(group => group.hooks).some(handler => handler.command.includes('memory-hook.mjs')), false);
   }
 });
