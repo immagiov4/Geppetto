@@ -69,19 +69,25 @@ class ReviewStrategyTests(unittest.TestCase):
             self.assertEqual(metrics['calls'][-1]['status'], 'failed')
         self.assertFalse((self.args.output / 'report.md').exists())
 
-    def test_question_investigation_confirmation_and_retained_triage(self):
+    def test_question_investigation_without_candidates_retains_triage(self):
         result = self.run_review()
-        self.assertEqual([label for label, _ in self.calls], ['questions', 'investigate', 'verify'])
+        self.assertEqual([label for label, _ in self.calls], ['questions', 'investigate'])
         self.assertIn(self.question['question'], self.calls[1][1])
-        self.assertNotIn(self.question['question'], self.calls[2][1])
         self.assertEqual(result['findings'], [])
+        self.assertEqual(len(result['coverage']), 1)
+        self.assertIn('Confirmed findings: 0. Candidates: 0.', (self.args.output / 'report.md').read_text(encoding='utf8'))
         self.assertEqual(json.loads((self.args.output / 'triage.json').read_text())['questions'], [self.triage])
         self.assertIn('consumer.py:1', (self.args.output / 'report.md').read_text(encoding='utf8'))
 
     def test_generic_remains_two_independent_searches(self):
         self.args.strategy = 'generic'
-        self.run_review()
-        self.assertEqual([label for label, _ in self.calls], ['search-1', 'search-2', 'verify'])
+        self.report['limitations'] = ['Synthetic coverage limit.']
+        result = self.run_review()
+        self.assertEqual([label for label, _ in self.calls], ['search-1', 'search-2'])
+        self.assertEqual(result['findings'], [])
+        self.assertEqual(len(result['coverage']), 2)
+        self.assertIn('Synthetic coverage limit.', result['limitations'])
+        self.assertIn('Confirmed findings: 0. Candidates: 0.', (self.args.output / 'report.md').read_text(encoding='utf8'))
 
     def test_cli_defaults_to_questions_and_preserves_explicit_generic(self):
         for strategy, first in ((None, 'questions'), ('generic', 'search-1')):
@@ -99,11 +105,11 @@ class ReviewStrategyTests(unittest.TestCase):
                 self.assertEqual(metrics['calls'][0]['stage'], first)
                 self.assertEqual(metrics['calls'][0]['status'], 'failed')
 
-    def test_no_questions_still_investigates_and_confirms(self):
+    def test_no_questions_still_investigates(self):
         self.outputs['questions']['questions'] = []
         self.outputs['investigate']['triage']['questions'] = []
         self.run_review()
-        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(len(self.calls), 2)
 
     def test_duplicate_questions_stop_before_investigation(self):
         self.outputs['questions']['questions'].append(deepcopy(self.question))
@@ -160,6 +166,7 @@ class ReviewStrategyTests(unittest.TestCase):
         self.assertEqual(result['findings'], [finding])
         self.assertEqual(set(result), {'findings','decisions','coverage','limitations'})
         self.assertIn('C-1', self.calls[2][1])
+        self.assertNotIn(self.question['question'], self.calls[2][1])
 
     def test_consumer_finding_reaches_confirmation_and_final_report(self):
         finding = {'id': 'C-1', 'severity': 'P2', 'file': 'consumer.py', 'line_start': 1, 'line_end': 1,

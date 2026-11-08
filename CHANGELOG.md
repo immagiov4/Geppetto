@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.9
+
+- Complete reviews with no candidates without an unnecessary verification model call, retaining coverage and limitations. Candidate findings still require independent confirmation.
+
 ## 0.10.8
 
 - Make the independent-review request explicit when the host permits skill-requested delegation, while preserving explicit prohibitions.

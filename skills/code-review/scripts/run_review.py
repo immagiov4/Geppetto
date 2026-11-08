@@ -365,21 +365,22 @@ def main(args):
             coverage.append({"search": index, "files": response["coverage"]})
             limitations.extend(response["limitations"])
         require(len({c["id"] for c in candidates}) == len(candidates), "Duplicate IDs across searches")
-        response = run_call(args, frozen, "verify", base +
-            "\nIndependently verify every candidate against sources and diff. "
-            "Decide accept, reject or unverified for every ID with specific evidence. "
-            "Distinguish regressions, incomplete new behavior, material test defects and preexisting issues. "
-            "Do not present a preexisting issue as introduced by this change. "
-            "Deduplicate only defects with the same demonstrated cause, trigger and consequence. "
-            "accepted_findings contains demonstrated findings with checked locations and an "
-            "original canonical ID. Every accept decision points to that canonical_id; "
-            "the canonical candidate has its own self-referencing accept decision; "
-            "reject and unverified use canonical_id '-'. Keep distinct defects separate.\n" +
-            json.dumps(candidates, ensure_ascii=False), ROOT / "references/verification.schema.json", metrics)
-        accepted.extend(verify_response(args.case, response, candidates, changed, schemas["verification"]))
-        metrics["calls"][-1]["status"] = "completed"
-        decisions.extend(response["decisions"])
-        limitations.extend(response["limitations"])
+        if candidates:
+            response = run_call(args, frozen, "verify", base +
+                "\nIndependently verify every candidate against sources and diff. "
+                "Decide accept, reject or unverified for every ID with specific evidence. "
+                "Distinguish regressions, incomplete new behavior, material test defects and preexisting issues. "
+                "Do not present a preexisting issue as introduced by this change. "
+                "Deduplicate only defects with the same demonstrated cause, trigger and consequence. "
+                "accepted_findings contains demonstrated findings with checked locations and an "
+                "original canonical ID. Every accept decision points to that canonical_id; "
+                "the canonical candidate has its own self-referencing accept decision; "
+                "reject and unverified use canonical_id '-'. Keep distinct defects separate.\n" +
+                json.dumps(candidates, ensure_ascii=False), ROOT / "references/verification.schema.json", metrics)
+            accepted.extend(verify_response(args.case, response, candidates, changed, schemas["verification"]))
+            metrics["calls"][-1]["status"] = "completed"
+            decisions.extend(response["decisions"])
+            limitations.extend(response["limitations"])
         findings = sorted(accepted, key=lambda f: (f["severity"], f["file"], f["line_start"], f["id"]))
         limitations = list(dict.fromkeys(limitations))
         save(args.output / "findings.json", {"findings": findings, "decisions": decisions,
