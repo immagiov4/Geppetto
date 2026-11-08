@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.8
+
+- Make the independent-review request explicit when the host permits skill-requested delegation, while preserving explicit prohibitions.
+- Require the local-fix route to read and execute the verification procedure instead of leaving the handoff implicit.
+
 ## 0.10.7
 
 - Limit the global review gate to projects with a Geppetto configuration.
