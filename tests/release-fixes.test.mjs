@@ -33,14 +33,13 @@ test('bad Stop configuration closes every delivery and logs its redacted error o
   }
 });
 
-test('Stop catches downstream learning errors and active Stop never blocks', async t => {
+test('learning configuration errors fail open and Stop never blocks', async t => {
   const root = project(t), event = { cwd: root, session_id: 'learning-error', turn_id: 'one' };
   await handleEvent({ ...event, hook_event_name: 'UserPromptSubmit' });
   assert.equal(invoke('hook.mjs', ['--record-turn', JSON.stringify(decision), '--session', event.session_id, '--turn', event.turn_id], { cwd: root }).status, 0);
   put(root, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 0 } } });
+  assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: {} }), {});
   for (const stop_hook_active of [false, true]) assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop', stop_hook_active }), {});
-  const errors = get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse).filter(row => row.status === 'error');
-  assert.equal(errors.length, 1); assert.match(errors[0].error, /minToolCalls/);
 });
 
 test('fresh clone updates an exactly generated workflow pin but preserves user edits', t => {

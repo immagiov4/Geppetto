@@ -9,11 +9,12 @@ import { eligibleSignals, learningPolicy, localRecords } from './signal.mjs';
 export async function learningEvent(event, now) {
   if (process.env.GEPPETTO_LEARNING_CHILD === '1') return {};
   const kind = event.hook_event_name ?? 'PreToolUse';
-  if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id || event.stop_hook_active && kind !== 'Stop') return {};
+  // Stop cannot carry additional context in Codex or Claude Code; offers reach the session at PostToolUse.
+  if (!['UserPromptSubmit', 'PreToolUse', 'PostToolUse'].includes(kind) || typeof event.session_id !== 'string' || !event.session_id) return {};
   const root = await projectRoot(event.cwd ?? '.'); const configPath = resolve(root, '.geppetto/config.json');
-  if (!await exists(configPath) && !(kind === 'Stop' && (await localRecords(root, 'signals')).length > 0)) return {};
+  if (!await exists(configPath) && !(kind === 'PostToolUse' && (await localRecords(root, 'signals')).length > 0)) return {};
   const config = { ...learnNudgeDefaults, ...(await jsonFile(configPath, {})).hooks?.learnNudge };
-  if (!config.enabled && !(kind === 'Stop' && (await localRecords(root, 'signals')).length > 0)) return {};
+  if (!config.enabled && !(kind === 'PostToolUse' && (await localRecords(root, 'signals')).length > 0)) return {};
   for (const key of ['minToolCalls', 'minDurationMs']) if (!Number.isSafeInteger(config[key]) || config[key] <= 0) throw new Error(`${configPath}:1: hooks.learnNudge.${key} must be a positive integer`);
   const session = createHash('sha256').update(event.session_id).digest('hex'); const state = resolve(root, '.geppetto/hook-state', session); const activity = resolve(state, 'activity.jsonl');
   const snapshot = turnStatePath(root, event.session_id), hasState = await exists(snapshot) || event.turn_id && await exists(turnStatePath(root, event.session_id, event.turn_id));
@@ -21,13 +22,13 @@ export async function learningEvent(event, now) {
     const active = await readTurnState(root, event.session_id, event.turn_id) ?? {}; const decision = kind === 'PostToolUse' && active.turn ? currentDecision(await jsonFile(decisionPath(root, event.session_id, active.turn), null)) : null;
     return { active, decision }; }) : { active: {}, decision: null };
   const messageTurn = active.userEpoch && (!event.turn_id || active.turn === event.turn_id) ? `${active.turn}:${active.userEpoch}` : event.turn_id || active.turn;
-  if (!['PostToolUse', 'Stop'].includes(kind)) {
+  if (kind !== 'PostToolUse') {
     await mkdir(state, { recursive: true });
     await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);
     await appendFile(activity, `${JSON.stringify({ kind, at: now(), id: event.tool_use_id ?? randomUUID(), turn: messageTurn ?? null })}\n`, { mode: 0o600 });
     return {};   }
   const records = await exists(activity) ? (await readFile(activity, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse) : []; const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit' && (!messageTurn || record.turn === messageTurn)); const calls = records.slice(lastPrompt + 1).filter(record => record.kind === 'PreToolUse' && (!messageTurn || record.turn === messageTurn)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
-  const elapsedMs = unique.length ? now() - Math.min(...unique.map(call => call.at)) : 0; const qualified = config.enabled && (unique.length >= config.minToolCalls || elapsedMs >= config.minDurationMs); const signals = kind === 'Stop' && (await jsonFile(configPath, {})).hooks?.signalLearning?.enabled !== false && (await eligibleSignals(root)).length > 0;
+  const elapsedMs = unique.length ? now() - Math.min(...unique.map(call => call.at)) : 0; const qualified = config.enabled && (unique.length >= config.minToolCalls || elapsedMs >= config.minDurationMs); const signals = (await jsonFile(configPath, {})).hooks?.signalLearning?.enabled !== false && (await eligibleSignals(root)).length > 0;
   const assessed = kind === 'PostToolUse' && config.enabled && !active.messageError && decision?.epoch === active.epoch && decision?.userEpoch === active.userEpoch && (decision?.userDecisionIndex ?? 0) === (active.userDecisionIndex ?? 0) && (decision?.value.feedback?.applies === true || decision?.value.frustration?.applies === true);
   if (!qualified && !signals && !assessed) return {}; const turn = messageTurn || unique[0]?.turn || records[lastPrompt]?.id || unique[0]?.id || 'signals'; const keys = (await eligibleSignals(root)).map(row => row.key); const turnHash = createHash('sha256').update(turn + JSON.stringify(keys)).digest('hex'); const fired = resolve(state, `fired-${turnHash}`);
   await mkdir(state, { recursive: true }); await ignoreLocalFiles(root, ['/hook-state/']);

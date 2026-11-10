@@ -101,14 +101,14 @@ test('learning children and tool-free completions create no reminder or hook sta
   assert.equal(existsSync(resolve(cwd, '.geppetto/hook-state')), false);
 });
 
-test('Stop supplies the reminder when the qualifying turn has no tool-completion event', async t => {
+test('Stop never carries the reminder; the next tool result does', async t => {
   const cwd = fixture(t); put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 1 } } });
   const event = { cwd, session_id: 'stop-fallback', tool_name: 'Read', tool_input: {} };
   await handleEvent({ ...event, hook_event_name: 'PreToolUse' });
-  const result = await handleEvent({ ...event, hook_event_name: 'Stop' });
-  assert.equal(result.hookSpecificOutput.hookEventName, 'Stop');
-  assert.match(result.hookSpecificOutput.additionalContext, /\$geppetto-learn/);
   assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop' }), {});
+  const result = await handleEvent({ ...event, hook_event_name: 'PostToolUse' });
+  assert.equal(result.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.match(result.hookSpecificOutput.additionalContext, /\$geppetto-learn/);
 });
 
 test('plugin reminder signal command runs from a project with no vendored scripts', async t => {

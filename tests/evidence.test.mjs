@@ -22,13 +22,14 @@ test('approved defaults preserve ordered assignment and secondary effects remain
   assert.equal(entry.category, 'workflow'); assert.deepEqual(entry.attributes.effects, attributes.effects); assert.equal(entry.attributes.note, 'token=[REDACTED]');
 });
 
-test('agent friction reaches its configured distinct-session threshold and Stop offers it in-turn', async t => {
+test('agent friction reaches its configured distinct-session threshold and the next tool result offers it in-turn', async t => {
   const root = fixture(t); put(root, '.geppetto/config.json', { hooks: { signalLearning: { minSessions: 3 }, learnNudge: { enabled: false } } });
   for (const session of ['one', 'one', 'two']) await recordSignal(root, observation('threshold', session));
   assert.equal((await eligibleSignals(root)).length, 0);
   await recordSignal(root, observation('threshold', 'three'));
   assert.equal((await eligibleSignals(root)).length, 1);
-  const result = await handleEvent({ cwd: root, session_id: 'three', turn_id: 'retry', hook_event_name: 'Stop' });
+  assert.deepEqual(await handleEvent({ cwd: root, session_id: 'three', turn_id: 'retry', hook_event_name: 'Stop' }), {});
+  const result = await handleEvent({ cwd: root, session_id: 'three', turn_id: 'retry', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: {} });
   assert.match(result.hookSpecificOutput?.additionalContext ?? '', /threshold/);
   assert.equal((await eligibleSignals(root)).length, 1, 'offering evidence does not resolve it');
 });
@@ -172,16 +173,15 @@ test('outcome audit reopens evidence recurring after a change and flags changed 
   put(root, '.geppetto/reads.jsonl', rows([{ path: resolve(root, path), kind: 'skill', ts: '2026-10-04T00:00:00Z', session: 'two' }]));
   assert.deepEqual((await learningAudit(root, { home })).outcomes[0].neverRead, []);
 });
-test('Stop offers a signal that became eligible after an earlier nudge in the same turn', async t => {
+test('a signal that becomes eligible after an earlier nudge is offered at the next tool result, never at Stop', async t => {
   const { learningEvent } = await import('../skills/geppetto-adopt/scripts/learn-nudge.mjs');
-  const { config } = await import('./helpers.mjs');
   const root = fixture(t); git(root, ['init', '-q']);
   put(root, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: true, minToolCalls: 1, minDurationMs: 600000 } } });
   const send = (kind, extra = {}) => learningEvent({ cwd: root, session_id: 'nudge', turn_id: 'one', hook_event_name: kind, ...extra }, () => 1, async () => {});
   await send('PreToolUse', { tool_use_id: 'a' });
-  const early = await send('Stop');
-  assert.match(early.hookSpecificOutput.additionalContext, /Open keys: \[\]/);
+  assert.match((await send('PostToolUse', { tool_use_id: 'a' })).hookSpecificOutput.additionalContext, /Open keys: \[\]/);
   for (const session of ['s1', 's2']) await recordSignal(root, { text: 'Recurring friction in delivery.', key: 'late', session, category: 'workflow', kind: 'friction', scope: 'project' });
-  const late = await send('Stop');
-  assert.match(late.hookSpecificOutput?.additionalContext ?? '', /"late"/);
+  assert.deepEqual(await send('Stop'), {});
+  await send('PreToolUse', { tool_use_id: 'b' });
+  assert.match((await send('PostToolUse', { tool_use_id: 'b' })).hookSpecificOutput?.additionalContext ?? '', /"late"/);
 });

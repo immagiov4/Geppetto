@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.1
+
+- Learning reminders and eligible signals reach the working session at the next tool result. Stop no longer returns that context, which Codex reported as a failed Stop hook and Claude Code ignores.
+
 ## 0.11.0
 
 - Learning happens in the working turn. When the user is frustrated by the work, the agent closes it before the turn ends: it edits the owning rule (lesson), names the rule that already covers it (covered), explains why it cannot recur (one-off), or names the owner it cannot edit (blocked, which opens a signal). Stop asks once when the outcome is missing or a lesson's file did not change.

@@ -10,7 +10,7 @@ Runtime records live in `geppetto/` under the absolute directory returned by `gi
 
 Geppetto preserves legacy journals as immutable imports under the shared `legacy/` directory. Records retain their originating worktree and revision; hook state remains checkout-local. Existing learning branches and working directories remain available for inspection.
 
-Agent evidence qualifies at `hooks.signalLearning.minSessions` (default 2); the existing `maxOpenKeys` threshold also offers open evidence. User-sourced signals qualify immediately. Stop presents eligible keys to the working session without starting a model. Include `key` in the learning outcome to resolve that occurrence; blocked appends an open signal automatically. A later occurrence reopens a resolved key. Weekly curation merges duplicate keys and prunes procedures; the current working session applies lessons.
+Agent evidence qualifies at `hooks.signalLearning.minSessions` (default 2); the existing `maxOpenKeys` threshold also offers open evidence. User-sourced signals qualify immediately. The next tool result presents eligible keys to the working session without starting a model; Stop cannot carry that context in Codex or Claude Code. Include `key` in the learning outcome to resolve that occurrence; blocked appends an open signal automatically. A later occurrence reopens a resolved key. Weekly curation merges duplicate keys and prunes procedures; the current working session applies lessons.
 
 Close historical evidence by hand with `node <adopt>/scripts/signal.mjs --close <key> --reference <commit-or-PR> --reason "<verified disposition>"`. The reference and reason are retained, and resolution is tied to the latest observed occurrence ID. The key must be open.
 
