@@ -73,6 +73,7 @@ async function learningGate(root, state, statePath, event, staged) {
   if (outcome?.outcome === 'lesson') {
     const path = resolve(root, outcome.path); await rejectSymlinks(path);
     if (!state.learningFiles || digest(await readFile(path)) === state.learningFiles[outcome.path]) reason = 'The lesson owner did not change in this user turn.';
+    else if (!(outcome.path in state.learningFiles) && run('git', ['check-ignore', '-q', '--', outcome.path], { cwd: root }).status === 0) reason = 'The lesson owner is ignored by Git; write the lesson in a shared project file.';
   }
   if (!reason) { await finishLearning(root, state, statePath, event); return {}; }
   const block = !event.stop_hook_active && await claimFile(`${statePath}.${digest(state.userEpoch ?? state.turn)}.learning-blocked`);

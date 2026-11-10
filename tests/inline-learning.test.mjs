@@ -60,3 +60,9 @@ test('an eligible signal closes with the same in-turn outcome command',async t=>
  assert.equal(record({learning:{outcome:'covered',path:'AGENTS.md',reason:'The existing rule owns this requirement.',key:'save-check'}}).status,0);await send('Stop');
  assert.deepEqual(JSON.parse(invoke('signal.mjs',['--list'],{cwd}).stdout),[]);
 });
+test('a Git-ignored file cannot be the lesson owner', async t => {
+  const { cwd, send, record } = await setup(t);
+  put(cwd, 'LOCAL.md', 'Private notes.\n'); put(cwd, '.git/info/exclude', 'LOCAL.md\n');
+  assert.equal(record({ learning: { outcome: 'lesson', path: 'LOCAL.md', reason: 'Inspect the actual saved file.' } }).status, 0);
+  const first = await send('Stop'); assert.equal(first.decision, 'block'); assert.match(first.reason, /ignored by Git/);
+});
