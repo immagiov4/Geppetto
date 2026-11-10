@@ -1,4 +1,4 @@
-import { readFile, mkdir, unlink, rmdir, open, writeFile, rename, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdir, unlink, rmdir, open, writeFile, rename, mkdtemp, rm } from 'node:fs/promises';
 import { resolve, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -211,6 +211,10 @@ export async function main(args) {
     console.log(`Memory: ${memoryDescription(preview)}; change with --memory <local|github|native|none>.`);
   }
   if (opts['--dry-run']) { if (!opts['--uninstall'] && plans.some(owner => owner.target !== 'claude')) console.log('Codex hooks: would approve the installed plugin identity or owned command keys after final writes.'); return 0; }
+  if (!opts['--uninstall']) {
+    const directory = resolve(userHome(), '.geppetto');
+    for (const name of await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) if (name === 'learn.lock' || /^integrations\.md\..+\.tmp$/.test(name)) await unlink(resolve(directory, name));
+  }
   if (!opts['--uninstall']) await applyInstallation({ root, manifest, statePath, uninstall: false, source, plans });
   let machine;
   try { for (const owner of plans) machine = await reconcileMachine(root, owner.target, source, { pluginHooks: owner.plugin, uninstall: opts['--uninstall'], uninstallMemory: ['native', 'none'].includes(memory?.choice) ? null : memory, memoryChoice: opts['--memory'], addJobs: opts['--add-job'], jobs: opts['--scheduler-jobs'] ? await jsonFile(opts['--scheduler-jobs']) : {} }); }
@@ -231,7 +235,7 @@ export async function main(args) {
   console.log(`Memory: ${memoryDescription(await memoryConfiguration(root))}; change with --memory <local|github|native|none>.`);
   if (!opts['--uninstall']) { const companions = await compileIntegrations(root); console.log(`Optional companions (install on yes): ${companions.suggestions.slice(0, 3).join(', ') || 'none'}. See the integration catalog for harness instructions.`); }
   const choices = await jsonFile(resolve(root, '.geppetto/config.json'), {});
-  console.log(`Choices (.geppetto/config.json): hooks=${JSON.stringify(choices.hooks ?? {})}; screen.shareSource=${choices.screen?.shareSource === true}; learner=${JSON.stringify(choices.hooks?.signalLearning ?? {})}; review=${JSON.stringify(choices.review ?? {})}; maintenance.enabled=${choices.maintenance?.enabled !== false}; jobs=${JSON.stringify(machine.jobs)}; ci.enabled=${choices.ci?.enabled !== false}. Source sharing: python <screen>/scripts/screen.py --repo <project> --share-source yes|no; key: OPENROUTER_API_KEY in the launching environment.`);
+  console.log(`Choices (.geppetto/config.json): hooks=${JSON.stringify(choices.hooks ?? {})}; screen.shareSource=${choices.screen?.shareSource === true}; signals=${JSON.stringify(choices.hooks?.signalLearning ?? {})}; review=${JSON.stringify(choices.review ?? {})}; maintenance.enabled=${choices.maintenance?.enabled !== false}; jobs=${JSON.stringify(machine.jobs)}; ci.enabled=${choices.ci?.enabled !== false}. Source sharing: python <screen>/scripts/screen.py --repo <project> --share-source yes|no; key: OPENROUTER_API_KEY in the launching environment.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
   if (!opts['--uninstall'] && plans.some(owner => owner.target !== 'claude')) {

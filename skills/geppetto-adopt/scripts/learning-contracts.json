@@ -1,29 +1,4 @@
 {
-  "result": {
-    "type": "object",
-    "additionalProperties": false,
-    "properties": {
-      "decision": {
-        "type": "string",
-        "enum": [
-          "applied",
-          "no_change",
-          "blocked"
-        ]
-      },
-      "reason": {
-        "type": "string"
-      },
-      "owner": {
-        "type": "string"
-      }
-    },
-    "required": [
-      "decision",
-      "reason",
-      "owner"
-    ]
-  },
   "tools": {
     "Read": {
       "path": {

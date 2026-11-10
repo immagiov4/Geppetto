@@ -1,7 +1,7 @@
 import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, put, get, git, invoke } from './helpers.mjs';
+import { fixture, put, get, git } from './helpers.mjs';
 import { handleMemoryEvent } from '../skills/geppetto-adopt/scripts/memory-hook.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 
@@ -29,14 +29,4 @@ test('learning reminders expose native identifiers alongside existing deduplicat
   const [row] = records(cwd);
   assert.equal(row.sessionId, 'working-session'); assert.equal(row.turnId, 'working-turn');
   assert.equal(row.turn, 'working-turn'); assert.equal(row.session.length, 64);
-});
-
-test('background learning errors retain the triggering session and turn', t => {
-  const cwd = fixture(t), home = fixture(t); git(cwd, ['init', '-q']);
-  put(cwd, '.geppetto/config.json', { hooks: { signalLearning: { enabled: true } } });
-  put(cwd, '.geppetto/signals.jsonl', '{"id":"pending","key":"pending","session":"fixture","source":"user","category":"workflow","status":"open","text":"Retain the correction"}\n');
-  const result = invoke('learn-runner.mjs', [], { cwd, home, input: JSON.stringify({ cwd, session_id: 'learning-session', turn_id: 'learning-turn', hook_event_name: 'Stop' }) });
-  assert.equal(result.status, 1);
-  const [row] = records(cwd);
-  assert.equal(row.status, 'error'); assert.equal(row.sessionId, 'learning-session'); assert.equal(row.turnId, 'learning-turn');
 });

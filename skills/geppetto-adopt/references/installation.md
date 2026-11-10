@@ -23,13 +23,13 @@ Explain the small baseline: keep evidence of what happened, design technical obs
 > 1. **Memory**: where lessons are saved. A local Git folder (recommended), a private GitHub repo to share them across computers, Claude's or Codex's own memory, or none.
 > 2. **Checks while working**: yes. Before editing, the agent writes down what it decided; before finishing a large change, `<runtime>` reviews it and receives that change.
 > 3. **Finding the code a change touches**: yes. Your request and the project's committed code go to OpenRouter, private projects included.
-> 4. **Learning from your corrections**: yes. `<runtime>` reads short excerpts of the conversation, with secrets removed, and improves the skills.
+> 4. **Learning from your corrections**: yes. The working agent closes mistakes in the same turn by improving the owning rule or recording why it needs no change.
 > 5. **Weekly upkeep**: yes. `<runtime>` tidies skills and memory once a week.
 > 6. **GitHub check**: yes. A GitHub Actions workflow checks each pull request.
 
 When the OpenRouter key is missing, add to line 3 an offer to enter it through private secret entry. The first specification settles technical observability and any needed documentation structure before implementation, through geppetto-spec. At design time, strongly recommend Architect and Codebase Design and offer Engineering Workflow as the execution router; reuse installed copies. Extra pstack principles are optional after checking overlap. Follow the [companion catalog](integrations.md) for sources and installation.
 
-Record the answers before installing: line 1 through `--memory`; line 2 through `hooks.reviewGate.enabled`, which turns off both the decision record and the review; line 3 through `python <screen>/scripts/screen.py --repo <project> --share-source yes|no`; line 4 through `hooks.learnNudge.enabled` and `hooks.signalLearning.enabled`, with a changed runtime in `hooks.signalLearning.model` and `.reasoningEffort`; line 5 through `maintenance.enabled`; line 6 through `ci.enabled`. Register `.geppetto/config.json` with `--record-generated` when updating an owned configuration. The recap repeats each line with its actual value and how to change it; report a missing prerequisite (Node 22+, Git, Python 3.10+, a signed-in CLI) beside the line it blocks. Never show the key's value.
+Record the answers before installing: line 1 through `--memory`; line 2 through `hooks.reviewGate.enabled`, which controls pre-edit decisions and independent review; line 3 through `python <screen>/scripts/screen.py --repo <project> --share-source yes|no`; line 4 through the `frustration` turn check; `hooks.learnNudge.enabled` controls reminders and `hooks.signalLearning.enabled` controls repeated-signal reminders; line 5 through `maintenance.enabled`; line 6 through `ci.enabled`. Register `.geppetto/config.json` with `--record-generated` when updating an owned configuration. The recap repeats each line with its actual value and how to change it; report a missing prerequisite (Node 22+, Git, Python 3.10+, a signed-in CLI) beside the line it blocks. Never show the key's value.
 
 ## Memory
 
@@ -54,10 +54,9 @@ The optional OpenRouter key enables semantic screening in `$requirements-blast-r
 
 For standalone hook fragments, substitute `${CLAUDE_PLUGIN_ROOT}` with the absolute package root; the shared installer hooks already resolve that path. Record generated files with `--record-generated <project-relative-path>`; write only Geppetto-owned project files. Record existing project checks as `hostChecks.changed`. Follow [jobs](../../geppetto-learn/references/jobs.md) before running installation: attach available native scheduler jobs and hand their registrations to `--scheduler-jobs <external-json>`. Otherwise the installer attaches OS jobs through the subscription CLI, hidden on Windows.
 
-When the task specifies a model for unattended work, record it as `hooks.signalLearning.model` before enabling the learning child; for Codex, preserve the requested effort as `hooks.signalLearning.reasoningEffort`. Verify that the actual child uses that selection.
 
 ## Verify
 
-Run `<adopt>/scripts/audit.mjs --project <project> --verify`, a synthetic prompt hook and memory listing. Complete [hook activation](../assets/templates/hooks/README.md#activation) for the target harness and project. Then run the installer with `--target <target> --project <project> --commit`: it commits only owned installation paths on `geppetto-install`, preserving unrelated staged work. Rerun the audit after committing: learning needs an initial Git revision and must report ready before adoption is complete. Include the commit and recap table in the response.
+Run `<adopt>/scripts/audit.mjs --project <project> --verify`, a synthetic prompt hook and memory listing. Complete [hook activation](../assets/templates/hooks/README.md#activation) for the target harness and project. Then run the installer with `--target <target> --project <project> --commit`: it commits only owned installation paths on `geppetto-install`, preserving unrelated staged work. Rerun the audit after committing: the turn checks use that initial Git revision as their baseline. Include the commit and recap table in the response.
 
 [Process execution](processes.md) governs child processes. Runtime and provider limitations are listed once in the README's Limits section.

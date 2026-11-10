@@ -1,10 +1,10 @@
-import { redact } from './signal.mjs';
+
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, open, mkdir, readdir, access, rename } from 'node:fs/promises';
 import { resolve, basename, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cli, isMain, userHome, jsonFile, run, exists, filesUnder, rejectSymlinks, foundationReport } from './common.mjs';
-import { learningCommand, executeLearning, runLearning } from './learn-runner.mjs';
+import { learningCommand, executeLearning } from './learn-runner.mjs';
 import { memorySettings } from './memory-config.mjs';
 export const maintenanceJobs = ['curate-skills', 'maintain-memory'];
 const cadence = 'weekly Monday 09:00 (local time)';
@@ -131,13 +131,12 @@ export async function main(args) {
   for (const targets of Object.values(machine.projects ?? {})) for (const [target, source] of Object.entries(targets)) targets[target] = await maintenanceSource(source);
   const memory = args[1] === 'maintain-memory' ? await memorySettings(userHome()) : null; const procedure = new URL(`../../${args[1] === 'maintain-memory' ? 'geppetto-memory' : 'skill-learning-patterns'}/SKILL.md`, import.meta.url); const source = new URL(`../assets/templates/jobs/${args[1]}.md`, import.meta.url); const roots = args[1] === 'maintain-memory' ? [memory?.localPath ?? machine.memory?.localPath].filter(Boolean) : [...new Set([...Object.keys(machine.projects), ...Object.values(machine.projects).flatMap(project => Object.values(project))])];
   if (args[2] === '--dry-run') { console.log(JSON.stringify({ job: args[1], host: job.host ?? 'codex', source: fileURLToPath(source), roots })); return 0; }
-  const learning = []; if (args[1] === 'curate-skills') for (const project of Object.keys(machine.projects ?? {})) { try { learning.push({ project, ...await runLearning(project) }); } catch (error) { learning.push({ project, status: 'error', error: redact(error.message), action: 'Run learn-runner for this project and inspect its retained evidence.' }); } }
-  const { learningAudit } = await import('./audit.mjs'); const reports = await Promise.all(Object.keys(machine.projects ?? {}).map(async project => ({ project, foundations: foundationReport(await jsonFile(resolve(project, '.geppetto/config.json'), {})), evidence: await learningAudit(project), companions: await compileIntegrations(project) }))); const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(source, 'utf8')}\nResolved machine context: ${JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory, reports, learning })}. Work only within the supplied file tools. Keep changes local for review.\n`; const log = resolve(userHome(), `.geppetto/${args[1]}.log`);
+  const { learningAudit } = await import('./audit.mjs'); const reports = await Promise.all(Object.keys(machine.projects ?? {}).map(async project => ({ project, foundations: foundationReport(await jsonFile(resolve(project, '.geppetto/config.json'), {})), evidence: await learningAudit(project), companions: await compileIntegrations(project) }))); const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(source, 'utf8')}\nResolved machine context: ${JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory, reports })}. Work only within the supplied file tools. Keep changes local for review.\n`; const log = resolve(userHome(), `.geppetto/${args[1]}.log`);
   await writeFile(log, roots.length ? '' : 'No configured maintenance destination.\n');
   const output = await open(log, 'a');
   try {
     for (const cwd of roots) {
-      await output.write(`${cwd}\n${JSON.stringify({ reports, learning })}\n`);
+      await output.write(`${cwd}\n${JSON.stringify({ reports })}\n`);
       await executeLearning({ cwd, prompt, host: job.host ?? 'codex', output: output.fd, maintenance: args[1] === 'curate-skills' });
     }
   } finally { await output.close(); }

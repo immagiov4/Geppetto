@@ -1,18 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { readFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
-import { resolve, matchesGlob } from 'node:path';
+import { resolve, relative, matchesGlob } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, exists } from './common.mjs';
+import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, exists, contained, rejectSymlinks } from './common.mjs';
 import { messageCheckpoint, withTurnLock, turnStatePath, readTurnState, decisionPath, currentDecision } from './turn-messages.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
-import { redact, localRecords } from './signal.mjs';
+import { redact, localRecords, signalArchive, resolveSignals, redactValue, learningPolicy } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
 import { placeholderReason } from './gate-sections.mjs';
-import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, commandArgs } from './turn-checks.mjs';
+import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, commandArgs, userTurnDecision } from './turn-checks.mjs';
 function sectionFeedback(body, cwd, runCommand) {
   const result = runCommand(process.execPath, [fileURLToPath(new URL('./gate-sections.mjs', import.meta.url)), '--pr', '-'], { cwd, input: body });
   if (result.status === 0) return 'Geppetto: PR sections pass.';
@@ -26,6 +26,59 @@ async function worktreeFingerprint(root) {
     if (stat) hash.update(`${name}\0${stat.size}\0${stat.mtimeNs}\0${stat.ctimeNs}\n`);
   } return hash.digest('hex');
 }
+async function learningFiles(root) {
+  const files = {};
+  for (const name of gitOutput(root, ['ls-files', '-c', '-o', '--exclude-standard', '-z'], { trim: false }).split('\0').filter(Boolean)) {
+    const path = resolve(root, name); if (!contained(root, path) || name.startsWith('.geppetto/hook-state/')) continue;
+    try { if ((await lstat(path)).isFile()) { await rejectSymlinks(path); files[name.replaceAll('\\', '/')] = digest(await readFile(path)); } }
+    catch (error) { if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error; }
+  }
+  return files;
+}
+async function recordLearning(root, state, statePath, event, learning) {
+  if (!learning || !['lesson', 'covered', 'one-off', 'blocked'].includes(learning.outcome) || Object.keys(learning).some(key => !['outcome', 'path', 'reason', 'key'].includes(key)) || typeof learning.reason !== 'string' || /[\r\n]/.test(learning.reason) || placeholderReason(learning.reason)) throw new UsageError('Learning needs outcome and a meaningful one-line reason.');
+  if (learning.key !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(learning.key)) throw new UsageError('Learning key must be a slug.');
+  if (['lesson', 'covered', 'blocked'].includes(learning.outcome) && (typeof learning.path !== 'string' || !learning.path.trim())) throw new UsageError('Learning needs its owner path.');
+  if (['lesson', 'covered'].includes(learning.outcome)) {
+    const path = resolve(root, learning.path); if (!contained(root, path) || path === root || relative(root, path).split(/[\\/]/)[0] === '.git') throw new UsageError('Use a project owner; retain external lessons in the project instruction file.');
+    await rejectSymlinks(path); if (!(await lstat(path)).isFile()) throw new UsageError('Learning owner must be a file.');
+    learning = { ...learning, path: relative(root, path).replaceAll('\\', '/') };
+  }
+  if (learning.outcome === 'blocked' && !learning.key) throw new UsageError('Blocked learning needs a signal key.');
+  if (state.learningOutcome) {
+    if (JSON.stringify(state.learningOutcome) !== JSON.stringify(learning)) throw new UsageError('This user turn already has a learning outcome.');
+    return learning;
+  }
+  state.learningOutcome = learning; await atomicJson(statePath, state); return learning;
+}
+async function finishLearning(root, state, statePath, event) {
+  const learning = state.learningOutcome; if (!learning || state.learningRecorded) return;
+  const ts = new Date().toISOString();
+  if (learning.outcome === 'blocked') {
+    const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null));
+    const decision = userTurnDecision({ decisions: staged?.decisions.slice(staged.userDecisionIndex ?? 0) }), source = decision?.frustration?.applies || decision?.feedback?.applies ? 'user' : 'agent';
+    const prior = (await signalArchive(root)).find(row => row.key === learning.key), categories = learningPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})).categories;
+    await appendRecord(root, 'signals', redactValue({ key: learning.key, text: `${learning.path}: ${learning.reason}`, session: event.session_id, turn: state.turn, source, category: prior?.category ?? (categories.some(row => row.id === 'workflow') ? 'workflow' : 'other'), evidence: learning.path, status: 'open', id: randomUUID(), ts, transcript_path: state.transcript_path }));
+  }
+  else if (learning.key) {
+    const signal = (await signalArchive(root)).find(row => row.key === learning.key); if (!signal || signal.status !== 'open') throw new UsageError('Learning key must name an open signal.');
+    await resolveSignals(root, [learning.key], { reference: `${event.session_id}:${state.turn}`, reason: learning.reason, paths: learning.path ? [learning.path] : [], through: { [learning.key]: signal.id } });
+  }
+  await logHookEvent(root, { hook: 'learningOutcome', ...redactValue(learning), userEpoch: state.userEpoch ?? 'initial', ts, modelCalls: 0 }, event);
+  state.learningRecorded = true; await atomicJson(statePath, state);
+}
+async function learningGate(root, state, statePath, event, staged) {
+  const outcome = state.learningOutcome, frustration = staged?.decisions.slice(staged.userDecisionIndex ?? 0).some(row => row.decision.frustration?.applies);
+  let reason = frustration && !outcome ? 'Frustration needs a learning outcome in this turn.' : '';
+  if (outcome?.outcome === 'lesson') {
+    const path = resolve(root, outcome.path); await rejectSymlinks(path);
+    if (!state.learningFiles || digest(await readFile(path)) === state.learningFiles[outcome.path]) reason = 'The lesson owner did not change in this user turn.';
+  }
+  if (!reason) { await finishLearning(root, state, statePath, event); return {}; }
+  const block = !event.stop_hook_active && await claimFile(`${statePath}.${digest(state.userEpoch ?? state.turn)}.learning-blocked`);
+  await logHookEvent(root, { hook: 'learningGate', status: block ? 'block' : 'second-stop', reason, modelCalls: 0 }, event);
+  return block ? { decision: 'block', reason: `${reason} Edit the project instruction or existing owner, then record ${recordCommand(event.session_id, state.turn)} with {"learning":{"outcome":"lesson|covered|one-off|blocked","path":"<owner>","reason":"<why>","key":"<signal-key when blocked or closing a signal>"}}. A lesson names a file changed now; covered names an existing rule; one-off explains why it cannot recur; blocked names the inaccessible owner and requires a key.` } : {};
+}
 async function sessionStart(event, options) {
   const memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
   await compileIntegrations(root, options);
@@ -33,7 +86,7 @@ async function sessionStart(event, options) {
   const policy = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); if (!policy.checks.length) return memory;
   await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
   if (!await claimFile(`${turnStatePath(root, event.session_id)}.startup`)) return memory;
-  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }])); const text = `Before the first file-modifying tool call after each user message, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\n${foundationReminder} Judge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
+  const schema = Object.fromEntries(policy.checks.map(({ id }) => [id, { [decisionFields(id)[0]]: false }])); const text = `Before the first file-modifying tool call after each user message, record decisions from the project root: ${recordCommand(event.session_id)} (active turn resolved automatically; --record-turn - reads JSON stdin). Edit-free turns need no record unless frustration applies. Close frustration in this turn: edit the owning rule, then use --record-turn with {"learning":{"outcome":"lesson","path":"AGENTS.md","reason":"<concrete prevention>"}}. Other outcomes: covered with existing rule path, one-off with reason, blocked with inaccessible owner path/reason and key. Installed plugin owners belong in the project instruction file instead. Plain steering needs no outcome.\nMinimal schema: ${JSON.stringify(schema)}.\n${policy.checks.map(({ id, question, skill }) => `${id}: ${question} If true, apply $${skill}; supply meaningful one-line ${decisionFields(id).slice(1).join(' and ')}.`).join('\n')}\n${foundationReminder} Judge incoming work before editing. On review-result re-arm, record feedback again before the next edit. Set optional userCorrection to true only if this user message corrects the preceding work, false otherwise; this calibrates audit without text heuristics. For a pure continuation use {"continuation":true}; renewed feedback still needs evaluation. Review is filled by the gate.`;
   try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
   catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; }
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
@@ -53,6 +106,7 @@ function turnDecision(value, checks) {
 export async function recordTurn(root, session, turn, value) { return withTurnLock(`${turnStatePath(root, session)}.lock`, async () => {
   const state = currentState(await readTurnState(root, session, turn)); turn ??= state?.turn;
   if (!state || state.turn !== turn) throw new UsageError('No matching active session and turn; use the command supplied by PreToolUse.');
+  if (value && Object.keys(value).length === 1 && value.learning) return recordLearning(root, state, turnStatePath(root, session, turn && state.turn !== (await readTurnState(root, session))?.turn ? turn : undefined), { session_id: session, turn_id: turn }, value.learning);
   const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && state.epoch !== state.userEpoch && previous !== null; const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
   if ((renewed || state.epoch === state.userEpoch) && value?.continuation) throw new UsageError('A new user message or renewed feedback requires explicit decisions.');
   turnDecision(value, renewed && value && Object.keys(value).every(key => ['feedback', 'userCorrection'].includes(key)) ? required : checks);
@@ -145,7 +199,7 @@ async function completionEvent(event) {
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
     const prior = event.turn_id ? currentDecision(await jsonFile(decisionPath(root, event.session_id, event.turn_id), null)) : null;
     fresh = !prior;
-    state = { transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), ...(await reviewSnapshot(root, base, policy)) };
+    state = { transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), learningFiles: await learningFiles(root), ...(await reviewSnapshot(root, base, policy)) };
     await atomicJson(statePath, state);
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
@@ -164,6 +218,7 @@ async function completionEvent(event) {
       if (!fresh && checkpoint.userMessage && state.userEpoch !== `user-${checkpoint.userMessage}`) {
         const prior = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null));
         state.userEpoch = `user-${checkpoint.userMessage}`; state.epoch = state.userEpoch;
+        delete state.learningOutcome; delete state.learningRecorded; state.learningFiles = await learningFiles(root);
         state.userDecisionIndex = prior?.userEpoch === state.userEpoch ? prior.userDecisionIndex : prior?.decisions.length ?? 0;
         if (state.shellPending) state.shellPending = state.epoch;
         await logHookEvent(root, { hook: 'turnGate', status: 'user-message', bytesRead: checkpoint.bytesRead, modelCalls: 0 }, event);
@@ -173,7 +228,9 @@ async function completionEvent(event) {
       }
     }
   }
-  if (kind === 'UserPromptSubmit' || policy.enabled === false) return {};
+  if (kind === 'UserPromptSubmit') return {};
+  if (kind === 'Stop') { const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const learning = await learningGate(root, state, statePath, event, staged); if (learning.decision) return learning; }
+  if (policy.enabled === false) return {};
   if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(turnConfig));
   if (kind !== 'Stop') return {};
   const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
@@ -199,13 +256,13 @@ async function completionEvent(event) {
   }
   let review_blocked = false; try { review_blocked = !['reviewed', 'below-threshold'].includes(status) && (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked }; }); }
-async function dispatch(event, { runCommand = run, now = Date.now, home, launchLearning } = {}) {
+async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   if (process.env.GEPPETTO_LEARNING_CHILD !== '1') await logReads(event, { home });
   if (event.hook_event_name === 'SessionStart') return process.env.GEPPETTO_LEARNING_CHILD === '1' ? {} : sessionStart(event, { home });
   const { review_blocked, ...review } = await completionEvent(event);
   if (review.hookSpecificOutput?.permissionDecision === 'deny') return review;
-  const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now, launchLearning); const native = await nativeMemoryEvent(event, { home }); if (event.hook_event_name === 'UserPromptSubmit') return {};
+  const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now); const native = await nativeMemoryEvent(event, { home }); if (event.hook_event_name === 'UserPromptSubmit') return {};
   if (native.hookSpecificOutput) {
     if (learning.hookSpecificOutput) native.hookSpecificOutput.additionalContext += `\n${learning.hookSpecificOutput.additionalContext}`;
     return native;   }

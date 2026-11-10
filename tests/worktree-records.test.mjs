@@ -5,8 +5,8 @@ import { symlink } from 'node:fs/promises';
 import { fixture, put, git } from './helpers.mjs';
 import { appendRecord } from '../skills/geppetto-adopt/scripts/common.mjs';
 import { localRecords, signalArchive } from '../skills/geppetto-adopt/scripts/signal.mjs';
-import { learningState, projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
-import { runLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
+
+
 import { learningAudit } from '../skills/geppetto-adopt/scripts/audit.mjs';
 import { handleEvent, recordReview } from '../skills/geppetto-adopt/scripts/hook.mjs';
 
@@ -62,23 +62,6 @@ test('all journals survive deletion while review eligibility remains checkout-sp
   assert.equal((await localRecords(other, 'reviews', { currentWorktree: true })).length, 1);
   check(root, ['worktree', 'remove', '--force', other]);
   assert.equal((await learningAudit(root, { home: fixture(t) })).userFriction.turns, 1);
-});
-
-test('learning consumes shared evidence once and retains progress after the source worktree is removed', async t => {
-  const { root, other, check } = repositories(t), home = fixture(t);
-  put(other, '.geppetto/learning.json', { lastId: 'previous', status: 'unchanged' });
-  assert.equal((await learningState(root)).state.lastId, 'previous');
-  assert.equal((await learningState(root)).path, (await learningState(other)).path);
-  put(other, 'chat.jsonl', JSON.stringify({ message: { role: 'user', content: 'Synthetic public correction' } }) + '\n');
-  await appendRecord(other, 'signals', { id: 'pending', key: 'shared', session: 'delegated', source: 'user', status: 'open', category: 'workflow', text: 'Reusable correction', transcript_path: resolve(other, 'chat.jsonl') });
-  check(root, ['worktree', 'remove', '--force', other]);
-  const first = await runLearning(root, { home, execute: async () => ({ decision: 'no_change', reason: 'Already covered by the project instructions.', owner: 'README.md' }) });
-  assert.equal(first.lastId, 'pending');
-  assert.equal((await learningState(root)).state.lastId, 'pending');
-  assert.equal((await signalArchive(root))[0].status, 'resolved');
-  let executions = 0;
-  const second = await runLearning(root, { home, execute: async () => { executions++; } });
-  assert.equal(second.status, 'idle'); assert.equal(executions, 0);
 });
 
 test('reusing a removed checkout path cannot inherit its archived review approval', async t => {

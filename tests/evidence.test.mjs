@@ -1,46 +1,18 @@
 import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolve, delimiter } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+
 import { fixture, put, get, invoke, git, config, scripts } from './helpers.mjs';
 import { recordSignal, signalArchive, eligibleSignals, resolveSignals, maintainEvidence } from '../skills/geppetto-adopt/scripts/signal.mjs';
-import { runLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
+
 import { learningFileTool } from '../skills/geppetto-adopt/scripts/learner-tools.mjs';
 import { defaultConfig } from '../skills/geppetto-adopt/scripts/common.mjs';
 import { learningAudit } from '../skills/geppetto-adopt/scripts/audit.mjs';
 import { handleEvent, recordTurn } from '../skills/geppetto-adopt/scripts/hook.mjs';
 const rows = records => records.map(JSON.stringify).join('\n') + '\n';
 const observation = (key, session, extra = {}) => ({ key, session, category: 'efficiency', text: 'Synthetic repeated work', ...extra });
-function observeWorker(home) {
-  const path = resolve(home, 'observe-worker.cjs');
-  put(home, 'observe-worker.cjs', `if(process.argv[1]?.endsWith('learn-runner.mjs'))require('node:fs').writeFileSync(${JSON.stringify(resolve(home, 'worker.pid'))},String(process.pid));`);
-  return `${process.env.NODE_OPTIONS ?? ''} --require=${JSON.stringify(path)}`;
-}
-async function waitForWorker(home, deadline) {
-  const pid = Number(get(home, 'worker.pid'));
-  while (Date.now() < deadline) {
-    try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw error; }
-    await new Promise(done => setTimeout(done, 25));
-  }
-  assert.fail('The detached recording worker did not exit after releasing its lock.');
-}
-test('the recording CLI starts its default worker at threshold and exits without a module cycle', async t => {
-  const root = fixture(t, { maxRetries: 3 }), home = fixture(t, { maxRetries: 3 });
-  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(root, args);
-  put(root, 'README.md', '# Owner\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
-  put(root, '.geppetto/config.json', { hooks: { signalLearning: { host: 'codex' } }, memory: { choice: 'none' } });
-  put(root, '.geppetto/signals.jsonl', rows([{ id: 'seed', key: 'cli-case', category: 'workflow', source: 'agent', session: 'one', status: 'open', text: 'First observation' }]));
-  put(home, 'node_modules/@openai/codex/bin/codex.js', "const fs=require('fs');process.stdin.resume();process.stdin.on('end',()=>{const a=process.argv.slice(2);fs.writeFileSync(a[a.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'The existing owner covers the evidence.',owner:'README.md'}));});");
-  const result = spawnSync(process.execPath, [resolve(scripts, 'signal.mjs'), 'Second observation', '--key', 'cli-case', '--category', 'workflow', '--session', 'two'], { cwd: root, windowsHide: true, encoding: 'utf8', timeout: 15000, env: { ...process.env, NODE_OPTIONS: observeWorker(home), HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex'), PATH: `${home}${delimiter}${process.env.PATH}` } });
-  assert.equal(result.status, 0, result.stderr);
-  const deadline = Date.now() + 15000;
-  while ((!existsSync(projectDataPath(root, 'learning.json')) || existsSync(resolve(home, '.geppetto/learn.lock'))) && Date.now() < deadline) await new Promise(done => setTimeout(done, 25));
-  assert.equal(JSON.parse(get(root, projectDataPath(root, 'learning.json'))).status, 'unchanged');
-  await waitForWorker(home, deadline);
-});
-
 test('approved defaults preserve ordered assignment and secondary effects remain attributes', async t => {
   assert.deepEqual(defaultConfig().categories.map(row => row.id), ['security', 'verification', 'workflow', 'efficiency', 'communication', 'behavior']);
   const root = fixture(t), attributes = { episode: 'synthetic-episode', effects: ['frustration', 'rework'], note: 'token=synthetic-secret' };
@@ -50,16 +22,15 @@ test('approved defaults preserve ordered assignment and secondary effects remain
   assert.equal(entry.category, 'workflow'); assert.deepEqual(entry.attributes.effects, attributes.effects); assert.equal(entry.attributes.note, 'token=[REDACTED]');
 });
 
-test('agent threshold uses three distinct sessions when configured, and failed launches retain eligible evidence', async t => {
-  const root = fixture(t), calls = [];
-  put(root, '.geppetto/config.json', { hooks: { signalLearning: { minSessions: 3 } } });
-  const launch = async event => calls.push(event);
-  for (const session of ['one', 'one', 'two']) await recordSignal(root, observation('threshold', session), { launch });
-  assert.equal(calls.length, 0);
-  await assert.rejects(recordSignal(root, observation('threshold', 'three'), { launch: async () => { throw new Error('Synthetic launch failure'); } }), /launch failure/);
+test('agent friction reaches its configured distinct-session threshold and Stop offers it in-turn', async t => {
+  const root = fixture(t); put(root, '.geppetto/config.json', { hooks: { signalLearning: { minSessions: 3 }, learnNudge: { enabled: false } } });
+  for (const session of ['one', 'one', 'two']) await recordSignal(root, observation('threshold', session));
+  assert.equal((await eligibleSignals(root)).length, 0);
+  await recordSignal(root, observation('threshold', 'three'));
   assert.equal((await eligibleSignals(root)).length, 1);
-  await handleEvent({ cwd: root, session_id: 'three', turn_id: 'retry', hook_event_name: 'Stop' }, { launchLearning: launch });
-  assert.equal(calls.length, 1);
+  const result = await handleEvent({ cwd: root, session_id: 'three', turn_id: 'retry', hook_event_name: 'Stop' });
+  assert.match(result.hookSpecificOutput?.additionalContext ?? '', /threshold/);
+  assert.equal((await eligibleSignals(root)).length, 1, 'offering evidence does not resolve it');
 });
 
 test('shell read telemetry ignores neighboring writes and listings and records personal aliases', async t => {
@@ -88,7 +59,7 @@ test('a flagged active user turn starts learning immediately before Stop writes 
   await handleEvent({ cwd: root, session_id: 'active', turn_id: 'turn', hook_event_name: 'UserPromptSubmit' });
   await recordTurn(root, 'active', 'turn', { requirements: { changes: false }, feedback: { applies: true, on: 'The user corrected the result.', action: 'Fix the existing owner.' }, frustration: { applies: false } });
   const entry = await recordSignal(root, observation('active-user', 'active'), { launch: async event => starts.push(event) });
-  assert.equal(entry.source, 'user'); assert.equal(starts.length, 1);
+  assert.equal(entry.source, 'user'); assert.equal(starts.length, 0);
 });
 test('replacing categories in config changes validation without changing code', async t => {
   const root = fixture(t), category = { id: 'configured-class', definition: 'A broad configured problem class.', score: 'Count evidenced keys per distinct session.' };
@@ -110,30 +81,13 @@ test('curation proposes a class only with three other keys across sessions, and 
   await assert.rejects(learningFileTool(root, 'MaintainEvidence', { action: 'merge' }), /unavailable/);
 });
 
-test('agent signals stay pending below threshold and learner changes carry keys without consuming newer occurrences', async t => {
-  const root = fixture(t), home = fixture(t), launch = async () => {};
-  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(root, args);
-  put(root, 'lesson.md', 'Original owner\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
-  await recordSignal(root, observation('redo', 'one'), { launch });
-  assert.equal((await runLearning(root, { home, execute: () => assert.fail('below threshold') })).status, 'idle');
-  await recordSignal(root, observation('redo', 'two'), { launch });
-  const result = await runLearning(root, { home, execute: async ({ cwd }) => {
-    put(cwd, 'lesson.md', 'Improved owner\n');
-    await recordSignal(root, observation('redo', 'three'), { launch });
-    return { decision: 'applied', owner: 'lesson.md', reason: 'Corrected repeated work at the owner.' };
-  } });
-  assert.equal(result.status, 'committed'); assert.match(git(result.path, ['log', '-1', '--format=%B']).stdout, /Evidence: redo/);
-  assert.equal((await signalArchive(root)).find(row => row.key === 'redo').status, 'open');
-  assert.equal(get(root, 'lesson.md'), 'Original owner\n');
-});
-
 test('only open keys are offered and one key counts once in each session', async t => {
   const root = fixture(t), starts = [], launch = async event => starts.push(event);
   await recordSignal(root, observation('redo', 'one'), { launch });
   await recordSignal(root, observation('redo', 'one'), { launch });
   assert.equal((await signalArchive(root)).length, 1); assert.equal(starts.length, 0);
   await recordSignal(root, observation('redo', 'two'), { launch });
-  assert.equal(starts.length, 1); assert.deepEqual((await eligibleSignals(root)).map(row => row.key), ['redo']);
+  assert.equal(starts.length, 0); assert.deepEqual((await eligibleSignals(root)).map(row => row.key), ['redo']);
   await resolveSignals(root, ['redo'], { reference: 'abc', paths: ['lesson.md'], reason: 'Fixed owner' });
   const list = invoke('signal.mjs', ['--list'], { cwd: root }); assert.equal(list.status, 0, list.stderr); assert.deepEqual(JSON.parse(list.stdout), []);
   await recordSignal(root, observation('redo', 'two'), { launch });
@@ -148,12 +102,12 @@ test('user provenance comes from flagged feedback or frustration, agent threshol
   const root = fixture(t), starts = [], launch = async event => starts.push(event);
   await assert.rejects(recordSignal(root, observation('user-fix', 'u', { source: 'user' }), { launch }), /turn record/);
   put(root, '.geppetto/turns.jsonl', rows([{ sessionId: 'u', turnId: 'turn', feedback: { applies: true } }]));
-  await recordSignal(root, observation('user-fix', 'u', { turn: 'turn', source: 'user' }), { launch }); assert.equal(starts.length, 1);
+  await recordSignal(root, observation('user-fix', 'u', { turn: 'turn', source: 'user' }), { launch }); assert.equal(starts.length, 0);
   put(root, '.geppetto/config.json', { hooks: { signalLearning: { minSessions: 3, maxOpenKeys: 1 } } });
-  await recordSignal(root, observation('second', 's'), { launch }); assert.equal(starts.length, 2);
+  await recordSignal(root, observation('second', 's'), { launch }); assert.equal(starts.length, 0);
   assert.equal((await eligibleSignals(root)).length, 2);
   put(root, '.geppetto/config.json', { hooks: { signalLearning: { enabled: false } } });
-  await recordSignal(root, observation('third', 's'), { launch }); assert.equal(starts.length, 2);
+  await recordSignal(root, observation('third', 's'), { launch }); assert.equal(starts.length, 0);
 });
 
 test('review feedback on a completed turn retains agent provenance when the user message was unflagged', async t => {
@@ -175,7 +129,7 @@ test('an unrelated below-threshold key does not relaunch learning for an older p
   put(root, '.geppetto/turns.jsonl', rows([{ sessionId: 'user', feedback: { applies: true } }]));
   await recordSignal(root, observation('user-pending', 'user'), { launch });
   await recordSignal(root, observation('agent-once', 'agent'), { launch });
-  assert.equal(starts.length, 1);
+  assert.equal(starts.length, 0);
 });
 
 test('category boundary lists supported categories and requires concrete evidence for other; legacy metrics remain readable', async t => {

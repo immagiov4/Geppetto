@@ -39,14 +39,6 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
   root = await realpath(root);
   if (typeof args.path === 'string' && contained(requestedRoot, resolve(requestedRoot, args.path))) args = { ...args, path: resolve(root, relative(requestedRoot, resolve(requestedRoot, args.path))) };
   const read = async path => { const text = redact(await readFile(path, 'utf8')); await logReads({ cwd: telemetry.root ?? root, session_id: telemetry.session ?? 'learner', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { path } }, { home: telemetry.home, readRoot: root, reference: telemetry.root && contained(root, path) ? gitOutput(root, ['rev-parse', 'HEAD']) : undefined }); return text; };
-  if (telemetry.evidenceRoot && typeof args.path === 'string') {
-    const evidenceRoot = await realpath(telemetry.evidenceRoot), path = resolve(root, args.path);
-    if (contained(evidenceRoot, path)) {
-      if (name !== 'Read') throw new LearningScopeError('Session evidence is read-only');
-      // Snapshots are already redacted; repeating text redaction can invalidate their JSON.
-      return readFile(await learningFilePath(evidenceRoot, path), 'utf8');
-    }
-  }
   if (name === 'MaintainEvidence') { if (!telemetry.maintenance || readOnly) throw new Error('Maintenance capability is unavailable'); await maintainEvidence(root, args); return 'Evidence maintenance saved'; }
   if (name === 'Read' && referenceRoot) {
     const requestedReference = resolve(referenceRoot);
@@ -94,7 +86,7 @@ if (isMain(import.meta.url)) {
     else if (request.method === 'tools/call') {
       try {
         if (!allowed.includes(request.params.name)) throw new Error('Tool outside the configured selection');
-        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly, referenceRoot, { root: process.argv[6] ?? root, session: process.argv[7], evidenceRoot: process.argv[8], maintenance: process.argv[3] === 'maintenance' }) }] };
+        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly, referenceRoot, { root: process.argv[6] ?? root, session: process.argv[7], maintenance: process.argv[3] === 'maintenance' }) }] };
       }
       catch { result = { isError: true, content: [{ type: 'text', text: 'File operation rejected; verify the project path, tool and exact edit match.' }] }; }
     } else if (request.method === 'ping') result = {};

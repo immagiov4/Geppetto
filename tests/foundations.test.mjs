@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, invoke, repo, config, git } from './helpers.mjs';
 import { defaultConfig, validateConfig } from '../skills/geppetto-adopt/scripts/common.mjs';
-import { runLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
+
 
 test('config accepts foundation choices independently of principle packs', () => {
   assert.deepEqual(defaultConfig().foundations, { documentation: null, observability: null });
@@ -32,18 +32,6 @@ test('installation recap surfaces unset foundations', t => {
   const result = invoke('install.mjs', ['--target', 'codex', '--project', root, '--plugin-hooks', '--gate-sha', 'a'.repeat(40)], { cwd: root, home });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Unset foundations: documentation, observability/);
-});
-
-test('the bounded learner receives recorded foundation choices without needing configuration file access', async t => {
-  const root = fixture(t), home = fixture(t);
-  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(root, args);
-  put(root, 'README.md', '# Owner\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
-  put(root, '.geppetto/config.json', { foundations: { documentation: 'Coherent topic pages with an index.', observability: 'Sampled rotating traces.' } });
-  put(root, '.geppetto/signals.jsonl', JSON.stringify({ id: 'foundations', key: 'foundations', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Follow the agreed owner.' }) + '\n');
-  await runLearning(root, { home, execute: async ({ prompt }) => {
-    assert.match(prompt, /Resolved project foundations:.*Coherent topic pages with an index.*Sampled rotating traces/);
-    return { decision: 'no_change', owner: 'README.md', reason: 'The agreed owner already covers this case.' };
-  } });
 });
 
 test('foundation instructions fit within each skill’s existing word count', () => {

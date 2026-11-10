@@ -91,7 +91,7 @@ Generalizable lessons and decision rationale live in a Git repository of Markdow
 | **Procedures** | `geppetto-adopt`, `geppetto-spec`, `geppetto-build`, `geppetto-verify`, `geppetto-learn`, `geppetto-memory` |
 | **Principles** | `geppetto-measure-it`, `geppetto-x-ray`, `geppetto-reuse-it`, `geppetto-living-docs`, `geppetto-behaviour-tests` |
 | **Bundled** | `writing-for-agents`, `requirements-blast-radius`, `skill-learning-patterns`, `code-review`, `receive-work-feedback`, `retro` (optional), `write-pr` (fallback when no PR procedure is selected) |
-| **Scripts** | `audit`, `install`, `gate-sections`, `gate-agents`, `signal`, `memory-hook`, `learn-nudge`, `learn-runner`, `machine`, `migrate-agents`, `host-lint` |
+| **Scripts** | `audit`, `install`, `gate-sections`, `gate-agents`, `signal`, `memory-hook`, `learn-nudge`, `machine`, `migrate-agents`, `host-lint` |
 
 Bundled copies keep provenance in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 

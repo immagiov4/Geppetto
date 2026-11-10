@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
-import { fixture, put, get, git, config } from './helpers.mjs';
+import { fixture, put, config } from './helpers.mjs';
 import { recordSignal, signalArchive, eligibleSignals, localRecords, maintainEvidence } from '../skills/geppetto-adopt/scripts/signal.mjs';
 import { learningAudit } from '../skills/geppetto-adopt/scripts/audit.mjs';
 import { logReads } from '../skills/geppetto-adopt/scripts/hook-events.mjs';
-import { learningFileTool } from '../skills/geppetto-adopt/scripts/learner-tools.mjs';
-import { runLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
+
+
 import { validateConfig } from '../skills/geppetto-adopt/scripts/common.mjs';
 
 const rows = records => records.map(JSON.stringify).join('\n') + '\n';
@@ -25,7 +25,7 @@ test('R1: same-session user corrections are retained and qualify immediately wit
   const [entry] = await signalArchive(root);
   assert.equal(entry.source, 'user'); assert.deepEqual(entry.sessions, ['session']);
   assert.deepEqual((await eligibleSignals(root)).map(row => row.key), ['same-problem']);
-  assert.equal(starts.length, 2);
+  assert.equal(starts.length, 0);
   assert.equal((await recordSignal(root, observation('same-problem', { source: 'agent' }), { launch })).duplicate, true);
 });
 
@@ -49,36 +49,6 @@ test('R2: never-read outcomes and inventory exclude documents outside successful
   await logReads(readEvent(root, resolve(privateRoot, 'index.md')), { home });
   assert.equal((await localRecords(root, 'reads')).length, 3);
   assert.equal((await learningAudit(root, { home })).neverRead.includes(resolve(privateRoot, 'index.md')), false);
-});
-
-test('R3: learner working-copy reads count for source skills and memory pages while retaining the read revision', async t => {
-  const root = fixture(t), home = fixture(t), skill = 'skills/example/SKILL.md', page = 'buckets/preferences/page.md';
-  for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) assert.equal(git(root, args).status, 0);
-  for (const path of [skill, page]) put(root, path, '# Original owner');
-  git(root, ['add', '.']); git(root, ['commit', '-qm', 'Synthetic baseline']);
-  put(root, '.geppetto/config.json', { memory: { localPath: root } });
-  put(root, '.geppetto/signals.jsonl', rows([{ ...observation('lesson'), id: 'eligible', source: 'user', status: 'open', ts: '2026-10-01T00:00:00Z' }]));
-  const learned = await runLearning(root, { home, execute: async ({ cwd }) => {
-    for (const path of [skill, page]) await learningFileTool(cwd, 'Write', { path, content: '# Improved owner' });
-    return { decision: 'applied', owner: skill, reason: 'Synthetic correction at the existing owners.' };
-  } });
-  assert.equal(learned.status, 'committed');
-  assert.equal((await learningAudit(root, { home })).outcomes[0].candidateToRevert, true);
-  for (const path of [skill, page]) {
-    assert.equal(await learningFileTool(learned.path, 'Read', { path }, false, null, { root, home, session: 'after-change' }), '# Improved owner');
-    assert.equal(get(root, path), '# Original owner');
-  }
-  const report = await learningAudit(root, { home }), reads = await localRecords(root, 'reads');
-  assert.deepEqual(report.outcomes[0].neverRead, []); assert.equal(report.outcomes[0].candidateToRevert, false);
-  assert.equal(report.neverRead.includes(resolve(root, page)), false);
-  assert.deepEqual(reads.map(row => row.path), [resolve(root, skill), resolve(root, page)]);
-  assert.deepEqual(reads.map(row => row.readPath), [resolve(learned.path, skill), resolve(learned.path, page)]);
-  assert.ok(reads.every(row => row.reference === report.outcomes[0].reference));
-  const references = fixture(t), guide = resolve(references, 'example/SKILL.md');
-  put(root, guide, '# External guide');
-  assert.equal(await learningFileTool(learned.path, 'Read', { path: guide }, false, references, { root, home }), '# External guide');
-  const external = (await localRecords(root, 'reads')).at(-1);
-  assert.equal(external.path, guide); assert.equal(external.readPath, undefined); assert.equal(external.reference, undefined);
 });
 
 test('R4: equivalent timestamp instants select identical reads, outcomes, sessions and turns', async t => {

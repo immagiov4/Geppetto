@@ -5,8 +5,8 @@ import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fixture, put, get, git, invoke, config, repo } from './helpers.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
-import { runLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
-import { transcriptSlice } from '../skills/geppetto-adopt/scripts/learn-nudge.mjs';
+
+
 
 const decision = { requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false } };
 const jsonl = rows => rows.map(row => JSON.stringify(row) + '\n').join('');
@@ -19,22 +19,6 @@ function project(t) {
   assert.equal(git(root, ['add', '.']).status, 0); assert.equal(git(root, ['commit', '-qm', 'baseline']).status, 0);
   return root;
 }
-test('learner provider input redacts untruncated secrets in transcripts, signals and turn evidence', async t => {
-  const root = project(t), home = fixture(t), secret = 'sk-proj-SYNTHETIC0123456789ABCDEF';
-  put(root, '.geppetto/config.json', config());
-  put(root, '.geppetto/signals.jsonl', jsonl([{ id: 'secret', key: 'secret', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: `No, fix api_key=${secret}` }]));
-  const transcript = resolve(home, 'transcript.jsonl');
-  put(root, '.geppetto/turns.jsonl', jsonl([{ ...decision, feedback: { applies: true, on: secret, action: 'Correct the credential owner.' }, sessionId: 'privacy', transcriptPath: transcript, transcriptOffset: 0 }]));
-  put(home, 'transcript.jsonl', jsonl([user(`No, fix api_key=${secret}`), { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: `echo ${secret}` } }, { type: 'tool_result', is_error: true, content: `Error: ${secret}` }] } }, { type: 'response_item', payload: { type: 'function_call_output', output: `Error: ${secret}` } }, user('No, keep this correction.')]));
-  let captured;
-  const result = await runLearning(root, { home, context: { learning_qualified: true, session_id: 'privacy', transcript_path: transcript }, execute: async request => { captured = request.prompt; return { decision: 'no_change', reason: 'Synthetic evidence already covered.', owner: 'app.mjs' }; } });
-  assert.equal(result.status, 'unchanged'); assert.ok(captured.includes('keep this correction')); assert.ok(captured.includes('Correct the credential owner.'));
-  assert.ok(!captured.includes(secret), captured); assert.match(captured, /REDACTED/);
-  const pem = '-----BEGIN PRIVATE KEY-----\n' + 'SYNTHETIC_KEY_MATERIAL'.repeat(40) + '\n-----END PRIVATE KEY-----';
-  put(home, 'pem.jsonl', jsonl([{ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Read', input: { text: pem } }, { type: 'tool_result', is_error: true, content: pem }] } }]));
-  assert.doesNotMatch((await transcriptSlice(resolve(home, 'pem.jsonl'))).text, /SYNTHETIC_KEY_MATERIAL/);
-});
-
 test('bad Stop configuration closes every delivery and logs its redacted error once per turn', async t => {
   for (const policy of [{ threshold: 0 }, { docGlobs: [42] }]) {
     const root = project(t);
@@ -57,18 +41,6 @@ test('Stop catches downstream learning errors and active Stop never blocks', asy
   for (const stop_hook_active of [false, true]) assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop', stop_hook_active }), {});
   const errors = get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse).filter(row => row.status === 'error');
   assert.equal(errors.length, 1); assert.match(errors[0].error, /minToolCalls/);
-});
-
-test('failed learning launch closes Stop with one redacted diagnostic and leaves the launch retryable', async t => {
-  const root = project(t), event = { cwd: root, session_id: 'launch-error', turn_id: 'one' }, secret = 'sk-proj-SYNTHETIC0123456789ABCDEF';
-  put(root, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { minToolCalls: 1 } } });
-  await handleEvent({ ...event, hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: {} });
-  assert.equal(invoke('hook.mjs', ['--record-turn', JSON.stringify(decision), '--session', event.session_id, '--turn', event.turn_id], { cwd: root }).status, 0);
-  const launchLearning = async () => { throw new Error(`Synthetic launch failed: api_key=${secret}`); };
-  for (const stop_hook_active of [false, true]) assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop', stop_hook_active }, { launchLearning }), {});
-  const log = get(root, projectDataPath(root, 'hook-events.jsonl')); assert.ok(!log.includes(secret));
-  const errors = log.trim().split('\n').map(JSON.parse).filter(row => row.error); assert.equal(errors.length, 1); assert.match(errors[0].error, /Synthetic launch failed.*REDACTED/);
-  const starts = []; await handleEvent({ ...event, hook_event_name: 'Stop', stop_hook_active: true }, { launchLearning: async event => { starts.push(event); } }); assert.equal(starts.length, 1);
 });
 
 test('fresh clone updates an exactly generated workflow pin but preserves user edits', t => {

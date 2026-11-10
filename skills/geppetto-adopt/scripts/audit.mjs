@@ -6,7 +6,6 @@ import { cli, isMain, parseArgs, UsageError, jsonFile, validateConfig, userHome,
 import { localRecords, learningPolicy, signalArchive } from './signal.mjs';
 import { hostLintReport } from './host-lint.mjs';
 import { memorySettings, memoryConfiguration } from './memory-config.mjs';
-import { learningReadiness } from './learn-runner.mjs';
 import { turnMetrics, validateTurnPolicy, userTurnDecision } from './turn-checks.mjs';
 import { readKind } from './hook-events.mjs';
 import { projectDataPath } from './project-records.mjs';
@@ -62,7 +61,7 @@ export async function main(args) {
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {}); const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
   validateTurnPolicy(config);
   const turns = await localRecords(project, 'turns');
-  const report = { project, dataDirectory: projectDataPath(project, ''), foundations: foundationReport(config), node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: learningReadiness(project, config.hooks?.signalLearning) };
+  const report = { project, dataDirectory: projectDataPath(project, ''), foundations: foundationReport(config), node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: { enabled: config.hooks?.signalLearning?.enabled !== false, mode: 'in-turn', action: null } };
   report.turnChecks = turnMetrics(turns);
   report.evidence = await learningAudit(project, { since: opts['--since'] });
   if (opts['--verify']) {

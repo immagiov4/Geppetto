@@ -24,7 +24,7 @@ test('adoption initializes a new project and commits only owned files as its fir
   assert.equal(get(cwd, 'app.txt'), 'Existing application');
   const ignored = get(cwd, '.geppetto/.gitignore');
   const event = { cwd, session_id: 'first-real-use', turn_id: 'first', tool_name: 'Read', tool_input: { file_path: resolve(cwd, 'app.txt') } };
-  for (const hook_event_name of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) await handleEvent({ ...event, hook_event_name }, { home, launchLearning: async () => assert.fail('Idle installation must not launch learning') });
+  for (const hook_event_name of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) await handleEvent({ ...event, hook_event_name }, { home });
   assert.equal(get(cwd, '.geppetto/.gitignore'), ignored, 'the first hook cycle must not modify the committed installation');
   assert.equal(git(cwd, ['diff', '--name-only']).stdout.trim(), '', 'runtime activity must leave committed installation files clean');
 });

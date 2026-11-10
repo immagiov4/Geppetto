@@ -8,17 +8,13 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Shared hooks, job identities and memory | `machine.mjs` |
 | OS maintenance attachment and subscription CLI execution | `maintenance.mjs` |
 | PR feedback, pre-edit decisions and completion review | `hook.mjs`, `turn-checks.mjs` |
-| Learning activity, background launch and transcript reduction | `learn-nudge.mjs` |
-| Background subscription run and machine lock | `learn-runner.mjs` |
-| Foreground delivery and disposition of retained learning commits | `learning-delivery.mjs` |
-| Current project capture through an isolated Git index | `learning-context.mjs` |
-| On-demand redacted session context for background learning | `learning-evidence.mjs` |
-| Structured learning decisions | `learning-result.mjs` |
+| Learning activity and in-turn reminders | `learn-nudge.mjs` |
+| Weekly subscription CLI execution | `learn-runner.mjs` |
 | Bounded learner file tools | `learner-tools.mjs` |
 | Memory listing and configuration | `memory-hook.mjs`, `memory-config.mjs` |
 | Memory installation and Claude native directory ownership | `memory-setup.mjs` |
 | Cross-machine maintenance registrations | `memory-jobs.mjs` |
-| Shared repository journals, legacy recovery and learning progress | `project-records.mjs` |
+| Shared repository journals, legacy recovery | `project-records.mjs` |
 | Hook telemetry | `hook-events.mjs` |
 | Evidence keys, categories, merging and proposals | `signal.mjs`, `learning-defaults.json` |
 | Read/outcome reports and companion compilation | `audit.mjs`, `maintenance.mjs` |
@@ -26,7 +22,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Codex native hook trust | `codex-hook-trust.mjs` |
 | Structural gates and instruction migration | `gate-agents.mjs`, `gate-sections.mjs`, `migrate-agents.mjs` |
 
-Tests exercise public script and hook flows with temporary repositories and injected providers. `scripts/check-skills.mjs` checks the distributable inventory and document links. [Memory retrieval](memory-retrieval.md) describes recursive indexing; [learning](../skills/geppetto-learn/references/ingestion.md) owns the background lifecycle.
+Tests exercise public script and hook flows with temporary repositories and injected providers. `scripts/check-skills.mjs` checks the distributable inventory and document links. [Memory retrieval](memory-retrieval.md) describes recursive indexing; [learning](../skills/geppetto-learn/references/ingestion.md) owns the in-turn lifecycle.
 
 ## Observability
 

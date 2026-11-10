@@ -1,10 +1,10 @@
-import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { existsSync, symlinkSync } from 'node:fs';
 import { fixture, put, get, invoke, git, restoreEnv } from './helpers.mjs';
-import { runLearning, executeLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
+import { executeLearning } from '../skills/geppetto-adopt/scripts/learn-runner.mjs';
 import { learningFileTool } from '../skills/geppetto-adopt/scripts/learner-tools.mjs';
 import { memorySettings } from '../skills/geppetto-adopt/scripts/memory-config.mjs';
 
@@ -37,58 +37,17 @@ test('two repositories reuse one machine hook set, memory and maintenance jobs',
   assert.deepEqual(Object.keys(JSON.parse(get(home, '.geppetto/machine.json')).projects), [b]);
 });
 
-test('runner processes a signal snapshot on a branch, machine lock prevents overlap and failure permits retry', async t => {
-  const home = fixture(t), root = fixture(t), other = fixture(t);
-  git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']); git(root, ['config', 'user.email', 'fixture@example.invalid']);
-  put(root, 'README.md', '# Fixture\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
-  put(root, '.geppetto/signals.jsonl', JSON.stringify({ id: 'one', key: 'one', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Use the existing helper', metric: 'complexity' }) + '\n');
-  put(other, '.geppetto/signals.jsonl', '{"id":"other","key":"other","session":"fixture","source":"user","category":"workflow","status":"open","text":"another project"}\n');
-  let release, started; const active = new Promise(done => { release = done; }); const launched = new Promise(done => { started = done; }); let launches = 0;
-  const execute = async ({ cwd, prompt }) => { launches++; assert.match(prompt, /untrusted evidence/); started(); await active; put(cwd, 'lesson.md', 'Use existing helpers.\n'); return { decision: 'applied', reason: 'Retained the reusable helper lesson.', owner: 'lesson.md' }; };
-  const first = runLearning(root, { home, execute });
-  await Promise.race([first, launched]);
-  assert.equal((await runLearning(root, { home, execute })).status, 'busy');
-  assert.equal((await runLearning(other, { home, execute })).status, 'busy');
-  release(); const result = await first;
-  assert.equal(result.status, 'committed'); assert.equal(launches, 1); assert.equal(get(root, 'README.md'), '# Fixture\n');
-  assert.equal((await runLearning(root, { home, execute })).status, 'idle');
-  assert.equal(existsSync(resolve(home, '.geppetto/learn.lock')), false);
-  put(root, '.geppetto/signals.jsonl', get(root, projectDataPath(root, 'signals.jsonl')) + JSON.stringify({ id: 'two', key: 'two', session: 'fixture', source: 'user', category: 'workflow', status: 'open', text: 'Fix verified dead end' }) + '\n');
-  await assert.rejects(runLearning(root, { home, execute: async () => { throw new Error('fixture failure'); } }), /fixture failure/);
-  assert.equal(existsSync(resolve(home, '.geppetto/learn.lock')), false);
-  const retry = await runLearning(root, { home, execute: async () => ({ decision: 'no_change', reason: 'Existing procedure covers the signal.', owner: 'README.md' }) }); assert.equal(retry.status, 'unchanged');
-});
-
 test('the subscription CLI receives only file tools, with no model override or API routing', async t => {
   const cwd = fixture(t); const old = { ...process.env };
   t.after(() => restoreEnv(old));
-  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>{const args=process.argv.slice(2);fs.writeFileSync('native.json',JSON.stringify({args,prompt,key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD}));fs.writeFileSync(args[args.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'Already covered.',owner:'README.md'}));});`);
+  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>{const args=process.argv.slice(2);fs.writeFileSync('native.json',JSON.stringify({args,prompt,key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD}));});`);
   process.env.PATH = cwd; process.env.OPENAI_API_KEY = 'fixture-secret';
-  assert.equal((await executeLearning({ cwd, prompt: 'Fixed synthetic learning prompt', host: 'codex', resultPath: resolve(cwd, 'result.json') })).decision, 'no_change');
+  assert.equal(await executeLearning({ cwd, prompt: 'Fixed synthetic learning prompt', host: 'codex' }), 0);
   const result = JSON.parse(get(cwd, 'native.json'));
   assert.equal(result.prompt, 'Fixed synthetic learning prompt'); assert.equal(result.key, undefined); assert.equal(result.child, '1');
   assert.ok(result.args.includes('features.shell_tool=false')); assert.ok(result.args.includes('features.multi_agent=false'));
   assert.ok(result.args.includes('read-only')); assert.ok(result.args.some(arg => arg.includes('learner-tools.mjs')));
   assert.ok(result.args.every(arg => !/--model|service_tier/.test(arg)));
-});
-
-test('configured learning model and effort reach the CLI and the signal dispatcher', async t => {
-  const cwd = fixture(t), home = fixture(t); const old = { ...process.env };
-  t.after(() => restoreEnv(old));
-  put(cwd, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'),args=process.argv.slice(2);fs.writeFileSync('selection.json',JSON.stringify(args));fs.writeFileSync(args[args.indexOf('--output-last-message')+1],JSON.stringify({decision:'no_change',reason:'Already covered.',owner:'README.md'}));process.stdin.resume();`);
-  process.env.PATH = cwd;
-  await executeLearning({ cwd, prompt: 'Actual incident', host: 'codex', model: 'gpt-6.1-terra', reasoningEffort: 'medium', resultPath: resolve(cwd, 'result.json') });
-  const args = JSON.parse(get(cwd, 'selection.json'));
-  assert.equal(args[args.indexOf('--model') + 1], 'gpt-6.1-terra');
-  assert.ok(args.includes('model_reasoning_effort="medium"'));
-  restoreEnv(old);
-  git(cwd, ['init', '-q']); git(cwd, ['config', 'user.name', 'Fixture']); git(cwd, ['config', 'user.email', 'fixture@example.invalid']);
-  put(cwd, '.geppetto/config.json', { hooks: { signalLearning: { model: 'gpt-6.1-terra', reasoningEffort: 'medium' } } });
-  git(cwd, ['add', '.geppetto/config.json']); git(cwd, ['commit', '-qm', 'baseline']);
-  put(cwd, '.geppetto/signals.jsonl', '{"id":"model","key":"model","session":"fixture","source":"user","category":"workflow","status":"open","text":"A real incident"}\n');
-  let selection;
-  await runLearning(cwd, { home, execute: async request => { selection = request; return { decision: 'no_change', reason: 'Existing behavior covers the signal.', owner: 'README.md' }; } });
-  assert.equal(selection.model, 'gpt-6.1-terra'); assert.equal(selection.reasoningEffort, 'medium');
 });
 
 test('learner file boundary preserves edits while excluding secret and escaped paths', async t => {
@@ -134,20 +93,6 @@ test('learning resolves an explicit root alias before checking absolute paths in
   await learningFileTool(alias, 'Write', { path: resolve(alias, 'owner.md'), content: 'Updated owner' });
   assert.equal(get(root, 'owner.md'), 'Updated owner');
   await assert.rejects(learningFileTool(alias, 'Write', { path: resolve(guides, 'guide.md'), content: 'Forbidden' }, false, guides), /scope/);
-});
-
-test('write approval retains a staged result and a signal appended during a run stays eligible', async t => {
-  const home = fixture(t), root = fixture(t);
-  git(root, ['init', '-q']); git(root, ['config', 'user.name', 'Fixture']); git(root, ['config', 'user.email', 'fixture@example.invalid']);
-  put(root, 'README.md', '# Fixture\n'); git(root, ['add', '.']); git(root, ['commit', '-qm', 'baseline']);
-  put(root, '.geppetto/config.json', { hooks: { signalLearning: { writeApproval: true } } });
-  put(root, '.geppetto/signals.jsonl', '{"id":"one","key":"one","session":"fixture","source":"user","category":"workflow","status":"open","text":"first"}\n');
-  const result = await runLearning(root, { home, execute: async ({ cwd }) => {
-    put(cwd, 'lesson.md', 'Verified lesson\n'); put(root, '.geppetto/signals.jsonl', get(root, '.geppetto/signals.jsonl') + '{"id":"two","key":"two","session":"fixture","source":"user","category":"workflow","status":"open","text":"second"}\n'); return { decision: 'applied', reason: 'Retained the verified lesson.', owner: 'lesson.md' };
-  } });
-  assert.equal(result.status, 'staged'); assert.match(git(result.path, ['diff', '--cached', '--name-only']).stdout, /lesson.md/);
-  let prompt; await runLearning(root, { home, execute: async request => { prompt = request.prompt; return { decision: 'no_change', reason: 'Existing owner covers the signal.', owner: 'README.md' }; } });
-  assert.match(prompt, /second/); assert.match(prompt, /"text":"first"/);
 });
 
 test('machine memory reuse resolves project-relative paths and keeps project bucket links local', async t => {

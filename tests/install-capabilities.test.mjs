@@ -15,7 +15,7 @@ test('install question and recap cover every capability choice', t => {
   const machine = JSON.parse(readFileSync(`${cwd}/.geppetto/machine.json`, 'utf8'));
   assert.equal(machine.jobs['curate-skills'], undefined);
   assert.equal(machine.jobs['maintain-memory'], undefined);
-  for (const name of ['Memory:', 'hooks=', 'screen.shareSource=true', 'learner=', 'review=', 'maintenance.enabled=false', 'ci.enabled=false', 'OPENROUTER_API_KEY']) assert.ok(result.stdout.includes(name), result.stdout);
+  for (const name of ['Memory:', 'hooks=', 'screen.shareSource=true', 'signals=', 'review=', 'maintenance.enabled=false', 'ci.enabled=false', 'OPENROUTER_API_KEY']) assert.ok(result.stdout.includes(name), result.stdout);
 });
 
 test('declined answers turn off what an earlier installation started', async t => {

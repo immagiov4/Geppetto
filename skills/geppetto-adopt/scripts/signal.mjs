@@ -3,7 +3,7 @@ import { userTurnDecision } from './turn-checks.mjs';
 import { projectRecords } from './project-records.mjs';
 import { resolve } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { cli, isMain, parseArgs, UsageError, jsonFile, projectRoot, learningPolicy, appendRecord, launchLearning } from './common.mjs';
+import { cli, isMain, parseArgs, UsageError, jsonFile, projectRoot, learningPolicy, appendRecord } from './common.mjs';
 export { learningDefaults, learningPolicy } from './common.mjs';
 export const localRecords = projectRecords;
 export async function signalArchive(root) {
@@ -24,7 +24,7 @@ export async function eligibleSignals(root) {
   const policy = learningPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})), open = (await signalArchive(root)).filter(row => row.status === 'open' && !row.legacy);
   return open.filter(row => row.source === 'user' || row.sessions.length >= policy.minSessions || open.length > policy.maxOpenKeys); }
 export async function resolveSignals(root, keys, change) {
-  for (const key of keys) await appendRecord(root, 'signals', { ...change, key, status: 'resolved', ts: new Date().toISOString(), through: change.through?.[key] });
+  for (const key of keys) await appendRecord(root, 'signals', redactValue({ ...change, key, status: 'resolved', ts: new Date().toISOString(), through: change.through?.[key] }));
 }
 /** Maintenance merges exact keys or proposes a supported class; the curator judges shared meaning. */
 export async function maintainEvidence(root, { action, keys, category, reason }) {
@@ -38,7 +38,7 @@ export async function maintainEvidence(root, { action, keys, category, reason })
   learningPolicy({ categories: [...policy.categories, category] });
   await appendRecord(root, 'category-proposals', { category, reason: redact(reason), evidence: keys, ts: new Date().toISOString() });
 }
-export async function recordSignal(root, input, { launch } = {}) {
+export async function recordSignal(root, input) {
   const policy = learningPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})), allowed = [...policy.categories.map(row => row.id), 'other'];
   if (!allowed.includes(input.category)) throw new UsageError(`Unknown category. Choose: ${allowed.join(', ')}`);
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(input.key ?? '') || !input.session?.trim() || !input.text?.trim()) throw new UsageError('Signal needs a slug key, session and text.');
@@ -60,7 +60,6 @@ export async function recordSignal(root, input, { launch } = {}) {
   if (source !== 'user' && previous?.status === 'open' && previous.sessions.includes(input.session)) return { duplicate: true, key: input.key };
   const entry = redactValue({ ...input, transcript_path: active.transcript_path, source, id: randomUUID(), ts: new Date().toISOString(), status: 'open' });
   await appendRecord(root, 'signals', entry);
-  if (policy.enabled !== false && process.env.GEPPETTO_LEARNING_CHILD !== '1' && (await eligibleSignals(root)).some(row => row.key === input.key)) await (launch ?? launchLearning)({ cwd: root, session_id: input.session, turn_id: input.turn ?? active.turn, transcript_path: active.transcript_path, signal_qualified: true });
   return entry; }
 const credentialName = String.raw`[a-z\d_]*(?:api[_-]?key|token|secret|password)`;
 const credentialProperty = new RegExp(String.raw`\b${credentialName}$`, 'i');
@@ -79,11 +78,15 @@ export function redact(text) {
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[REDACTED]@');
 }
 export async function main(args) {
-  const opts = parseArgs(args, { values: ['--category', '--scope', '--kind', '--key', '--session', '--source', '--turn', '--evidence', '--attributes', '--merge', '--reason'], flags: ['--list', '--maintenance'] }); const root = await projectRoot('.');
+  const opts = parseArgs(args, { values: ['--category', '--scope', '--kind', '--key', '--session', '--source', '--turn', '--evidence', '--attributes', '--merge', '--reason', '--close', '--reference'], flags: ['--list', '--maintenance'] }); const root = await projectRoot('.');
   if (opts['--list'] && !opts._.length) { console.log(JSON.stringify((await signalArchive(root)).filter(row => row.status === 'open' && !row.legacy).map(row => row.key))); return 0; }
   if (opts['--merge'] && opts['--maintenance'] && opts['--key'] && opts['--reason']?.trim()) { await maintainEvidence(root, { action: 'merge', keys: [opts['--key'], opts['--merge']], reason: opts['--reason'] }); return 0; }
+  if (opts['--close'] && opts['--reference']?.trim() && opts['--reason']?.trim() && !opts._.length) {
+    const row = (await signalArchive(root)).find(row => row.key === opts['--close']); if (!row || row.status !== 'open') throw new UsageError('Close needs an open signal key.');
+    await resolveSignals(root, [row.key], { reference: opts['--reference'], reason: redact(opts['--reason']), through: { [row.key]: row.id } }); return 0;
+  }
   const kind = opts['--kind'] ?? 'friction';
-  if (opts._.length !== 1 || !['error', 'friction', 'preference', 'optimisation'].includes(kind)) throw new UsageError('Usage: signal.mjs "<text>" --key <slug> --session <id> --category <id> [--evidence <reference>] | --list');
+  if (opts._.length !== 1 || !['error', 'friction', 'preference', 'optimisation'].includes(kind)) throw new UsageError('Usage: signal.mjs "<text>" --key <slug> --session <id> --category <id> [--evidence <reference>] | --list | --close <key> --reference <commit-or-PR> --reason "<reason>"');
   let attributes; try { if (opts['--attributes']) attributes = JSON.parse(opts['--attributes']); } catch { throw new UsageError('--attributes must be a JSON object.'); }
   const entry = await recordSignal(root, { text: opts._[0], kind, scope: opts['--scope'] ?? 'project', key: opts['--key'], session: opts['--session'], category: opts['--category'], source: opts['--source'], turn: opts['--turn'], evidence: opts['--evidence'], attributes });
   console.log(`Signal ${entry.duplicate ? 'already counted' : 'recorded'}: ${entry.key}`); return 0;

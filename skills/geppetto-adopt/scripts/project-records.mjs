@@ -63,13 +63,3 @@ export async function projectRecords(root, name, { currentWorktree = false } = {
   }
   return [...unique.values()].sort((a, b) => (Date.parse(a.ts) || 0) - (Date.parse(b.ts) || 0));
 }
-
-export async function learningState(root) {
-  const directory = await recoverProjectRecords(root), path = resolve(directory, 'learning.json');
-  if (existsSync(path) || directory === resolve(root, '.geppetto')) return { path, state: JSON.parse(await readOptional(path) || '{}') };
-  const imported = [];
-  for (const file of await readdir(resolve(directory, 'legacy'))) if (file.startsWith('learning-') && file.endsWith('.json')) imported.push(JSON.parse(await readOptional(resolve(directory, 'legacy', file))));
-  // Legacy results are retained individually; the latest run supplies the initial shared progress.
-  imported.sort((a, b) => a.modifiedAt - b.modifiedAt);
-  return { path, state: JSON.parse(imported.at(-1)?.text ?? '{}') };
-}

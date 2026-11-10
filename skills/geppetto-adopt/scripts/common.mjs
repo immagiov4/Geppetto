@@ -1,14 +1,11 @@
 import { readFile, lstat, mkdir, rename, writeFile, appendFile, open, unlink } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
-import { pathToFileURL, fileURLToPath } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
-import { spawnSync, spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { validateTurnPolicy, defaultTurnChecks } from './turn-checks.mjs';
 import { recoverProjectRecords } from './project-records.mjs';
-export async function launchLearning(event) {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('./learn-runner.mjs', import.meta.url))], { cwd: event.cwd, windowsHide: true, detached: true, shell: false, stdio: ['pipe', 'ignore', 'ignore'] }); await new Promise((done, reject) => { child.once('error', reject); child.once('spawn', done); });
-  child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(event)); child.unref(); }
 export class UsageError extends Error {}
 export const userHome = () => homedir();
 export const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 15000, ...options, windowsHide: true, shell: false });
@@ -109,7 +106,7 @@ export function learningPolicy(config) {
   if (!['minSessions', 'maxOpenKeys'].every(key => Number.isSafeInteger(policy[key]) && policy[key] > 0) || policy.outcomeWeeks !== undefined && (!Number.isSafeInteger(policy.outcomeWeeks) || policy.outcomeWeeks <= 0)) throw new UsageError('signalLearning needs positive minSessions, maxOpenKeys and optional outcomeWeeks.');
   if (!Array.isArray(policy.categories) || !policy.categories.length || policy.categories.some(row => !row || typeof row.id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(row.id) || row.id === 'other' || ['definition', 'score'].some(key => typeof row[key] !== 'string' || !row[key].trim() || /[\r\n]/.test(row[key]))) || new Set(policy.categories.map(row => row.id)).size !== policy.categories.length) throw new UsageError('categories need unique {id, definition, score} entries on one line; other is reserved.');
   return policy; }
-export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, writeApproval: false, minSessions: learningDefaults.minSessions, maxOpenKeys: learningDefaults.maxOpenKeys });
+export const signalLearningDefaults = () => ({ enabled: true, benchmark: null, minSessions: learningDefaults.minSessions, maxOpenKeys: learningDefaults.maxOpenKeys });
 export function foundationReport(config) {
   const choices = { documentation: null, observability: null, ...config.foundations };
   if (config.foundations !== undefined && (!config.foundations || typeof config.foundations !== 'object' || Array.isArray(config.foundations)) || Object.entries(choices).some(([name, value]) => !['documentation', 'observability'].includes(name) || value !== null && (typeof value !== 'string' || !value.trim()))) throw new UsageError('foundations needs documentation/observability choices as nonempty strings or null.');
@@ -139,9 +136,8 @@ export function validateConfig(config, file) {
   if (!config.pillars || Array.isArray(config.pillars) || Object.values(config.pillars).some(s => !['installed', 'declined', 'n/a'].includes(s))) fail('pillars must use installed, declined or n/a');
   if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks) || Object.entries(config.hooks).filter(([name]) => name in defaultConfig().hooks).some(([, h]) => !h || typeof h.enabled !== 'boolean' || !('benchmark' in h))) fail('hooks need enabled and benchmark');
   for (const key of ['minToolCalls', 'minDurationMs']) if (config.hooks.learnNudge?.[key] !== undefined && (!Number.isSafeInteger(config.hooks.learnNudge[key]) || config.hooks.learnNudge[key] <= 0)) fail(`hooks.learnNudge.${key} must be a positive integer`);
-  const learning = config.hooks.signalLearning; const review = { ...reviewGateDefaults, ...config.hooks.reviewGate };
+  const review = { ...reviewGateDefaults, ...config.hooks.reviewGate };
   if (!Number.isSafeInteger(review.threshold) || review.threshold <= 0 || ![review.docGlobs, review.testGlobs].every(globs => Array.isArray(globs) && globs.every(glob => typeof glob === 'string' && glob))) fail('hooks.reviewGate needs a positive threshold and arrays of nonempty globs');
-  if (learning?.writeApproval !== undefined && typeof learning.writeApproval !== 'boolean') fail('hooks.signalLearning.writeApproval must be boolean');
   for (const [section, key] of [['ci', 'enabled'], ['maintenance', 'enabled'], ['screen', 'shareSource']]) if (config[section] !== undefined && (!config[section] || typeof config[section] !== 'object' || Array.isArray(config[section]) || (config[section][key] !== undefined && typeof config[section][key] !== 'boolean'))) fail(`${section}.${key} must be boolean`); validateMemory(config.memory, file); validateTurnPolicy(config); learningPolicy(config); foundationReport(config);
   return config; }
 export function validateMemory(memory, file) {

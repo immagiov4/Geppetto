@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fixture, put, get, invoke, repo, git, config } from './helpers.mjs';
 
 const templates = resolve(repo, 'skills/geppetto-adopt/assets/templates');
-test('both shipped hook fragments deliver internal context from nested directories and leave Stop for background learning', t => {
+test('both shipped hook fragments deliver internal context from nested directories and leave Stop for completion checks', t => {
   for (const path of ['hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json']) {
     const cwd = fixture(t), home = fixture(t);
     const installed = invoke('install.mjs', ['--target', path.includes('/claude/') ? 'claude' : 'codex', '--project', cwd], { cwd, home });
