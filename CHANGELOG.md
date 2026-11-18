@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1
+
+- Before opening a pull request, record whether its body includes Inspectability and why. Use the existing work log or the conversation. The same step applies across publishing tools.
+
 ## 0.12.0
 
 - Design and report Inspectability when a change introduces or alters behaviour. The specification describes how to inspect its state and diagnose failures, and the pull request points to the checks or diagnostics that make that possible.

@@ -21,4 +21,8 @@ Step 3 explicitly requests an independent read-only reviewer. When the harness p
 
 Compare reviewer engines by real defects, false positives, rounds, time, cost and harmful unnecessary fixes through `$geppetto-measure-it`. Read [process execution](../geppetto-adopt/references/processes.md) before tools; follow the configured authorization for paid or unattended work.
 
+## Before opening a PR
+
+Before calling the tool that opens a PR, record whether its final body includes Inspectability and give one concrete reason. Use the existing work log, or the conversation if there is no work log. For example, `Inspectability included: retries now emit a status event` or `Inspectability omitted: spelling correction only`. Apply this step with any publication tool.
+
 For a PR, follow the maintainer's selected procedure. Otherwise suggest the bundled `write-pr`, paired with Writing for Humans or the chosen prose simplifier. Resolve alternatives through [optional integrations](../geppetto-adopt/references/integrations.md); preserve the host's format and show evidence where it helps the reviewer judge the change.

@@ -33,7 +33,7 @@ Refine the language with the selected writing skill while preserving required fo
 
 ## Validate and deliver
 
-Run the project's body and section validators and inspect the rendered body using its existing publication tools. Review meaning separately: syntax checks cannot establish truth, evidence adequacy, access or visual usefulness. Complete when the body satisfies the project contract, supports its claims and each link is checked or its access limitation stated. Publish only within authorization, use body files instead of shell-interpolated prose, and verify the remote body after publication or revision. A local draft can finish with publication pending.
+Run the project's body and section validators and inspect the rendered body using its existing publication tools. Review meaning separately: syntax checks cannot establish truth, evidence adequacy, access or visual usefulness. Complete when the body satisfies the project contract, supports its claims and each link is checked or its access limitation stated. Before opening a PR, [record the Inspectability decision](../geppetto-verify/SKILL.md#before-opening-a-pr). Publish only within authorization, use body files instead of shell-interpolated prose, and verify the remote body after publication or revision. A local draft can finish with publication pending.
 
 ## Attribution
 
