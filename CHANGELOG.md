@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0
+
+- Design and report Inspectability when a change introduces or alters behaviour. The specification describes how to inspect its state and diagnose failures, and the pull request points to the checks or diagnostics that make that possible.
+- Omit Inspectability for changes that preserve behaviour. Include Testing when the checks or results help the reviewer assess the change.
+- New Geppetto configurations no longer require an Observability heading in every pull request. Existing projects can remove that heading from `sections.pr` and update their PR templates and instructions together.
+
 ## 0.11.1
 
 - Learning reminders and eligible signals reach the working session at the next tool result. Stop no longer returns that context, which Codex reported as a failed Stop hook and Claude Code ignores.

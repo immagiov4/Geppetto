@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { resolve, sep, matchesGlob } from 'node:path';
-import { cli, isMain, parseArgs, UsageError, jsonFile, exists, filesUnder } from './common.mjs';
+import { cli, isMain, parseArgs, UsageError, defaultConfig, jsonFile, exists, filesUnder } from './common.mjs';
 // Preserve line numbers while removing fenced examples and HTML comments.
 export function markdownLines(text, { keepCode = false } = {}) {
   let fence = null;
@@ -70,7 +70,7 @@ export async function main(args) {
   const configPath = opts['--config'] ?? resolve('.geppetto/config.json');
   const config = opts['--config'] || await exists(configPath) ? await jsonFile(configPath) : {};
   const kind = opts['--pr'] ? 'pr' : 'featureDocs';
-  const required = config.sections?.[kind] ?? ['Observability'];
+  const required = config.sections?.[kind] ?? defaultConfig().sections[kind];
   if (!Array.isArray(required) || required.some(h => typeof h !== 'string' || !h.trim())) throw new Error(`${configPath}:1: sections.${kind} must be an array of nonempty headings`);
   const files = opts['--pr'] ? [opts['--pr']] : [...new Set((await Promise.all(opts['--docs'].map(expand))).flat())];
   let errors = [];

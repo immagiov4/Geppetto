@@ -1,13 +1,13 @@
 ---
 name: geppetto-x-ray
-description: "Design technical observability in every specification and implement diagnostic access with the feature. Use to inspect normal operation, state, duration, failure or interruption across system and component boundaries."
+description: "Design inspectability for new or changed behaviour and implement diagnostic access with the feature. Use to inspect normal operation, state, duration, failure or interruption across system and component boundaries."
 ---
 
 # X-ray
 
 If `~/.geppetto/integrations.md` has a section for this skill, read it.
 
-Design technical observability in every specification before implementation: inspect running code, infrastructure and dependencies. Follow `foundations.observability` in `.geppetto/config.json`. When unset, compare approaches WITH the user through `$geppetto-spec`, record the choice and reuse it.
+Before implementing new or changed behaviour, design how to inspect its state and diagnose failures. Omit Inspectability when behaviour stays the same. Follow `foundations.observability` in `.geppetto/config.json`. When unset, compare approaches WITH the user through `$geppetto-spec`, record the choice and reuse it.
 
 Answer the maintainer's diagnostic questions:
 
@@ -21,7 +21,7 @@ Choose detail for the context of use. Budget volume and performance through samp
 
 Preserve error causes and context. Recoveries retain evidence of what failed; failure must remain distinguishable from success. Keep private data and secrets out of logs, applying redaction at collection boundaries. Store technical diagnostics in their authorized location and present stable messages at the user boundary.
 
-Explain the approach in the specification's `## Observability`: technical views and linked identities, behavior and invariants, measurements and rationale, collection/query access, privacy, volume controls, overhead and blind spots. The feature document retains the evolving design. A specification may be an agreed conversation or local artifact; a Git host is optional. A PR/ticket reports implementation evidence and links this owner. A correction records whether the existing design still answers the diagnostic questions.
+Explain the approach in the specification's `## Inspectability`: relevant views, linked identities, invariants, measurements, access, privacy, overhead and blind spots. The feature document retains the evolving design. A specification may be an agreed conversation or local artifact; a Git host is optional. A PR/ticket reports implementation evidence and links this owner. A correction records whether the existing design still answers the diagnostic questions.
 
 Use the existing document and [feature template](../geppetto-adopt/assets/templates/feature-doc.md). Keep declarations beside the feature; indexes link them. Add Verification when configured for significant tests. Run `<adopt>/scripts/gate-sections.mjs --docs <changed-doc-paths> --config .geppetto/config.json`; headings establish structure, while a reader assesses meaning. Complete when declarations match demonstrated behaviour and limits.
 

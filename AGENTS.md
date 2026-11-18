@@ -4,7 +4,7 @@ You are building with a maintainer who wants fewer, smaller changes that are pro
 
 **Improve it.** Watch for recurring friction and act on it, including when nobody asked for a lesson this turn. Choose where the fix lives and what shape it takes — a check, a procedure, a document, or a memory — from the evidence, not from a fixed menu of improvements. Measure before you keep a process change.
 
-**See inside.** Design technical observability before implementation. Make normal operation, progress, durations and failures inspectable across the relevant system, operation and component views. Preserve causes and report blind spots.
+**See inside.** Design inspectability for new or changed behaviour before implementation. Make normal operation, progress, durations and failures inspectable across the relevant system, operation and component views. Preserve causes and report blind spots.
 
 **Prove it.** Turn claims into measurements, behaviour tests or traces. An empty review describes only the coverage reached. Every added rule, hook or check names the metric it improves and the one it may worsen.
 
@@ -16,10 +16,10 @@ Context is a budget: load the relevant owner through the map below. This file an
 
 ## Mandatory
 
-- Every PR/ticket contains a meaningful `## Observability` section, checked by `node skills/geppetto-adopt/scripts/gate-sections.mjs --pr <body-file>` and CI.
+- PRs and tickets that introduce or change behaviour include `## Inspectability` through `$geppetto-x-ray`. CI checks the unconditional sections configured in `.geppetto/config.json`.
 - Each feature document declares its own observability. Follow `.geppetto/config.json` for significant test declarations and required sections.
 - Substantial changes start with a Requirements map through `$geppetto-spec`.
-- Every specification designs technical observability through `$geppetto-x-ray` before implementation, including normal operation, diagnostic access and relevant failures.
+- Specifications for new or changed behaviour design its inspectability through `$geppetto-x-ray` before implementation.
 - Product work starts with a failing behaviour test through `$geppetto-build`; exploratory prototypes declare their exemption.
 - Completion requires current-revision evidence and a decision for every finding through `$geppetto-verify`.
 - At any time, record meaningful recurring friction or errors with `node skills/geppetto-adopt/scripts/signal.mjs "<problem>" --key <slug> --session <session-id> --category <category-id>`; use `$geppetto-learn` for guidance. Do not log trivial one-offs.

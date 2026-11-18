@@ -17,7 +17,7 @@ Describe the actual Result in a sentence for a trivial change whose Approach alr
 
 Show the work where it supports the claim:
 
-- Visible changes: inspected screenshots or a short video of the affected states and interaction. Place images or video under Result, after any comparison table and before Observability.
+- Visible changes: inspected screenshots or a short video of the affected states and interaction. Place images or video under Result, after any comparison table.
 - Structural changes: the smallest useful diagram, call tree, file tree or diff sketch revealing the changed ownership, ordering or boundary. A small direct edit can be clear from its linked diff.
 - Behaviour changes: the actual failing/passing run or reproduction output, including scenario, observed result and tested revision. Distinguish execution evidence from pseudocode or an expected result.
 
@@ -25,7 +25,7 @@ Use durable reviewer-accessible attachments, commit permalinks, check runs or ap
 
 ## Keep the review surface short
 
-Where the project has no different convention, use `## 👁️ Observability` for how the changed behaviour or failure is inspected and its material blind spots, followed by `## 🧪 Testing` for relevant suites and scenario outcomes. Put the icons before the titles and keep paragraph and bullet text plain. Report CI and applicable analysis together, tied to the tested head. Link detailed records instead of pasting logs.
+When the PR introduces or changes behaviour, include `## 👁️ Inspectability` with the inspection path and diagnostic evidence from `$geppetto-x-ray`. Omit the section when behaviour stays the same, subject to the project's configured PR requirements. Include `## 🧪 Testing` when relevant checks or their results help the reviewer judge the change. For a prose-only change, a short note about a useful document check can go under Result. Report CI and applicable analysis together, tied to the tested head. Link detailed records instead of pasting logs.
 
 When material, put `## Merge impact` last, after Testing and supporting Details. Explain reversibility and affected scope: what reverting restores, what remains, and which users, consumers or systems can be affected. Use `## ⚠️ Merge impact` when difficult to reverse. Name concrete consequences, such as deleted data or an external action that a code revert cannot undo. Routine reversible edits need no risk section.
 

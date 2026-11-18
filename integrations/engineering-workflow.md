@@ -10,7 +10,7 @@ Reuse the project's or harness's installed `engineering-workflow`. Otherwise sel
 
 ## With geppetto-spec
 
-Follow the workflow's discovery and design route, strongly suggesting Architect and Codebase Design at that stage. Settle technical observability in the specification before implementation and choose documentation structure separately from prose style.
+Follow the workflow's discovery and design route, strongly suggesting Architect and Codebase Design at that stage. Settle how to inspect new or changed behaviour in the specification before implementation and choose documentation structure separately from prose style.
 
 ## With geppetto-build
 

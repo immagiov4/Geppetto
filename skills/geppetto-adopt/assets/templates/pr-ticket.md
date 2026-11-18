@@ -6,7 +6,8 @@
 
 {{OBSERVABLE_CRITERIA_AND_REQUIREMENT_OWNERS}}
 
-## Observability
+<!-- Include Inspectability only when the change introduces or changes behaviour. -->
+## Inspectability
 
 {{BEHAVIOUR_AND_INVARIANTS}}
 
@@ -20,4 +21,4 @@
 
 {{REVISION_CHECKS_RESULTS_AND_REMAINING_DECISIONS}}
 
-<!-- Render all fields before publication. For an inapplicable declaration use "Not applicable" followed by its concrete reason. This template serves PRs and tickets; adopt chooses the ticket transition enforced by the project. -->
+<!-- Render all fields before publication. Remove the Inspectability block when behaviour stays the same. This template serves PRs and tickets; adopt chooses the ticket transition enforced by the project. -->

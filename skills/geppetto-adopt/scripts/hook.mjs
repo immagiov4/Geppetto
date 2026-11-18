@@ -91,7 +91,7 @@ async function sessionStart(event, options) {
   try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
   catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; }
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
-const foundationReminder = 'For documentation or diagnostics, resolve foundations.documentation and foundations.observability through $geppetto-spec: reuse and record an existing convention; otherwise ask the user before creating it.';
+const foundationReminder = 'Resolve foundations.documentation for documentation design and foundations.observability for new or changed behaviour through $geppetto-spec. Reuse existing conventions; ask before creating one.';
 const recordCommand = (session, turn) => `node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-turn '<json>' --session ${JSON.stringify(session)}${turn ? ` --turn ${JSON.stringify(turn)}` : ''}`;
 function turnDecision(value, checks) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new UsageError('Turn decision must be an object.');

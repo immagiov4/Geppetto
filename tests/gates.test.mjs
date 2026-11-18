@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture, put, invoke, config } from './helpers.mjs';
+import { defaultConfig } from '../skills/geppetto-adopt/scripts/common.mjs';
+
+test('the default PR contract accepts a spelling correction without a diagnostic section', t => {
+  const cwd = fixture(t);
+  const input = '**Result:** Corrected the guide title.\n';
+  const check = () => invoke('gate-sections.mjs', ['--pr', '-'], { cwd, input });
+  assert.equal(check().status, 0);
+  put(cwd, '.geppetto/config.json', { sections: {} });
+  assert.equal(check().status, 0);
+  put(cwd, '.geppetto/config.json', defaultConfig());
+  assert.equal(check().status, 0);
+});
+
 
 test('section gate accepts heading icons while preserving level, body and example checks', t => {
   const cwd = fixture(t);
@@ -14,7 +27,8 @@ test('section gate accepts heading icons while preserving level, body and exampl
 
 for (const answer of ['**Not applicable**', '*Not applicable*', '`Not applicable`', 'N/A', 'n/a', '-', '.', 'TBD', 'none', '**N/A**', 'Not applicable because …']) {
   test(`required sections reject unexplained answer ${JSON.stringify(answer)}`, t => {
-    const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd: fixture(t), input: `## Observability\n${answer}` });
+    const cwd = fixture(t); put(cwd, '.geppetto/config.json', config());
+    const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd, input: `## Observability\n${answer}` });
     assert.equal(result.status, 1, result.stdout);
     assert.match(result.stderr, /<stdin>:1:.*(?:Empty section|needs a reason)/);
   });
@@ -26,7 +40,7 @@ test('formatted non-applicability with a concrete reason passes', t => {
 });
 
 test('PR sections accept content and reject a fenced heading, an empty section, and unexplained non-applicability', t => {
-  const cwd = fixture(t);
+  const cwd = fixture(t); put(cwd, '.geppetto/config.json', config());
   for (const text of ['## Observability\nErrors are recorded.', 'Observability\n-------------\nNot applicable: this changes spelling only.', '## Observability\n```json\n{"event":"failure"}\n```', '<!--\n```\n-->\n## Observability\nLogs']) {
     const r = invoke('gate-sections.mjs', ['--pr', '-'], { cwd, input: text }); assert.equal(r.status, 0, r.stderr);
   }
@@ -68,7 +82,8 @@ test('agent gate fails on missing imports, cycles and excess lines, ignores remo
 
 test('the required section must be a level-two heading', t => {
   for (const text of ['# Observability\nLogs', '### Observability\nLogs', 'Observability\n=============\nLogs']) {
-    const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd: fixture(t), input: text });
+    const cwd = fixture(t); put(cwd, '.geppetto/config.json', config());
+    const result = invoke('gate-sections.mjs', ['--pr', '-'], { cwd, input: text });
     assert.equal(result.status, 1, text); assert.match(result.stderr, /level-two heading/);
   }
 });
