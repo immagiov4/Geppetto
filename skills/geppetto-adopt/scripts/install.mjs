@@ -10,6 +10,7 @@ import { reconcileMachine } from './machine.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
 import { memoryQuestion, memoryDescription } from './memory-setup.mjs';
 import { maintenanceJobs, compileIntegrations, integrationFiles } from './maintenance.mjs';
+import { checkUpdate } from './update-check.mjs';
 import { validateTurnPolicy } from './turn-checks.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 // Git checkouts can differ in text line endings while containing the same package.
@@ -176,12 +177,17 @@ export async function approveCodexHooks(project, source, installed, connect = co
   } finally { if (client) await client.close(); }
 }
 export async function main(args) {
-  const opts = parseArgs(args, { values: ['--target', '--project', '--scheduler-jobs', '--memory', '--gate-sha'], repeat: ['--record-generated', '--add-job'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks', '--begin', '--commit'] }); const target = opts['--target'];
-  if (opts._.length || !['claude', 'codex', 'agents'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents> (--project <dir> | --user) [--dry-run] [--uninstall]');
+  const opts = parseArgs(args, { values: ['--target', '--project', '--scheduler-jobs', '--memory', '--gate-sha'], repeat: ['--record-generated', '--add-job'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks', '--begin', '--commit', '--check-update'] }); const target = opts['--target'];
+  if (opts._.length || !['claude', 'codex', 'agents'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents> (--project <dir> | --user) [--dry-run | --uninstall | --check-update]');
   const root = resolve(opts['--user'] ? userHome() : opts['--project']), statePath = resolve(root, '.geppetto/install.json');
-  if (!opts['--uninstall']) validateTurnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {}));
   await safePath(root, statePath);
   const manifest = await jsonFile(statePath, { version: 1, installations: {} }); validateManifest(manifest, root, statePath);
+  if (opts['--check-update']) {
+    if (opts['--begin'] || opts['--commit'] || opts['--uninstall'] || opts['--dry-run']) throw new UsageError('--check-update is a read-only operation');
+    const plugin = opts['--plugin-hooks'] || manifest.installations[target]?.plugin;
+    return checkUpdate({ root, target, user: opts['--user'], manifest, plugin, shellQuote });
+  }
+  if (!opts['--uninstall']) validateTurnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {}));
   if (opts['--begin'] || opts['--commit']) {
     if (opts['--user'] || opts['--uninstall'] || (opts['--begin'] && opts['--commit'])) throw new UsageError('--begin and --commit are separate project adoption steps');
     return installationGit(root, manifest, opts);   }

@@ -60,3 +60,9 @@ For standalone hook fragments, substitute `${CLAUDE_PLUGIN_ROOT}` with the absol
 Run `<adopt>/scripts/audit.mjs --project <project> --verify`, a synthetic prompt hook and memory listing. Complete [hook activation](../assets/templates/hooks/README.md#activation) for the target harness and project. Then run the installer with `--target <target> --project <project> --commit`: it commits only owned installation paths on `geppetto-install`, preserving unrelated staged work. Rerun the audit after committing: the turn checks use that initial Git revision as their baseline. Include the commit and recap table in the response.
 
 [Process execution](processes.md) governs child processes. Runtime and provider limitations are listed once in the README's Limits section.
+
+## Update
+
+Run `node <adopt>/scripts/install.mjs --check-update --target <claude|codex|agents> --project <project>` for each adopted target, or use `--user` for user-level adoption. The checker reads the current published release and compares it with the installation. Read the intervening CHANGELOG entries for migration steps.
+
+If a plugin is behind, refresh its marketplace and update through that harness before running the matching release's installer. For generated skills, get the published package and run its installer. Use the reconciliation command printed by the check and keep the current project choices. For Codex, the installer verifies and reapproves the updated definitions. Open a fresh session and check a matching hook execution. Rerun the diagnosis and report the version before and after, including any layer still awaiting action.

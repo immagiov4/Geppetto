@@ -59,13 +59,8 @@ async function maintenanceSource(source) {
   }
   throw new Error('No installed Geppetto maintenance package in ' + cache + '; reinstall the plugin.');
 }
-/** Refresh the fixed OS entrypoint while the installer holds the machine lock. */
-export async function refreshMaintenanceLauncher(home, source) {
-  const script = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
-  await mkdir(resolve(home, '.geppetto/bin'), { recursive: true });
-  // Embed the resolver so deleting its original plugin cache cannot break this entrypoint.
-  const temporary = script + '.' + randomUUID() + '.tmp';
-  await writeFile(temporary, `import { readdir, readFile, access, appendFile, mkdir } from 'node:fs/promises';
+export function maintenanceLauncherText(home, source) {
+  return `import { readdir, readFile, access, appendFile, mkdir } from 'node:fs/promises';
 import { resolve, basename, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 ${maintenanceSource.toString()}
@@ -80,9 +75,18 @@ try {
   if (process.exitCode) outcome = 'failure exit=' + process.exitCode;
 } catch (error) { outcome = 'failure ' + redact(String(error?.message ?? error)).replace(/[\\r\\n]+/g, ' '); console.error(outcome); process.exitCode = 1; }
 finally { await mkdir(directory, { recursive: true }); await appendFile(resolve(directory, job + '.log'), new Date().toISOString() + ' ' + job + ' ' + outcome + '\\n'); }
-`);
+`;
+}
+/** Refresh the fixed OS entrypoint while the installer holds the machine lock. */
+export async function refreshMaintenanceLauncher(home, source) {
+  const script = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
+  await mkdir(dirname(script), { recursive: true });
+  // Embed the resolver so deleting its original plugin cache cannot break this entrypoint.
+  const temporary = script + '.' + randomUUID() + '.tmp';
+  await writeFile(temporary, maintenanceLauncherText(home, source));
   await rename(temporary, script);
-  return script; }
+  return script;
+}
 function nextWeeklyRun(expression) {
   const match = /^(\d+) (\d+) \* \* ([0-6])$/.exec(expression);
   if (!match || Number(match[1]) > 59 || Number(match[2]) > 23) throw new Error('Inspect the existing cron cadence and register it through --scheduler-jobs with its next run.');

@@ -10,7 +10,7 @@ const cell = value => {
   return text;
 };
 const format = rows => header + [...rows].sort((a, b) => `${a.machine}/${a.job}`.localeCompare(`${b.machine}/${b.job}`, 'en')).map(row => `| ${['machine', 'job', 'scheduler', 'cadence', 'registered'].map(key => cell(row[key])).join(' | ')} |\n`).join('');
-function parse(text) {
+export function parseJobRegistry(text) {
   const rows = [];
   for (const line of text.split(/\r?\n/)) {
     if (!line.startsWith('|')) continue;
@@ -57,7 +57,7 @@ export async function memoryJobs(memory, execute = run) {
     const text = await exists(path) ? await readFile(path, 'utf8') : '';
     const head = execute('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root });
     const remoteHead = state.remote ? state.git(['for-each-ref', '--format=%(objectname)', `refs/remotes/${state.remote}/${state.branch}`]) : null;
-    return { ...state, text, rows: parse(text), head: head.status === 0 ? head.stdout.trim() : null, remoteHead };
+    return { ...state, text, rows: parseJobRegistry(text), head: head.status === 0 ? head.stdout.trim() : null, remoteHead };
   }
   let state = await load();
   return {

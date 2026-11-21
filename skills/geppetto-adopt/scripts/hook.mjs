@@ -1,3 +1,4 @@
+import { updateNotice } from './update-check.mjs';
 import { captureResources } from './resource-metrics.mjs';
 import { readFileSync } from 'node:fs';
 import { readFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
@@ -82,7 +83,12 @@ async function learningGate(root, state, statePath, event, staged) {
   return block ? { decision: 'block', reason: `${reason} Edit the project instruction or existing owner, then record ${recordCommand(event.session_id, state.turn)} with {"learning":{"outcome":"lesson|covered|one-off|blocked","path":"<owner>","reason":"<why>","key":"<signal-key when blocked or closing a signal>"}}. A lesson names a file changed now; covered names an existing rule; one-off explains why it cannot recur; blocked names the inaccessible owner and requires a key.` } : {};
 }
 async function sessionStart(event, options) {
-  const memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
+  let memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
+  const notice = await updateNotice(root, options);
+  if (notice) {
+    const additionalContext = [memory.hookSpecificOutput?.additionalContext, notice].filter(Boolean).join('\n');
+    memory = { ...memory, hookSpecificOutput: { ...memory.hookSpecificOutput, hookEventName: 'SessionStart', additionalContext } };
+  }
   await compileIntegrations(root, options);
   if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return memory;
   const policy = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); if (!policy.checks.length) return memory;

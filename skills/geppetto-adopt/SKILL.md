@@ -16,4 +16,4 @@ If `~/.geppetto/integrations.md` has a section for this skill, read it.
 |---|---|---|---|
 | Verified resources | Existing hooks, jobs and memory | Missing prerequisites | Configuration or scheduler location |
 
-Repeat each install-question line with its actual value and how to change it, including the memory location; identify jobs already scheduled on another machine. Complete when the user can inspect the result and find its controls. Rerun to reconcile updates; use `--uninstall` to remove owned files.
+Repeat each install-question line with its actual value and how to change it, including the memory location; identify jobs already scheduled on another machine. Complete when the user can inspect the result and find its controls. For an update, follow the [update procedure](references/installation.md#update); use `--uninstall` to remove owned files.
