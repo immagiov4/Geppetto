@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir, writeFile, rename, unlink, stat, realpath } from 'node:fs/promises';
+import { readFile, readdir, mkdir, writeFile, rename, unlink, realpath } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -10,7 +10,7 @@ const lines = text => text.split('\n').filter(line => line.trim()).map(JSON.pars
 
 /** Runtime data belongs to the repository; configuration and active gates belong to the checkout. */
 export function projectDataPath(root, name) {
-  const result = run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root });
+  const result = run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root, timeout: 2500 });
   if (result.status !== 0 && existsSync(resolve(root, '.git'))) throw new Error(`Cannot resolve shared Geppetto storage: ${result.stderr || result.error?.message}`);
   return resolve(result.status === 0 ? resolve(result.stdout.trim(), 'geppetto') : resolve(root, '.geppetto'), name);
 }
@@ -20,22 +20,25 @@ async function readOptional(path) {
   try { return await readFile(path, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return ''; throw error; }
 }
 
+export function worktreePaths(root, execute = run) {
+  const listing = execute('git', ['-c', 'core.quotePath=false', 'worktree', 'list', '--porcelain'], { cwd: root, timeout: 2500 });
+  if (listing.status !== 0) throw new Error(listing.error?.code ?? 'Git worktree discovery failed');
+  return listing.stdout.split(/\r?\n/).filter(line => line.startsWith('worktree ')).map(line => line.slice(9)).map(path => path.startsWith('"') ? JSON.parse(path) : path);
+}
 /** Immutable imports make repeated/concurrent migration safe and leave the originals intact. */
-export async function recoverProjectRecords(root) {
+async function recoverProjectRecords(root) {
   const directory = projectDataPath(root, '');
   if (directory === resolve(root, '.geppetto')) return directory;
-  const listing = run('git', ['-c', 'core.quotePath=false', 'worktree', 'list', '--porcelain'], { cwd: root });
-  if (listing.status !== 0) throw new Error(`Cannot discover legacy Geppetto records: ${listing.stderr}`);
-  const roots = listing.stdout.split(/\r?\n/).filter(part => part.startsWith('worktree ')).map(part => part.slice(9)).map(path => path.startsWith('"') ? JSON.parse(path) : path);
+  const roots = worktreePaths(root);
   const imports = resolve(directory, 'legacy'); await rejectSymlinks(imports); await mkdir(imports, { recursive: true });
-  for (const worktree of roots) for (const name of [...journals, 'learning']) {
+  for (const worktree of roots) for (const name of journals) {
     const path = resolve(worktree, `.geppetto/${name}.${name === 'learning' ? 'json' : 'jsonl'}`);
     let text = await readOptional(path); if (!text.trim()) continue;
     const target = resolve(imports, `${name}-${digest(worktree + '\0' + text)}.json`);
     if (existsSync(target)) continue;
     const temp = `${target}.${randomUUID()}.tmp`;
     try {
-      await writeFile(temp, JSON.stringify({ worktree: resolve(worktree), name, text, modifiedAt: (await stat(path)).mtimeMs }), { flag: 'wx', mode: 0o600 });
+      await writeFile(temp, JSON.stringify({ worktree: resolve(worktree), name, text }), { flag: 'wx', mode: 0o600 });
       await rename(temp, target);
     } finally { await unlink(temp).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
   }

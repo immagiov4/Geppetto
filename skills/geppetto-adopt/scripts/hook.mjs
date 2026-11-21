@@ -1,3 +1,4 @@
+import { captureResources } from './resource-metrics.mjs';
 import { readFileSync } from 'node:fs';
 import { readFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
 import { resolve, relative, matchesGlob } from 'node:path';
@@ -260,6 +261,7 @@ async function completionEvent(event) {
 async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   if (process.env.GEPPETTO_LEARNING_CHILD !== '1') await logReads(event, { home });
+  if (event.session_id && !event.stop_hook_active && process.env.GEPPETTO_LEARNING_CHILD !== '1' && ['SessionStart', 'Stop'].includes(event.hook_event_name)) await captureResources(event, { home, runCommand });
   if (event.hook_event_name === 'SessionStart') return process.env.GEPPETTO_LEARNING_CHILD === '1' ? {} : sessionStart(event, { home });
   const { review_blocked, ...review } = await completionEvent(event);
   if (review.hookSpecificOutput?.permissionDecision === 'deny') return review;

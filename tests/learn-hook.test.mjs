@@ -35,10 +35,11 @@ test('every long turn receives internal learning context after a tool and Stop s
   assert.ok((await send('PostToolUse', 'second', 6000)).hookSpecificOutput.additionalContext, 'one long command qualifies when it finishes');
   assert.deepEqual(await send('Stop', 'second', 7000), {});
   const logs = get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
-  assert.equal(logs.length, 3); assert.equal(logs[0].toolCalls, 2); assert.equal(logs[0].elapsedMs, 300); assert.equal(logs[2].toolCalls, 1); assert.equal(logs[2].elapsedMs, 1000);
-  assert.notEqual(logs[0].turn, logs[1].turn);
-  assert.equal(logs[0].hook, 'learnNudge'); assert.equal(logs[0].modelCalls, 0); assert.equal(logs[0].costUsd, 0);
-  assert.equal(logs[0].event, 'PostToolUse');
+  const nudges = logs.filter(row => row.hook === 'learnNudge');
+  assert.equal(nudges.length, 3); assert.equal(nudges[0].toolCalls, 2); assert.equal(nudges[0].elapsedMs, 300); assert.equal(nudges[2].toolCalls, 1); assert.equal(nudges[2].elapsedMs, 1000);
+  assert.notEqual(nudges[0].turn, nudges[1].turn);
+  assert.equal(nudges[0].hook, 'learnNudge'); assert.equal(nudges[0].modelCalls, 0); assert.equal(nudges[0].costUsd, 0);
+  assert.equal(nudges[0].event, 'PostToolUse');
   assert.equal(git(cwd, ['check-ignore', '.geppetto/hook-events.jsonl']).status, 0);
 });
 

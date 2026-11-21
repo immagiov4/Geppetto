@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+
+- Record available and total disk space, Git worktree count and resident memory of new processes at Stop.
+- Include bounded disk-size measurements and weekly comparisons in the metrics audit and curation context. Show merged pull request size beside cycle time.
+
 ## 0.13.0
 
 - Record elapsed time for selected commands and delegation calls in the project journal. Use `audit.mjs --metrics` to compare timings, find decision waits, and inspect merged pull request cycle times.
