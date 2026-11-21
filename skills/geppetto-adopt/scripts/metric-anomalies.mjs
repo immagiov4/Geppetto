@@ -3,7 +3,6 @@ import { unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appendRecord, atomicJson, claimFile, jsonFile, recordContext, run, UsageError } from './common.mjs';
-import { placeholderReason } from './gate-sections.mjs';
 import { projectRecords } from './project-records.mjs';
 import { recordSignal, redactValue } from './signal.mjs';
 import { commandArgs, commandSegments, toolCommand } from './turn-checks.mjs';
@@ -118,6 +117,7 @@ export async function recordMetricNote(root, note, { session, turn }) {
     await atomicJson(noteFile(root, kind, session, turn, key), expectation);
     return expectation;
   }
+  const { placeholderReason } = await import('./gate-sections.mjs');
   if (kind !== 'diagnosis' || !['expected', 'investigate', 'threshold'].includes(verdict) || typeof reason !== 'string' ||
       /[\r\n]/.test(reason) || placeholderReason(reason) || reason === '<specific reason>' || (verdict === 'threshold' && !positive(warnMs))) {
     throw new UsageError('Record expected, investigate or threshold with a specific one-line reason. Threshold proposals also need warnMs.');
