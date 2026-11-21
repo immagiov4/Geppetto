@@ -286,5 +286,6 @@ test('a scoped pending foundation blocks its own paths and permits a known unrel
   const script = fileURLToPath(new URL('../skills/geppetto-adopt/scripts/hook.mjs', import.meta.url)).replaceAll('\\', '/');
   const recordCommand = 'node "' + script + '" --record-turn \'{}\' --session "session" --turn "turn"';
   assert.ok(!denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand } })));
+  assert.ok(!denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand.replace(' --turn "turn"', '') } })));
   assert.ok(denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand + '; Write-Output later' } })));
 });

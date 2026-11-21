@@ -23,16 +23,18 @@ export async function completedReviewSession(home, thread, call, response, mater
     if (!archive) continue;
     const records = (await readFile(resolve(folder, archive), 'utf8')).split('\n').filter(line => line.trim()).map(JSON.parse);
     const identified = records.some(record => record.type === 'session_meta' && record.payload?.id === thread);
-    const bound = records.some(record => record.type === 'response_item' && record.payload?.role === 'user' &&
+    const isStage = (record, type) => record.type === 'event_msg' && record.payload?.type === type;
+    const starts = records.filter(record => isStage(record, 'task_started'));
+    const finishes = records.filter(record => isStage(record, 'task_complete'));
+    const [start] = starts, [finish] = finishes;
+    if (!identified || starts.length !== 1 || finishes.length !== 1 ||
+        !start.payload.turn_id || start.payload.turn_id !== finish.payload.turn_id) return false;
+    const bound = records.slice(records.indexOf(start) + 1, records.indexOf(finish)).some(record => record.type === 'response_item' && record.payload?.role === 'user' &&
       record.payload.content?.some(part => part.type === 'input_text' &&
         part.text?.split(/\r?\n/).includes('Review material SHA-256: ' + materialSeal)));
-    if (!identified || !bound) return false;
-    return records.some(record => {
-      const event = record.type === 'event_msg' && record.payload;
-      if (event?.type !== 'task_complete' || typeof event.last_agent_message !== 'string') return false;
-      try { return isDeepStrictEqual(JSON.parse(event.last_agent_message), JSON.parse(response)); }
-      catch { return false; }
-    });
+    if (!bound || typeof finish.payload.last_agent_message !== 'string') return false;
+    try { return isDeepStrictEqual(JSON.parse(finish.payload.last_agent_message), JSON.parse(response)); }
+    catch { return false; }
   }
   return false;
 }

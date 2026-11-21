@@ -25,7 +25,7 @@ export function maintenanceRegistrationStatus(name, job, { home = userHome(), ex
     const query = execute('schtasks.exe', ['/Query', '/TN', id, '/XML'], { timeout: 2000 });
     if (query.status !== 0) return 'missing';
     const xml = query.stdout ?? '';
-    if (/<Enabled>false<\/Enabled>/i.test(xml)) return 'disabled';
+    const disabled = /<Enabled>false<\/Enabled>/i.test(xml);
     const elements = (input, tag) => Array.from(input.matchAll(new RegExp('<' + tag + '\\b[^>]*>([^]*?)</' + tag + '>', 'gi')),
       match => match[1].trim().replace(/&(amp|lt|gt|quot|apos);/g, (_, entity) => xmlEntities[entity]));
     const [actions, ...otherActions] = elements(xml, 'Actions');
@@ -44,7 +44,7 @@ export function maintenanceRegistrationStatus(name, job, { home = userHome(), ex
         elements(trigger, 'WeeksInterval').join() !== '1' ||
         !dayPattern.test(elements(trigger, 'DaysOfWeek')[0] ?? '') ||
         boundary?.slice(11, 16) !== windowsTime) return 'cadence differs';
-    return 'scheduled';
+    return disabled ? 'disabled' : 'scheduled';
   }
   if (job.scheduler === 'cron') {
     const list = execute('crontab', ['-l'], { timeout: 2000 });
@@ -176,10 +176,16 @@ WScript.Quit status
     const reconcile = ['action differs', 'cadence differs'].includes(observed);
     const enable = observed === 'disabled';
     const replacement = reconcile ? 'Set-ScheduledTask -TaskName $id -Action $action -Trigger $trigger | Out-Null;'
-      : enable ? 'Enable-ScheduledTask -TaskName $id | Out-Null;' : '';
-    const code = `$ErrorActionPreference='Stop'; $id=${psQuote(id)}; $task=Get-ScheduledTask -TaskName $id -ErrorAction SilentlyContinue; $action=New-ScheduledTaskAction -Execute '${windowsAction}' -Argument ${psQuote(args)}; $trigger=New-ScheduledTaskTrigger -Weekly -DaysOfWeek ${windowsDay} -At '${windowsTime}'; if ($task) { ${replacement} if (!$task.Actions.Count -or $task.Actions.Count -ne 1 -or ('${reconcile}' -eq 'false' -and ($task.Actions.Execute -ne '${windowsAction}' -or $task.Actions.Arguments -ne ${psQuote(args)}))) { throw 'Existing task action changed during reconciliation' } } else { $settings=New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable; $task=Register-ScheduledTask -TaskName $id -Action $action -Trigger $trigger -Settings $settings }; $info=Get-ScheduledTaskInfo -TaskName $id; @{id=$id;nextRun=$info.NextRunTime.ToString('o')} | ConvertTo-Json -Compress`; const result = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
+      : '';
+    const code = `$ErrorActionPreference='Stop'; $id=${psQuote(id)}; $task=Get-ScheduledTask -TaskName $id -ErrorAction SilentlyContinue; $action=New-ScheduledTaskAction -Execute '${windowsAction}' -Argument ${psQuote(args)}; $trigger=New-ScheduledTaskTrigger -Weekly -DaysOfWeek ${windowsDay} -At '${windowsTime}'; if ($task) { ${replacement} if (!$task.Actions.Count -or $task.Actions.Count -ne 1 -or ('${reconcile}' -eq 'false' -and ($task.Actions.Execute -ne '${windowsAction}' -or $task.Actions.Arguments -ne ${psQuote(args)}))) { throw 'Existing task action changed during reconciliation' }; if ('${enable}' -eq 'true') { Enable-ScheduledTask -TaskName $id | Out-Null } } else { $settings=New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable; $task=Register-ScheduledTask -TaskName $id -Action $action -Trigger $trigger -Settings $settings }; $info=Get-ScheduledTaskInfo -TaskName $id; @{id=$id;nextRun=$info.NextRunTime.ToString('o')} | ConvertTo-Json -Compress`; const result = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
     if (result.status !== 0) throw new Error(`Windows maintenance registration failed: ${result.stderr?.trim() || result.error?.message}`);
-    if ((reconcile || enable) && maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute }) !== 'scheduled') throw new Error('Updated Windows maintenance task did not pass verification.');
+    if (reconcile || enable) {
+      const verified = maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute });
+      if (reconcile && verified === 'disabled') {
+        return scheduleMaintenance(name, { home, host, source, platform, execute, command, previous });
+      }
+      if (verified !== 'scheduled') throw new Error('Updated Windows maintenance task did not pass verification.');
+    }
     const registered = JSON.parse(result.stdout);
     return { ...registered, scheduler: 'windows-task-scheduler', cadence, disable: `schtasks.exe /Change /TN ${id} /DISABLE`, status: 'scheduled', host };   }
   const listed = execute('crontab', ['-l']);

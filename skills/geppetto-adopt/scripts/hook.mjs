@@ -249,8 +249,8 @@ function isTurnRecorder(event, state) {
   const { executable, positional, flags } = commandArgs(parts[0]);
   return /^node$/i.test(executable ?? '') && positional.length === 1 &&
     resolve(event.cwd ?? '.', positional[0]) === fileURLToPath(import.meta.url) &&
-    flags.size === 3 && typeof flags.get('--record-turn') === 'string' &&
-    flags.get('--session') === event.session_id && flags.get('--turn') === state.turn;
+    typeof flags.get('--record-turn') === 'string' && flags.get('--session') === event.session_id &&
+    (flags.size === 2 || (flags.size === 3 && flags.get('--turn') === state.turn));
 }
 
 async function editingEvent(root, state, statePath, event, policy) {

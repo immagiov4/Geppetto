@@ -83,7 +83,7 @@ test('a successful PR merge adds one line using the recorded PR interval', async
   });
   assert.match(note, /^Geppetto PR #12: 12000 ms elapsed .*0 recorded review rounds and 0 anomalous operations in this worktree window\.$/);
   assert.equal(await prTimingNote(cwd, event, { ok: false }, () => assert.fail('failed merges use no host lookup')), '');
-  const branch = { ...event, tool_input: { command: 'gh pr merge work/topic --squash' } };
+  const branch = { ...event, tool_input: { command: 'gh pr merge --author-email fixture@example.invalid work/topic --squash' } };
   const branchNote = await prTimingNote(cwd, branch, { ok: true }, (program, args) => {
     assert.equal(program, 'gh');
     assert.equal(args[2], 'work/topic');
