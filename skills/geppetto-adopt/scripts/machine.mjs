@@ -53,6 +53,11 @@ async function attachJobs(machine, path, registry, { home, harness, source, jobs
 }
 /** Reuse machine resources; hook commands point to the recorded package source. */
 export async function reconcileMachine(project, target, source, { pluginHooks = false, uninstall = false, home = userHome(), jobs = {}, scheduler = scheduleMaintenance, unscheduler = disableMaintenance, memoryChoice, addJobs = [], machineName = hostname(), execute = run, uninstallMemory } = {}) {
+  const git = run('git', ['-C', project, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir']);
+  const [gitDir, commonDir] = git.stdout?.trim().split(/\r?\n/) ?? [];
+  const worktrees = git.status === 0 && gitDir !== commonDir ? run('git', ['-C', project, 'worktree', 'list', '--porcelain']) : null;
+  const [worktree, kind] = worktrees?.stdout.split(/\r?\n/) ?? [];
+  const main = worktrees?.status === 0 && worktree.startsWith('worktree ') && kind !== 'bare' ? resolve(worktree.slice('worktree '.length)) : project;
   for (const [name, job] of Object.entries(jobs)) if (!maintenanceJobs.includes(name) || ['id', 'scheduler', 'cadence', 'nextRun', 'disable'].some(key => typeof job?.[key] !== 'string' || !job[key].trim())) throw new Error('Scheduler registrations need name, id, scheduler, cadence, nextRun and disable command');
   const directory = resolve(home, '.geppetto');
   await mkdir(directory, { recursive: true });
@@ -86,7 +91,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
     const configPath = resolve(project, '.geppetto/config.json');
     const local = await jsonFile(configPath, defaultConfig());
     if (!await exists(configPath)) await atomicJson(configPath, local);
-    machine.projects[project] = { ...machine.projects[project], [target]: source.path };
+    machine.projects[main] = { ...machine.projects[main], [target]: source.path };
     const memory = await setupMemory(project, machine, { home, memoryChoice, execute });
     await bridgeNativeMemory(project, machine, memory);
     await atomicJson(path, machine);

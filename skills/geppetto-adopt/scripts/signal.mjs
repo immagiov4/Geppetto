@@ -63,7 +63,7 @@ export async function recordSignal(root, input) {
   return entry; }
 const credentialName = String.raw`[a-z\d_]*(?:api[_-]?key|token|secret|password)`;
 const credentialProperty = new RegExp(String.raw`\b${credentialName}$`, 'i');
-const credentialAssignment = new RegExp(String.raw`\b(${credentialName})["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)`, 'gi');
+export const credentialAssignment = new RegExp(String.raw`\b(${credentialName})["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)`, 'gi');
 export function redactValue(value) {
   if (typeof value === 'string') return redact(value);
   if (Array.isArray(value)) return value.map(redactValue);

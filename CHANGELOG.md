@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.2
+
+- Record weekly maintenance outcomes even when startup fails, and skip missing project paths.
+- Register linked worktree installations under their main checkout for weekly maintenance.
+
 ## 0.12.1
 
 - Before opening a pull request, record whether its body includes Inspectability and why. Use the existing work log or the conversation. The same step applies across publishing tools.
