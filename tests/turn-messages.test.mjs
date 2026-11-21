@@ -63,3 +63,23 @@ test('concurrent session updates read the preceding committed state', async t =>
   await assert.rejects(withTurnLock(lock,async()=>{throw new Error('failed update');}),/failed update/);
   assert.equal(await withTurnLock(lock,()=>Promise.resolve('recovered')),'recovered');
 });
+
+test('native hook continuations and instructions do not advance the user epoch', async t => {
+  const root = fixture(t), path = resolve(root, 'session.jsonl');
+  const native = (text, provenance) => JSON.stringify({
+    type: 'response_item',
+    payload: {
+      role: 'user',
+      content: [{ type: 'input_text', text }],
+      internal_chat_message_metadata_passthrough: { content_item_metadata: [{ provenance }] },
+    },
+  }) + '\n';
+  put(root, path, native('# AGENTS.md instructions', { type: 'agents_md' }) + native('Real prompt', { type: 'user' }));
+  const initial = await messageCheckpoint(path);
+  assert.equal(initial.userMessages, 1);
+  await appendFile(path, native('Use the Stop retry command', { type: 'harness', hook: true }));
+  const retry = await messageCheckpoint(path, initial.cursor);
+  assert.equal(retry.userMessage, null);
+  await appendFile(path, native('Actual user steering', { type: 'user' }));
+  assert.ok((await messageCheckpoint(path, retry.cursor)).userMessage);
+});

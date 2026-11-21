@@ -27,6 +27,8 @@ export async function messageCheckpoint(path, cursor) {
       let record; try { record = JSON.parse(line); } catch { throw new Error('Invalid transcript JSONL record.'); }
       const message = record.type === 'response_item' ? record.payload : record.message;
       if (!message || (message.role ?? record.type) !== 'user') continue;
+      const metadata = message.internal_chat_message_metadata_passthrough?.content_item_metadata;
+      if (Array.isArray(metadata) && metadata.length && !metadata.some(item => item?.provenance?.type === 'user')) continue;
       const text = typeof message.content === 'string' ? message.content.trim() : message.content?.some(block => ['text', 'input_text'].includes(block.type) && block.text?.trim());
       if (text) { userMessages++; userMessage = createHash('sha256').update(`${path}:${identity}:${position}:${line}`).digest('hex'); }
     }
