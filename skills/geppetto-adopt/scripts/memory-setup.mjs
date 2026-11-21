@@ -1,4 +1,6 @@
-import { mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rename, unlink, writeFile, realpath } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
 import { atomicJson, gitOutput, jsonFile, exists, run, UsageError, rejectSymlinks as memoryWritePath } from './common.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
@@ -36,12 +38,65 @@ export async function syncMemory(memory, execute = run) {
   }
   return { git, remote, branch };
 }
+// Replace the known manual publisher instead of chaining a second push.
+const previousPushHook = String.raw`#!/bin/sh
+# Memory saves are published with the commit (maintainer, 2026-11-21): a commit here is also a push.
+git push --quiet 2>&1 || { echo "llm-memories: push failed; the commit is local only. Run: git -C \"$(git rev-parse --show-toplevel)\" pull --rebase && git push" >&2; exit 0; }`;
+const pushHook = `#!/bin/sh
+# Geppetto memory publication
+status=0
+previous="\${0%/*}/geppetto-previous/\${0##*/}"
+if [ -x "$previous" ]; then
+  IFS= read -r interpreter < "$previous"
+  if [ "$interpreter" = '#!/bin/sh' ]; then
+    # Keep the original script name and directory for relative hook imports.
+    GEPPETTO_PREVIOUS_HOOK="$previous" sh -c '. "$GEPPETTO_PREVIOUS_HOOK"' "$0" "$@" || status=$?
+  else
+    "$previous" "$@" || status=$?
+  fi
+fi
+remote=$(git config --local --get geppetto.memoryPushRemote) || exit "$status"
+branch=$(git symbolic-ref --quiet HEAD)
+if [ -z "$branch" ] || ! git push --quiet -- "$remote" "HEAD:$branch"; then
+  printf '%s\n' 'Geppetto memory: commit is local. Pull with rebase, retry the push, and inspect pending commits if it fails again.' >&2
+fi
+exit "$status"
+`;
+
+async function installMemoryPushHook({ git, remote }) {
+  if (!remote) return;
+  const path = git(['rev-parse', '--path-format=absolute', '--git-path', 'hooks/post-commit']);
+  await memoryWritePath(path);
+  const existing = await exists(path) ? await readFile(path) : null;
+  if (existing?.toString('utf8') !== pushHook) {
+    await mkdir(dirname(path), { recursive: true });
+    const previous = resolve(dirname(path), 'geppetto-previous', basename(path));
+    if (existing && existing.toString('utf8').replaceAll('\r\n', '\n').trimEnd() !== previousPushHook) {
+      await memoryWritePath(previous);
+      if (await exists(previous)) {
+        if (!existing.equals(await readFile(previous))) throw new Error('Memory hook backup differs; reconcile post-commit before installing Geppetto.');
+      } else {
+        await mkdir(dirname(previous), { recursive: true });
+        await copyFile(path, previous, constants.COPYFILE_EXCL);
+      }
+    }
+    const temporary = path + '.' + randomUUID();
+    await writeFile(temporary, pushHook, { flag: 'wx', mode: 0o755 });
+    try {
+      await chmod(temporary, 0o755);
+      await rename(temporary, path);
+    } finally {
+      await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    }
+  }
+  git(['config', '--local', 'geppetto.memoryPushRemote', remote]);
+}
 export { memoryWritePath };
 async function seed(memory, bucket, execute) {
   await memoryWritePath(memory.localPath);
   await mkdir(memory.localPath, { recursive: true });
   if (!await exists(resolve(memory.localPath, '.git'))) memoryGit(memory.localPath, ['init', '-q'], execute);
-  await syncMemory(memory, execute);
+  await installMemoryPushHook(await syncMemory(memory, execute));
   const index = resolve(memory.localPath, 'index.md');
   await memoryWritePath(index);
   let text = await exists(index) ? await readFile(index, 'utf8') : '# Memory\n\n| Bucket | Scope | Holds |\n|---|---|---|\n';
@@ -96,14 +151,17 @@ export async function setupMemory(project, machine, { home, memoryChoice, execut
   const bucket = memory.buckets?.find(name => name !== 'preferences') ?? (basename(project).replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[^a-zA-Z0-9]+/, '') || 'project');
   if (bucket.toLowerCase() === 'preferences') throw new UsageError('Choose a project bucket through memory.buckets');
   const managed = ['local', 'github'].includes(memory.choice);
-  if (managed && (memoryChoice || !memory.buckets?.length)) {
+  const seedRequired = managed && (memoryChoice || !memory.buckets?.length);
+  if (seedRequired) {
     await seed(memory, bucket, execute);
     if (memoryChoice === 'github' && !memoryGit(memory.localPath, ['remote'], execute)) {
       const result = execute('gh', ['repo', 'create', memory.repo.replace('https://github.com/', ''), '--private', '--source', memory.localPath, '--remote', 'origin'], { cwd: project });
       if (result.status !== 0) throw new Error(`Private memory creation failed: ${result.stderr?.trim() || result.error?.message}`);
       memoryGit(memory.localPath, ['push', '-u', 'origin', 'HEAD'], execute);
+      await installMemoryPushHook(await syncMemory(memory, execute));
     }
   }
+  if (memory.localPath && !seedRequired && !['native', 'none'].includes(memory.choice)) await installMemoryPushHook(await syncMemory(memory, execute));
   const userPath = resolve(home, '.geppetto/config.json');
   const user = await jsonFile(userPath, {});
   const { buckets, projectBucket, ...shared } = memory;
