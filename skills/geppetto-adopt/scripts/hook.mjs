@@ -1,3 +1,4 @@
+import { weeklyReportNotice } from './weekly-report.mjs';
 import { updateNotice } from './update-check.mjs';
 import { captureResources } from './resource-metrics.mjs';
 import { readFileSync } from 'node:fs';
@@ -98,7 +99,9 @@ async function learningGate(root, state, statePath, event, staged) {
 }
 async function sessionStart(event, options) {
   let memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
-  const notice = await updateNotice(root, { ...options, harness: event.harness });
+  const update = await updateNotice(root, { ...options, harness: event.harness });
+  const report = await exists(resolve(root, '.geppetto/config.json')) ? await weeklyReportNotice(root, options.now()) : '';
+  const notice = [update, report].filter(Boolean).join('\n');
   if (notice) {
     const additionalContext = [memory.hookSpecificOutput?.additionalContext, notice].filter(Boolean).join('\n');
     memory = { ...memory, hookSpecificOutput: { ...memory.hookSpecificOutput, hookEventName: 'SessionStart', additionalContext } };

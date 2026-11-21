@@ -4,6 +4,7 @@ import { resolve, relative, dirname, sep, matchesGlob } from 'node:path';
 import { createInterface } from 'node:readline';
 import { contained, isMain, userHome, gitOutput } from './common.mjs';
 import { redact, maintainEvidence } from './signal.mjs';
+import { writeWeeklyProposals } from './weekly-report.mjs';
 import { logReads } from './hook-events.mjs';
 const blocked = part => /^(?:\.git|\.geppetto|\.codex|\.claude|\.agents|node_modules|\.env(?:\..*)?|.*\.(?:pem|key))$/i.test(part);
 function blockedPath(parts, directory = false) {
@@ -39,6 +40,11 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
   root = await realpath(root);
   if (typeof args.path === 'string' && contained(requestedRoot, resolve(requestedRoot, args.path))) args = { ...args, path: resolve(root, relative(requestedRoot, resolve(requestedRoot, args.path))) };
   const read = async path => { const text = redact(await readFile(path, 'utf8')); await logReads({ cwd: telemetry.recordRevision ? requestedRoot : root, session_id: 'maintenance', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { path } }, { home: telemetry.home, readRoot: root, reference: telemetry.recordRevision && requestedRoot !== root && contained(root, path) ? gitOutput(root, ['rev-parse', 'HEAD']) : undefined }); return text; };
+  if (name === 'ProposeExperiments') {
+    if (!telemetry.maintenance || readOnly || !telemetry.weeklyDraft) throw new Error('Weekly proposal capability is unavailable');
+    await writeWeeklyProposals(telemetry.weeklyDraft, args.proposals);
+    return 'Saved weekly proposals';
+  }
   if (name === 'MaintainEvidence') { if (!telemetry.maintenance || readOnly) throw new Error('Maintenance capability is unavailable'); await maintainEvidence(root, args); return 'Evidence maintenance saved'; }
   if (name === 'Read' && referenceRoot) {
     const requestedReference = resolve(referenceRoot);
@@ -72,16 +78,17 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
   return 'Saved project file'; }
 const schemas = JSON.parse(readFileSync(new URL('./learning-contracts.json', import.meta.url), 'utf8')).tools;
 if (isMain(import.meta.url)) {
+  const weeklyDraft = process.argv[6] || null;
   const root = resolve(process.argv[2]); const readOnly = process.argv[3] === 'read-only'; const allowed = JSON.parse(process.argv[4] ?? '[]'); const referenceRoot = process.argv[5] ?? null;
   for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     const request = JSON.parse(line); if (request.id === undefined) continue;
     let result;
     if (request.method === 'initialize') result = { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'geppetto-learning-files', version: '1.0.0' } };
-    else if (request.method === 'tools/list') result = { tools: Object.entries(schemas).filter(([name]) => allowed.includes(name) && (!readOnly || !['Write', 'Edit', 'MaintainEvidence'].includes(name))).map(([name, properties]) => ({ name, description: `${name} project files within the learning boundary`, inputSchema: { type: 'object', properties, required: Object.keys(properties).filter(key => !['glob', 'category'].includes(key)), additionalProperties: false } })) };
+    else if (request.method === 'tools/list') result = { tools: Object.entries(schemas).filter(([name]) => allowed.includes(name) && (!readOnly || !['Write', 'Edit', 'MaintainEvidence', 'ProposeExperiments'].includes(name))).map(([name, properties]) => ({ name, description: `${name} project files within the learning boundary`, inputSchema: { type: 'object', properties, required: Object.keys(properties).filter(key => !['glob', 'category'].includes(key)), additionalProperties: false } })) };
     else if (request.method === 'tools/call') {
       try {
         if (!allowed.includes(request.params.name)) throw new Error('Tool outside the configured selection');
-        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly, referenceRoot, { recordRevision: true, maintenance: process.argv[3] === 'maintenance' }) }] };
+        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly, referenceRoot, { recordRevision: true, maintenance: process.argv[3] === 'maintenance', weeklyDraft }) }] };
       }
       catch { result = { isError: true, content: [{ type: 'text', text: 'File operation rejected; verify the project path, tool and exact edit match.' }] }; }
     } else if (request.method === 'ping') result = {};

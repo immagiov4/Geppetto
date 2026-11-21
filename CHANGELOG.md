@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.0
+
+- Weekly skill curation saves per-project metrics reports with operation times, storage, PR cycle, recorded overhead and up to two proposed experiments.
+- SessionStart links to a report more than eight days old. The metrics audit reports observed reads.
+- Migration: update both plugins and reapprove Codex hooks. The existing curation schedule is reused.
+
 ## 0.20.0
 
 - Require a complete foundation decision record and a matching independent review result. Keep edit decisions active when the Stop review gate is disabled.

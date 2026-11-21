@@ -6,6 +6,7 @@ import { timedMetric } from './metric-anomalies.mjs';
 import { resourceHost, sizeRoot } from './resource-metrics.mjs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { appendRecord, cli, exists, isMain, jsonFile, run, userHome, UsageError } from './common.mjs';
+import { weeklyReportState } from './weekly-report.mjs';
 import { projectDataPath, projectRecords, worktreePaths } from './project-records.mjs';
 
 const auditTimeout = 115000;
@@ -124,7 +125,16 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
   const start = since === undefined ? -Infinity : Date.parse(since);
   if (Number.isNaN(start)) throw new UsageError('--since must be an ISO date.');
   const metrics = await journal(project, 'metrics'), turns = await journal(project, 'turns');
-  const [events, reviews] = await Promise.all([journal(project, 'hook-events'), journal(project, 'reviews')]);
+  const [events, reviews, reads] = await Promise.all([journal(project, 'hook-events'), journal(project, 'reviews'), journal(project, 'reads')]);
+  const windowEvents = events.rows.filter(row => Date.parse(row.ts) >= start);
+  const measuredTotal = field => {
+    const values = windowEvents.map(row => row[field]).filter(Number.isFinite);
+    return values.length ? sum(values) : null;
+  };
+  const geppettoOverhead = { injectedBytes: measuredTotal('injectedBytes'), modelCalls: measuredTotal('modelCalls') };
+  const reportReads = reads.rows.filter(row => row.kind === 'weekly-report' && Date.parse(row.ts) >= start);
+  const weeklyReportReads = { ...await weeklyReportState(project, now), count: reportReads.length, reports: Object.fromEntries([...Map.groupBy(reportReads, row => row.path)]
+    .map(([path, rows]) => [path, rows.length])) };
   const compliance = gateCompliance([{ name: 'metrics', rows: metrics.rows }, { name: 'turns', rows: turns.rows }, { name: 'events', rows: events.rows }, { name: 'reviews', rows: reviews.rows }], start);
   const resources = metrics.rows.filter(row => row.kind === 'resource' && row.key === 'stop' && Date.parse(row.ts) >= start && (!key || row.key === key));
   const sizes = key && key !== 'disk-size' ? [] : await auditSizes(project, metrics.rows, now, home).catch(error => [{ status: 'unavailable', reason: error.code ?? 'resource roots unavailable' }]);
@@ -162,16 +172,16 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
     catch { /* An unreadable host response leaves coverage unknown. */ }
   }
   const prCycle = prs?.filter(row => Date.parse(row.ts) >= start) ?? [];
-  return { project, since: since ?? null, key: key ?? null, keys, topTimeSinks,
+  return { project, since: since ?? null, asOf: new Date(now).toISOString(), key: key ?? null, keys, topTimeSinks,
     delegates: { wallMs: mergedWall(delegates), resourceMs: sum(delegates.map(row => row.durationMs)), count: delegates.length },
-    resources, sizes, compliance, reminders, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
-    coverage: { metrics: metrics.coverage, turns: turns.coverage, 'hook events': events.coverage, prs: { status: prs ? 'available' : 'unknown', observed: prs?.length ?? 0, limit: 100 } } };
+    resources, sizes, compliance, reminders, geppettoOverhead, weeklyReportReads, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
+    coverage: { metrics: metrics.coverage, turns: turns.coverage, 'hook events': events.coverage, reads: reads.coverage, prs: { status: prs ? 'available' : 'unknown', observed: prs?.length ?? 0, limit: 100 } } };
 }
 
-export async function boundedMetricsAudit(project, { since, key } = {}) {
+export async function boundedMetricsAudit(project, { since, key, now } = {}) {
   try {
     const { stdout } = await executeFile(process.execPath,
-      [fileURLToPath(import.meta.url), project, JSON.stringify({ since, key })],
+      [fileURLToPath(import.meta.url), project, JSON.stringify({ since, key, now })],
       { timeout: auditTimeout, killSignal: 'SIGKILL', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
     return JSON.parse(stdout);
   } catch (error) {
@@ -201,6 +211,7 @@ export function printMetrics(report) {
   const { delegates, decisionWaits, prCycle } = report;
   console.log(`Delegate spans: ${delegates.count}, merged host wall ${delegates.wallMs} ms, summed resource ${delegates.resourceMs} ms`);
   console.log(`Decision waits: ${decisionWaits.length} recorded turns`);
+  console.log(`Weekly metrics report reads: ${report.weeklyReportReads.count} observed; latest report ${report.weeklyReportReads.status}`);
   for (const row of decisionWaits.slice(0, 10)) console.log(`${row.ts} ${row.turnId}: ${row.durationMs === null ? 'unknown' : `${row.durationMs / 1000} s`} (${row.decisions} observed decisions, ${row.missing} missing)`);
   for (const row of report.resources.slice(-10)) console.log(`Stop resources ${row.ts}: ${JSON.stringify({ worktreeCount: row.worktreeCount, volumes: row.volumes, processes: row.processes })}`);
   for (const size of report.sizes) console.log(`Disk size: ${JSON.stringify(size)}`);
