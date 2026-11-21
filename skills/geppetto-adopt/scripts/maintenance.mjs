@@ -111,9 +111,9 @@ End Select
 On Error Resume Next
 status = CreateObject("WScript.Shell").Run("${action.replaceAll('"', '""')}" & job, 0, True)
 If Err.Number <> 0 Then
-  Set log = CreateObject("Scripting.FileSystemObject").OpenTextFile("${dirname(launcher)}\\" & job & ".log", 8, True)
-  log.WriteLine Now & " " & job & " failure could not start the Node maintenance launcher"
-  log.Close
+  Set outputLog = CreateObject("Scripting.FileSystemObject").OpenTextFile("${dirname(launcher)}\\" & job & ".log", 8, True)
+  outputLog.WriteLine Now & " " & job & " failure could not start the Node maintenance launcher"
+  outputLog.Close
   WScript.Quit 1
 End If
 WScript.Quit status

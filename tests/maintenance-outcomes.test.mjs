@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fixture, put, get, invoke, repo, git } from './helpers.mjs';
-import { refreshMaintenanceLauncher } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
+import { refreshMaintenanceLauncher, scheduleMaintenance } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
 import { reconcileMachine } from '../skills/geppetto-adopt/scripts/machine.mjs';
 
 test('launcher records early failures and successful outcomes and skips absent projects', async t => {
@@ -30,4 +31,18 @@ test('source resolution errors are redacted before package imports', async t => 
   const result = invoke(resolve(home, '.geppetto/bin/maintenance-launcher.mjs'), ['--run', 'curate-skills'], { home });
   assert.equal(result.status, 1);
   assert.match(get(home, '.geppetto/curate-skills.log'), /failure.*No installed Geppetto maintenance package.*\[REDACTED\]/);
+});
+
+
+test('Windows launcher logs when Node cannot start', { skip: process.platform !== 'win32' }, async t => {
+  const home = fixture(t);
+  const launcher = '.geppetto/maintenance.vbs';
+  await scheduleMaintenance('curate-skills', {
+    home, host: 'codex', source: { path: repo }, command: {},
+    execute: () => ({ status: 0, stdout: '{"id":"Geppetto-curate-skills","nextRun":"2026-11-23T09:00:00"}' }),
+  });
+  put(home, launcher, get(home, launcher).replace(process.execPath, resolve(home, 'missing-node.exe')));
+  const result = spawnSync('cscript.exe', ['//B', '//Nologo', resolve(home, launcher), 'curate-skills'], { windowsHide: true });
+  assert.equal(result.status, 1);
+  assert.match(get(home, '.geppetto/curate-skills.log'), /curate-skills failure could not start the Node maintenance launcher/);
 });

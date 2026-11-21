@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.3
+
+- Record Windows maintenance startup errors when the launcher cannot start Node.
+
 ## 0.12.2
 
 - Record weekly maintenance outcomes even when startup fails, and skip missing project paths.
