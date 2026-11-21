@@ -79,7 +79,7 @@ async function readUpdateNotice(root, { home = userHome(), now = Date.now } = {}
         await atomicJson(attempted, { epoch });
         const signal = AbortSignal.timeout(2000);
         const release = await latestVersion(signal);
-        status = { epoch, ...release, sha: await releaseCommit(release.tag, signal) };
+        status = { epoch, ...release, sha: await releaseCommit(release.tag, signal), scheduler: await schedulerSnapshot(home) };
         await atomicJson(cache, status);
       } catch {
         // The explicit checker surfaces upstream errors. A startup failure is retried tomorrow.
@@ -91,7 +91,7 @@ async function readUpdateNotice(root, { home = userHome(), now = Date.now } = {}
   if (status.epoch !== epoch) return '';
   const packageVersion = (await jsonFile(new URL('../../../package.json', import.meta.url), {})).version;
   const pinDrift = !user && await checkPin(root, status.sha, () => {});
-  const maintenanceDrift = await machineDrift(user ? home : root, manifest.source, home, { log: () => {}, inspectScheduler: false });
+  const maintenanceDrift = await machineDrift(user ? home : root, manifest.source, home, { log: () => {}, scheduler: status.scheduler ?? {} });
   if (status.version === packageVersion && status.version === manifest.source?.version && !pinDrift && !maintenanceDrift) return '';
   return `Geppetto ${status.version} is published. Run node "${installer}" --check-update --target ${target} ${user ? '--user' : `--project "${root}"`} before reconciling.`;
 }
@@ -120,38 +120,48 @@ async function checkPin(root, releaseSha, log = console.log) {
   log(`Project CI pin: ${matches ? 'current' : 'missing or outdated'}`);
   return !matches;
 }
-function localJobPresent(name, job) {
+function localJobStatus(name, job) {
+  if (job?.status !== 'scheduled') return null;
   const id = `Geppetto-${name}`;
   if (job.scheduler === 'windows-task-scheduler') {
-    const query = run('schtasks.exe', ['/Query', '/TN', id, '/XML']);
-    return query.status === 0 && !/<Enabled>false<\/Enabled>/i.test(query.stdout);
+    const query = run('schtasks.exe', ['/Query', '/TN', id, '/XML'], { timeout: 2000 });
+    if (query.status !== 0) return 'missing';
+    return /<Enabled>false<\/Enabled>/i.test(query.stdout) ? 'disabled' : 'scheduled';
   }
   if (job.scheduler === 'cron') {
-    const list = run('crontab', ['-l']);
-    return list.status === 0 && list.stdout.split(/\r?\n/).some(line => !line.trimStart().startsWith('#') && line.endsWith(`# ${id}`));
+    const list = run('crontab', ['-l'], { timeout: 2000 });
+    const found = list.status === 0 && list.stdout.split(/\r?\n/).some(line => !line.trimStart().startsWith('#') && line.endsWith(`# ${id}`));
+    return found ? 'scheduled' : 'missing';
   }
-  return Boolean(job.id);
+  return job.id ? 'registered externally' : 'missing';
 }
 
-async function machineDrift(root, source, home = userHome(), { log = console.log, inspectScheduler = true } = {}) {
+async function schedulerSnapshot(home, machine) {
+  machine ??= await jsonFile(resolve(home, '.geppetto/machine.json'), {});
+  return Object.fromEntries(maintenanceJobs.map(name => [name, localJobStatus(name, machine.jobs?.[name])]));
+}
+async function machineDrift(root, source, home = userHome(), { log = console.log, scheduler } = {}) {
   const local = await jsonFile(resolve(root, '.geppetto/config.json'), {});
   const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {});
   const launcherPath = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
   const launcher = await exists(launcherPath) ? await readFile(launcherPath, 'utf8') : '';
   const sources = new Set([source?.path, ...Object.values(machine.projects ?? {}).flatMap(targets => Object.values(targets))]);
-  const launcherCurrent = [...sources].some(path => typeof path === 'string' &&
+  const wrapperMissing = process.platform === 'win32' && Object.values(machine.jobs ?? {}).some(job => job.scheduler === 'windows-task-scheduler' && job.status === 'scheduled') && !await exists(resolve(home, '.geppetto/maintenance.vbs'));
+  if (wrapperMissing) log('Windows maintenance entry point: missing maintenance.vbs');
+  const launcherCurrent = !wrapperMissing && [...sources].some(path => typeof path === 'string' &&
     launcher.replaceAll('\r\n', '\n') === maintenanceLauncherText(home, { path }).replaceAll('\r\n', '\n'));
   log(`Maintenance launcher: ${launcherCurrent ? 'registered source matches' : 'missing or linked to a different source'}`);
 
   const memory = await memoryConfiguration(root, home);
   const registryPath = memory?.localPath && resolve(memory.localPath, 'jobs.md');
   const registry = registryPath && await exists(registryPath) ? parseJobRegistry(await readFile(registryPath, 'utf8')) : [];
+  const schedule = scheduler ?? await schedulerSnapshot(home, machine);
   let drift = !launcherCurrent;
   for (const name of maintenanceJobs) {
     const job = machine.jobs?.[name];
     const owner = job?.status === 'scheduled-elsewhere' ? job.machine : hostname();
     const registered = !registryPath || registry.some(row => row.job === name && row.machine === owner && row.scheduler === job?.scheduler && row.cadence === job?.cadence);
-    const schedulerMissing = inspectScheduler && job?.status === 'scheduled' && !localJobPresent(name, job);
+    const schedulerMissing = ['missing', 'disabled'].includes(schedule[name]);
     const scheduled = ['scheduled', 'scheduled-elsewhere'].includes(job?.status) && registered && !schedulerMissing;
     if (schedulerMissing) log(`${name}: native registration missing or disabled`);
     const disabled = !job || job.status === 'disabled' || job.status === 'scheduled-elsewhere';
