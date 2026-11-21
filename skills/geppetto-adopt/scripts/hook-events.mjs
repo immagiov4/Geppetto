@@ -11,7 +11,7 @@ function reportFileArguments(command) {
   return new Set(commandSegments(command).flatMap(segment => {
     const { executable, positional, flags } = commandArgs(segment, { argumentFlags: searchValueFlags });
     if (/^(?:cat|Get-Content|type)$/i.test(executable ?? '')) return positional;
-    if (!/^(?:rg|sed)$/i.test(executable ?? '')) return [];
+    if (!/^(?:rg|sed)$/i.test(executable ?? '') || flags.has('--files')) return [];
     return flags.has('-e') || flags.has('--regexp') || flags.has('-f') || flags.has('--file') ? positional : positional.slice(1);
   }));
 }

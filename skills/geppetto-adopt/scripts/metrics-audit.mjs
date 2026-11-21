@@ -76,9 +76,9 @@ async function auditSizes(project, rows, now, home) {
   return sizes.map(size => ({ ...size, weekChangeBytes: size.status === 'complete' && previous.has(size.path) ? size.bytes - previous.get(size.path) : null }));
 }
 
-function gateCompliance(journals, start) {
+function gateCompliance(journals, inWindow) {
   const tagged = journals.flatMap(({ name, rows }) => rows
-    .filter(row => Date.parse(row.ts) >= start)
+    .filter(inWindow)
     .map(row => ({ row, name })));
   const byHost = Map.groupBy(tagged, ({ row }) => JSON.stringify([row.host ?? null, row.harness ?? null]));
   return [...byHost].map(([hostKey, entries]) => {
@@ -124,26 +124,30 @@ function gateCompliance(journals, start) {
 export async function metricsAudit(project, { since, key, now = Date.now(), execute = run, home = userHome() } = {}) {
   const start = since === undefined ? -Infinity : Date.parse(since);
   if (Number.isNaN(start)) throw new UsageError('--since must be an ISO date.');
+  const inWindow = row => {
+    const at = Date.parse(row.ts);
+    return at >= start && at <= now;
+  };
   const metrics = await journal(project, 'metrics'), turns = await journal(project, 'turns');
   const [events, reviews, reads] = await Promise.all([journal(project, 'hook-events'), journal(project, 'reviews'), journal(project, 'reads')]);
-  const windowEvents = events.rows.filter(row => Date.parse(row.ts) >= start);
+  const windowEvents = events.rows.filter(inWindow);
   const measuredTotal = field => {
     const values = windowEvents.map(row => row[field]).filter(Number.isFinite);
     return values.length ? sum(values) : null;
   };
   const geppettoOverhead = { injectedBytes: measuredTotal('injectedBytes'), modelCalls: measuredTotal('modelCalls') };
-  const reportReads = reads.rows.filter(row => row.kind === 'weekly-report' && Date.parse(row.ts) >= start);
-  const weeklyReportReads = { ...await weeklyReportState(project, now), count: reportReads.length, reports: Object.fromEntries([...Map.groupBy(reportReads, row => row.path)]
-    .map(([path, rows]) => [path, rows.length])) };
-  const compliance = gateCompliance([{ name: 'metrics', rows: metrics.rows }, { name: 'turns', rows: turns.rows }, { name: 'events', rows: events.rows }, { name: 'reviews', rows: reviews.rows }], start);
-  const resources = metrics.rows.filter(row => row.kind === 'resource' && row.key === 'stop' && Date.parse(row.ts) >= start && (!key || row.key === key));
+  const reportReads = reads.rows.filter(row => row.kind === 'weekly-report' && inWindow(row));
+  const weeklyReportReads = { ...await weeklyReportState(project, now), count: reportReads.length, reports: Object.fromEntries([...Map.groupBy(reportReads, row => process.platform === 'win32' ? row.path.toLowerCase() : row.path)]
+    .map(([, rows]) => [rows[0].path, rows.length])) };
+  const compliance = gateCompliance([{ name: 'metrics', rows: metrics.rows }, { name: 'turns', rows: turns.rows }, { name: 'events', rows: events.rows }, { name: 'reviews', rows: reviews.rows }], inWindow);
+  const resources = metrics.rows.filter(row => row.kind === 'resource' && row.key === 'stop' && inWindow(row) && (!key || row.key === key));
   const sizes = key && key !== 'disk-size' ? [] : await auditSizes(project, metrics.rows, now, home).catch(error => [{ status: 'unavailable', reason: error.code ?? 'resource roots unavailable' }]);
-  const observed = metrics.rows.filter(row => Date.parse(row.ts) >= start && (!key || row.key === key));
+  const observed = metrics.rows.filter(row => inWindow(row) && (!key || row.key === key));
   const rows = observed.filter(timedMetric);
   const reminderId = row => JSON.stringify([row.sessionId, row.turnId, row.key]);
-  const diagnosed = new Set(metrics.rows.filter(row => row.kind === 'diagnosis' && row.evidence).map(reminderId));
+  const diagnosed = new Set(metrics.rows.filter(row => row.kind === 'diagnosis' && row.evidence && Date.parse(row.ts) <= now).map(reminderId));
   const delivered = observed.filter(row => row.kind === 'reminder');
-  const historical = new Set(metrics.rows.filter(row => row.kind === 'diagnosis' && !row.evidence).map(reminderId));
+  const historical = new Set(metrics.rows.filter(row => row.kind === 'diagnosis' && !row.evidence && Date.parse(row.ts) <= now).map(reminderId));
   const matched = delivered.filter(row => diagnosed.has(reminderId(row))).length;
   const legacy = delivered.filter(row => historical.has(reminderId(row)) && !diagnosed.has(reminderId(row))).length;
   const reminders = { emitted: delivered.length, diagnosed: matched, pending: delivered.length - matched - legacy, ...(legacy && { legacy }) };
@@ -159,7 +163,7 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
     return { key, wallMs: mergedWall(spans) + sum(group.filter(row => row.kind !== 'delegate').map(row => row.durationMs)), resourceMs: totalMs };
   }).sort((a, b) => b.wallMs - a.wallMs || a.key.localeCompare(b.key)).slice(0, 10);
   const delegates = rows.filter(row => row.kind === 'delegate');
-  const decisionWaits = turns.rows.filter(row => Date.parse(row.ts) >= start).map(row => {
+  const decisionWaits = turns.rows.filter(inWindow).map(row => {
     const waits = (row.decisions ?? []).map(pair => waitMs(pair.requestedAt, pair.decidedAt));
     const observed = waits.filter(wait => wait !== null);
     return { ts: row.ts, turnId: row.turnId, sessionId: row.sessionId, durationMs: observed.length ? sum(observed) : null,
@@ -171,7 +175,7 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
     try { prs = JSON.parse(result.stdout).map(pr => ({ number: pr.number, ts: pr.mergedAt, changedFiles: pr.changedFiles ?? null, additions: pr.additions ?? null, deletions: pr.deletions ?? null, durationMs: waitMs(pr.createdAt, pr.mergedAt) })); }
     catch { /* An unreadable host response leaves coverage unknown. */ }
   }
-  const prCycle = prs?.filter(row => Date.parse(row.ts) >= start) ?? [];
+  const prCycle = prs?.filter(inWindow) ?? [];
   return { project, since: since ?? null, asOf: new Date(now).toISOString(), key: key ?? null, keys, topTimeSinks,
     delegates: { wallMs: mergedWall(delegates), resourceMs: sum(delegates.map(row => row.durationMs)), count: delegates.length },
     resources, sizes, compliance, reminders, geppettoOverhead, weeklyReportReads, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
@@ -206,7 +210,7 @@ export function printMetrics(report) {
     console.log(`Gate evidence ${row.host ?? 'unknown host'}/${row.harness ?? 'unknown harness'}: ${row.joined}/${row.records} linked (${row.identifiable} identifiable), ${row.uncheckedEdits} unchecked edits across ${row.editEpochs} edit epochs, ${row.unresolvedStops}/${row.stopEpochs} unresolved Stop epochs, ${row.stopRetries} retry attempts, ${row.editOverrides} edit and ${row.stopOverrides} Stop overrides`);
   }
   for (const row of report.compliance) console.log(`Gate coverage ${row.host ?? 'unknown host'}/${row.harness ?? 'unknown harness'}: ${row.eligibleEditTurns} eligible edit turns, ${row.eligibleStopTurns} eligible Stop turns, ${row.turnsFollowingDenial} recorded turns following a denial, ${row.failedEvaluations} evaluation errors (${row.unjoinedEvaluations} without epoch identity), ${row.externalReviews} external reviews`);
-  if (report.reminders.emitted) console.log(`Timing reminders: ${report.reminders.diagnosed}/${report.reminders.emitted} diagnosed; ${report.reminders.pending} pending`);
+  if (report.reminders.emitted) console.log(`Timing reminders: ${report.reminders.diagnosed}/${report.reminders.emitted} diagnosed; ${report.reminders.pending} pending${report.reminders.legacy ? ', ' + report.reminders.legacy + ' legacy diagnoses' : ''}`);
   for (const sink of report.topTimeSinks) console.log(`Time sink ${sink.key}: ${sink.wallMs} ms wall, ${sink.resourceMs} ms summed`);
   const { delegates, decisionWaits, prCycle } = report;
   console.log(`Delegate spans: ${delegates.count}, merged host wall ${delegates.wallMs} ms, summed resource ${delegates.resourceMs} ms`);

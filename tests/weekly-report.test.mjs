@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fixture, get, git, put } from './helpers.mjs';
+import { appendRecord } from '../skills/geppetto-adopt/scripts/common.mjs';
 import { learningFileTool } from '../skills/geppetto-adopt/scripts/learner-tools.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 import { metricsAudit } from '../skills/geppetto-adopt/scripts/metrics-audit.mjs';
@@ -47,10 +48,31 @@ test('SessionStart mentions overdue reports only, and actual reads have their ow
   const toolEvent = { ...event, hook_event_name: 'PostToolUse' };
   await logReads({ ...toolEvent, tool_name: 'exec_command',
     tool_input: { command: 'rg -l -F "' + recent + '" README.md' } }, { home });
+  await logReads({ ...toolEvent, tool_name: 'exec_command',
+    tool_input: { command: 'rg --hidden --files curation.log "' + recent + '"' } }, { home });
   const noSearchRead = await metricsAudit(root, { key: 'fixture', execute: () => ({ status: 1 }) });
   assert.equal(noSearchRead.weeklyReportReads.count, 0);
   const path = process.platform === 'win32' ? recent[0].toLowerCase() + recent.slice(1) : recent;
   await logReads({ ...toolEvent, tool_name: 'Read', tool_input: { file_path: path } }, { home });
   const observed = await metricsAudit(root, { key: 'fixture', execute: () => ({ status: 1 }) });
   assert.equal(observed.weeklyReportReads.count, 1);
+  await logReads({ ...toolEvent, tool_name: 'Read', tool_input: { file_path: recent } }, { home });
+  const rereads = await metricsAudit(root, { key: 'fixture', execute: () => ({ status: 1 }) });
+  assert.equal(rereads.weeklyReportReads.count, 2);
+  assert.equal(Object.keys(rereads.weeklyReportReads.reports).length, 1);
+});
+
+test('historical weekly totals exclude observations received after the fixed audit cutoff', async t => {
+  const root = fixture(t);
+  git(root, ['init', '-q']);
+  const ts = new Date(now + 1000).toISOString();
+  await appendRecord(root, 'metrics', { kind: 'command', key: 'fixture', durationMs: 37, ts });
+  await appendRecord(root, 'hook-events', { hook: 'turnContext', injectedBytes: 300, ts });
+  const execute = () => ({ status: 0, stdout: JSON.stringify([
+    { number: 8, createdAt: new Date(now - dayMs).toISOString(), mergedAt: ts },
+  ]) });
+  const report = await metricsAudit(root, { key: 'fixture', now, execute });
+  assert.deepEqual(report.keys, []);
+  assert.equal(report.geppettoOverhead.injectedBytes, null);
+  assert.deepEqual(report.mergedPrs, []);
 });
