@@ -22,9 +22,9 @@ for (const outcome of ['lesson','covered','one-off','blocked']) test(`frustratio
   assert.equal(record({learning}).status,0); assert.equal(get(cwd,projectDataPath(cwd,'hook-events.jsonl')).trim().split('\n').map(JSON.parse).filter(e=>e.hook==='learningOutcome').length,1);
   if(outcome==='blocked')assert.equal(JSON.parse(get(cwd,projectDataPath(cwd,'signals.jsonl'))).status,'open');
 });
-for(const unchanged of [false,true])test(`Stop blocks once for ${unchanged?'unchanged lesson owner':'missing outcome'}`,async t=>{
+for(const unchanged of [false,true])test(`Codex Stop stays blocked for ${unchanged?'unchanged lesson owner':'missing outcome'}`,async t=>{
  const {send,record}=await setup(t);if(unchanged)assert.equal(record({learning:{outcome:'lesson',path:'AGENTS.md',reason:'Inspect the actual saved file.'}}).status,0);
- const first=await send('Stop');assert.equal(first.decision,'block');assert.match(first.reason,/--record-turn/);assert.notEqual((await send('Stop')).decision,'block');
+ const first=await send('Stop');assert.equal(first.decision,'block');assert.match(first.reason,/--record-turn/);assert.equal((await send('Stop',{stop_hook_active:true})).decision,'block');
 });
 test('plain steering needs no learning outcome',async t=>{const {send}=await setup(t,false);assert.notEqual((await send('Stop')).decision,'block');});
 test('an outcome check error lets Stop end and writes a diagnostic',async t=>{
@@ -38,7 +38,7 @@ test('a new user message cannot reuse a prior outcome or pre-existing dirty less
  put(cwd,'AGENTS.md','# Rules\nInspect the actual saved file.\n');assert.equal(record({learning:{outcome:'lesson',path:'AGENTS.md',reason:'Check the written result.'}}).status,0);assert.notEqual((await send('Stop',{transcript_path:transcript})).decision,'block');
  await appendFile(transcript,message('You repeated the same mistake.'));await send('PreToolUse',{transcript_path:transcript,tool_name:'Read',tool_input:{}});
  assert.equal(record({...plain,frustration:{applies:true,cause:'Repeated the saved-file mistake.',prevention:'Inspect the actual saved file.'}}).status,0);
- assert.equal((await send('Stop',{transcript_path:transcript})).decision,'block');assert.equal(record({learning:{outcome:'lesson',path:'AGENTS.md',reason:'Check the written result.'}}).status,0);assert.notEqual((await send('Stop',{transcript_path:transcript})).decision,'block');
+ assert.equal((await send('Stop',{transcript_path:transcript})).decision,'block');assert.equal(record({learning:{outcome:'lesson',path:'AGENTS.md',reason:'Check the written result.'}}).status,0);assert.equal((await send('Stop',{transcript_path:transcript})).decision,'block');
  const events=get(cwd,projectDataPath(cwd,'hook-events.jsonl')).trim().split('\n').map(JSON.parse);assert.equal(events.filter(e=>e.hook==='learningOutcome').length,1,'unchanged dirty file is not counted as a new lesson');
 });
 test('manual signal closure retains reference and reason and a later occurrence reopens it',async t=>{

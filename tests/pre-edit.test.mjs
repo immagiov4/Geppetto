@@ -200,9 +200,9 @@ test('custom rearm patterns replace defaults and continuation cannot bypass rene
   await send('PostToolUse', { tool_name: 'Read', tool_input: { command: 'review.json' } }); assert.ok(denied(await edit())); assert.equal(record({ continuation: true }).status, 2);
   assert.equal(record({ feedback: { applies: false } }).status, 0); assert.deepEqual(await edit(), {});
 });
-test('concurrent first edits deny once and the next turn is independently gated', async t => {
-  const { send, edit } = project(t); await send('UserPromptSubmit'); assert.equal((await Promise.all([edit(), edit()])).filter(denied).length, 1);
-  assert.deepEqual(await edit(), {}); assert.deepEqual(await send('Stop'), {});
+test('concurrent Codex edits remain denied until a decision, and the next turn is gated', async t => {
+  const { send, edit, record } = project(t); await send('UserPromptSubmit'); assert.equal((await Promise.all([edit(), edit()])).filter(denied).length, 2);
+  assert.equal(record(decision).status, 0); assert.deepEqual(await edit(), {}); assert.deepEqual(await send('Stop'), {});
   await send('UserPromptSubmit', { turn_id: 'two' }); assert.ok(denied(await edit({ turn_id: 'two' })));
 });
 test('a review result before any decision still requires all configured checks', async t => {

@@ -74,10 +74,43 @@ async function auditSizes(project, rows, now, home) {
   return sizes.map(size => ({ ...size, weekChangeBytes: size.status === 'complete' && previous.has(size.path) ? size.bytes - previous.get(size.path) : null }));
 }
 
+function gateCompliance(journals, start) {
+  const tagged = journals.flatMap(({ name, rows }) => rows
+    .filter(row => Date.parse(row.ts) >= start)
+    .map(row => ({ row, name })));
+  const byHost = Map.groupBy(tagged, ({ row }) => JSON.stringify([row.host ?? null, row.harness ?? null]));
+  return [...byHost].map(([hostKey, entries]) => {
+    const [host, harness] = JSON.parse(hostKey);
+    const identifiable = entries.filter(({ row }) => row.host && row.harness && row.sessionId && row.turnId && row.epoch);
+    const byEpoch = Map.groupBy(identifiable, ({ row }) => JSON.stringify([row.sessionId, row.turnId, row.epoch]));
+    let joined = 0, checkedEdits = 0, uncheckedEdits = 0, editOverrides = 0;
+    let editEpochs = 0, stopEpochs = 0, unresolvedStops = 0, stopRetries = 0, stopOverrides = 0;
+    for (const epoch of byEpoch.values()) {
+      if (new Set(epoch.map(({ name }) => name)).size > 1) joined += epoch.length;
+      const dispositions = epoch.map(({ row }) => row).filter(row => row.disposition);
+      const edits = dispositions.filter(row => row.hook === 'turnGate');
+      if (edits.length) editEpochs++;
+      checkedEdits += edits.filter(row => row.disposition === 'decision').length;
+      uncheckedEdits += edits.filter(row => row.disposition === 'unchecked').length;
+      editOverrides += edits.filter(row => row.disposition === 'override').length;
+      const stops = dispositions.filter(row => ['learningGate', 'reviewGate'].includes(row.hook));
+      if (stops.length) stopEpochs++;
+      stopRetries += new Set(stops.filter(row => row.retry && row.stopAttemptId).map(row => row.stopAttemptId)).size;
+      if (stops.some(row => row.disposition === 'override')) stopOverrides++;
+      if (['learningGate', 'reviewGate'].some(hook => ['denied', 'retry-denied', 'unresolved']
+        .includes(stops.findLast(row => row.hook === hook)?.disposition))) unresolvedStops++;
+    }
+    return { host, harness, records: entries.length, identifiable: identifiable.length, joined,
+      editEpochs, checkedEdits, uncheckedEdits, editOverrides, stopEpochs, unresolvedStops, stopRetries, stopOverrides };
+  }).sort((a, b) => String(a.host).localeCompare(String(b.host)) || String(a.harness).localeCompare(String(b.harness)));
+}
+
 export async function metricsAudit(project, { since, key, now = Date.now(), execute = run, home = userHome() } = {}) {
   const start = since === undefined ? -Infinity : Date.parse(since);
   if (Number.isNaN(start)) throw new UsageError('--since must be an ISO date.');
   const metrics = await journal(project, 'metrics'), turns = await journal(project, 'turns');
+  const [events, reviews] = await Promise.all([journal(project, 'hook-events'), journal(project, 'reviews')]);
+  const compliance = gateCompliance([{ name: 'metrics', rows: metrics.rows }, { name: 'turns', rows: turns.rows }, { name: 'events', rows: events.rows }, { name: 'reviews', rows: reviews.rows }], start);
   const resources = metrics.rows.filter(row => row.kind === 'resource' && row.key === 'stop' && Date.parse(row.ts) >= start && (!key || row.key === key));
   const sizes = key && key !== 'disk-size' ? [] : await auditSizes(project, metrics.rows, now, home).catch(error => [{ status: 'unavailable', reason: error.code ?? 'resource roots unavailable' }]);
   const rows = metrics.rows.filter(row => row.kind !== 'resource' && Date.parse(row.ts) >= start && (!key || row.key === key));
@@ -108,8 +141,8 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
   const prCycle = prs?.filter(row => Date.parse(row.ts) >= start) ?? [];
   return { project, since: since ?? null, key: key ?? null, keys, topTimeSinks,
     delegates: { wallMs: mergedWall(delegates), resourceMs: sum(delegates.map(row => row.durationMs)), count: delegates.length },
-    resources, sizes, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
-    coverage: { metrics: metrics.coverage, turns: turns.coverage, prs: { status: prs ? 'available' : 'unknown', observed: prs?.length ?? 0, limit: 100 } } };
+    resources, sizes, compliance, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
+    coverage: { metrics: metrics.coverage, turns: turns.coverage, 'hook events': events.coverage, prs: { status: prs ? 'available' : 'unknown', observed: prs?.length ?? 0, limit: 100 } } };
 }
 
 export async function boundedMetricsAudit(project, { since, key } = {}) {
@@ -135,6 +168,9 @@ export function printMetrics(report) {
   }
   for (const row of report.keys) {
     console.log(`${row.key}: ${row.count} calls, median ${row.medianMs} ms, p90 ${row.p90Ms} ms, max ${row.maxMs} ms, total ${row.totalMs} ms, scoped ${row.scoped}; last 7 days ${row.lastWeek.totalMs} ms (${row.lastWeek.count}) vs previous 7 ${row.previousWeek.totalMs} ms (${row.previousWeek.count})`);
+  }
+  for (const row of report.compliance) {
+    console.log(`Gate evidence ${row.host ?? 'unknown host'}/${row.harness ?? 'unknown harness'}: ${row.joined}/${row.records} linked (${row.identifiable} identifiable), ${row.uncheckedEdits} unchecked edits across ${row.editEpochs} edit epochs, ${row.unresolvedStops}/${row.stopEpochs} unresolved Stop epochs, ${row.stopRetries} retry attempts, ${row.editOverrides} edit and ${row.stopOverrides} Stop overrides`);
   }
   for (const sink of report.topTimeSinks) console.log(`Time sink ${sink.key}: ${sink.wallMs} ms wall, ${sink.resourceMs} ms summed`);
   const { delegates, decisionWaits, prCycle } = report;

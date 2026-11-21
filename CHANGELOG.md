@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.18.0
+
+- Codex requires the outstanding decision, review or learning outcome on retries. A recorded and explained override is scoped to the current decision epoch.
+- Join new operation, decision and hook evidence by machine, harness, session, turn and epoch. The metrics audit reports unchecked edits, unresolved Stops and retries for each machine and harness.
+- Migration: update the installed plugins and reapprove Codex hooks through the installer. Existing journal rows remain readable and may lack identity fields.
+
 ## 0.17.0
 
 - Use the update checker to compare the published release with your installation. Adopted projects surface stale version information at session start.

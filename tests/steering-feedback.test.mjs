@@ -47,7 +47,7 @@ test('review feedback and tool-result envelopes do not become user corrections',
   const signal=await recordSignal(cwd,{key:'review-finding',session:event.session_id,category:'verification',text:'A reviewer found a source defect.'});assert.equal(signal.source,'agent');
 });
 
-test('pending user steering cannot be recorded as an agent signal and is evaluated once', async t => {
+test('pending user steering keeps Codex edits denied and cannot be recorded as an agent signal', async t => {
   const cwd=fixture(t);for(const args of [['init','-q'],['config','user.name','Fixture'],['config','user.email','fixture@example.invalid']])git(cwd,args);
   put(cwd,'.geppetto/config.json',{...config(),hooks:{signalLearning:{enabled:false}}});put(cwd,'app.mjs','export const stable=true;');git(cwd,['add','.']);git(cwd,['commit','-qm','Baseline']);
   const transcript=resolve(fixture(t),'session.jsonl');put(cwd,transcript,message('Implement comments.'));
@@ -57,7 +57,7 @@ test('pending user steering cannot be recorded as an agent signal and is evaluat
   const observation={...event,hook_event_name:'PostToolUse',tool_name:'wait_agent',tool_use_id:'review-arrives-with-user'};assert.deepEqual(await handleEvent(observation),{});
   await assert.rejects(recordSignal(cwd,{key:'pending-message',session:event.session_id,category:'workflow',text:'A pending user message.'}),/Record the new user message/);
   const write={...event,hook_event_name:'PreToolUse',tool_name:'Write',tool_input:{path:resolve(cwd,'app.mjs'),content:'x'}};
-  const replies=await Promise.all([handleEvent(write),handleEvent(write)]);assert.equal(replies.filter(r=>r.hookSpecificOutput?.permissionDecision==='deny').length,1);assert.match(replies.find(r=>r.hookSpecificOutput)?.hookSpecificOutput.permissionDecisionReason,/record requirements, feedback, frustration/);
+  const replies=await Promise.all([handleEvent(write),handleEvent(write)]);assert.equal(replies.filter(r=>r.hookSpecificOutput?.permissionDecision==='deny').length,2);assert.match(replies.find(r=>r.hookSpecificOutput)?.hookSpecificOutput.permissionDecisionReason,/record requirements, feedback, frustration/);
   await recordTurn(cwd,event.session_id,event.turn_id,{...decision,requirements:{changes:true,foundation:false,what:'Explicitly requested additional behavior.'}});
   assert.deepEqual(await handleEvent(write),{});
   const signal=await recordSignal(cwd,{key:'requirements-only',session:event.session_id,category:'workflow',text:'An implementation observation, not user feedback.'});assert.equal(signal.source,'agent');

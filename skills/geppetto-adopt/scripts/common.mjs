@@ -1,6 +1,7 @@
 import { readFile, lstat, mkdir, rename, writeFile, appendFile, open, unlink } from 'node:fs/promises';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { pathToFileURL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -121,12 +122,16 @@ export async function ignoreLocalFiles(project, paths) {
   const lastNegation = lines.findLastIndex(line => line.startsWith('!')); const missing = paths.filter(path => lines.lastIndexOf(path) <= lastNegation);
   if (missing.length) await appendFile(ignorePath, `${ignored && !ignored.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
 }
+export const recordContext = new AsyncLocalStorage();
 export async function appendRecord(root, name, row) {
   const path = projectDataPath(root, `${name}.jsonl`); await rejectSymlinks(path);
   if (dirname(path) === resolve(root, '.geppetto')) await ignoreLocalFiles(root, [`/${name}.jsonl`]);
   await mkdir(dirname(path), { recursive: true });
   const revision = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root, timeout: 2500 });
-  await appendFile(path, JSON.stringify({ ...row, worktree: resolve(root), revision: revision.status === 0 ? revision.stdout.trim() : null }) + '\n', { mode: 0o600 });
+  const identity = {
+    host: hostname(), harness: null, sessionId: row.sessionId ?? row.session ?? null, turnId: row.turnId ?? row.turn ?? null, epoch: null,
+  };
+  await appendFile(path, JSON.stringify({ ...identity, ...row, ...recordContext.getStore(), worktree: resolve(root), revision: revision.status === 0 ? revision.stdout.trim() : null }) + '\n', { mode: 0o600 });
 }
 export function validateConfig(config, file) {
   const fail = reason => { throw new Error(`${file}:1: Invalid Geppetto config: ${reason}`); };

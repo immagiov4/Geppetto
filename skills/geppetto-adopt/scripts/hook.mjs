@@ -6,7 +6,7 @@ import { resolve, relative, matchesGlob, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, exists, contained, rejectSymlinks } from './common.mjs';
+import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, recordContext, exists, contained, rejectSymlinks } from './common.mjs';
 import { messageCheckpoint, withTurnLock, turnStatePath, readTurnState, decisionPath, currentDecision } from './turn-messages.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
@@ -70,6 +70,8 @@ async function finishLearning(root, state, statePath, event) {
   state.learningRecorded = true; await atomicJson(statePath, state);
 }
 async function learningGate(root, state, statePath, event, staged) {
+  const marker = `${statePath}.${digest(state.userEpoch ?? state.turn)}.learning-blocked`;
+  const retry = await exists(marker);
   const outcome = state.learningOutcome, frustration = staged?.decisions.slice(staged.userDecisionIndex ?? 0).some(row => row.decision.frustration?.applies);
   let reason = frustration && !outcome ? 'Frustration needs a learning outcome in this turn.' : '';
   if (outcome?.outcome === 'lesson') {
@@ -77,10 +79,20 @@ async function learningGate(root, state, statePath, event, staged) {
     if (!state.learningFiles || digest(await readFile(path)) === state.learningFiles[outcome.path]) reason = 'The lesson owner did not change in this user turn.';
     else if (!(outcome.path in state.learningFiles) && run('git', ['check-ignore', '-q', '--', outcome.path], { cwd: root }).status === 0) reason = 'The lesson owner is ignored by Git; write the lesson in a shared project file.';
   }
-  if (!reason) { await finishLearning(root, state, statePath, event); return {}; }
-  const block = !event.stop_hook_active && await claimFile(`${statePath}.${digest(state.userEpoch ?? state.turn)}.learning-blocked`);
-  await logHookEvent(root, { hook: 'learningGate', status: block ? 'block' : 'second-stop', reason, modelCalls: 0 }, event);
-  return block ? { decision: 'block', reason: `${reason} Edit the project instruction or existing owner, then record ${recordCommand(event.session_id, state.turn)} with {"learning":{"outcome":"lesson|covered|one-off|blocked","path":"<owner>","reason":"<why>","key":"<signal-key when blocked or closing a signal>"}}. A lesson names a file changed now; covered names an existing rule; one-off explains why it cannot recur; blocked names the inaccessible owner and requires a key.` } : {};
+  if (!reason) {
+    await finishLearning(root, state, statePath, event);
+    if (frustration) await logHookEvent(root, { hook: 'learningGate', status: 'closed', disposition: 'outcome', retry }, event);
+    return {};
+  }
+  const strict = event.harness === 'codex';
+  if (strict && overrideFor(state, 'stop')) {
+    await logHookEvent(root, { hook: 'learningGate', status: 'override', disposition: 'override', retry }, event);
+    return {};
+  }
+  const first = (strict || !event.stop_hook_active) && await claimFile(marker);
+  const block = strict || first;
+  await logHookEvent(root, { hook: 'learningGate', status: block ? 'block' : 'second-stop', disposition: block ? (first ? 'denied' : 'retry-denied') : 'unresolved', retry, reason, modelCalls: 0 }, event);
+  return block ? { decision: 'block', reason: `${reason} Edit the project instruction or existing owner, then record ${recordCommand(event.session_id, state.turn)} with {"learning":{"outcome":"lesson|covered|one-off|blocked","path":"<owner>","reason":"<why>","key":"<signal-key when blocked or closing a signal>"}}. A lesson names a file changed now; covered names an existing rule; one-off explains why it cannot recur; blocked names the inaccessible owner and requires a key.${strict ? ` For an explicit override, run ${overrideCommand(event, state, 'stop')} with the real reason.` : ''}` } : {};
 }
 async function sessionStart(event, options) {
   let memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
@@ -100,6 +112,9 @@ async function sessionStart(event, options) {
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
 const foundationReminder = 'Resolve foundations.documentation for documentation design and foundations.observability for new or changed behaviour through $geppetto-spec. For every new or changed foundation, apply $geppetto-spec and set requirements.foundation to pending until the user decision is recorded. Then supply its foundations.<key> or project-relative Markdown decision record in an adr/ directory. For substantial work with no foundation, set requirements.foundation to false.';
 const recordCommand = (session, turn) => `node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-turn '<json>' --session ${JSON.stringify(session)}${turn ? ` --turn ${JSON.stringify(turn)}` : ''}`;
+const overrideFor = (state, gate) => state.overrides?.epoch === state.epoch && state.overrides[gate];
+const overrideCommand = (event, state, gate) => recordCommand(event.session_id, state.turn)
+  .replace('<json>', JSON.stringify({ override: { gate, reason: '<specific reason>' } }));
 function turnDecision(value, checks) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new UsageError('Turn decision must be an object.');
   if (value.userCorrection !== undefined && typeof value.userCorrection !== 'boolean') throw new UsageError('userCorrection must be boolean.');
@@ -114,7 +129,21 @@ function turnDecision(value, checks) {
 export async function recordTurn(root, session, turn, value) { return withTurnLock(`${turnStatePath(root, session)}.lock`, async () => {
   const state = currentState(await readTurnState(root, session, turn)); turn ??= state?.turn;
   if (!state || state.turn !== turn) throw new UsageError('No matching active session and turn; use the command supplied by PreToolUse.');
-  if (value && Object.keys(value).length === 1 && value.learning) return recordLearning(root, state, turnStatePath(root, session, turn && state.turn !== (await readTurnState(root, session))?.turn ? turn : undefined), { session_id: session, turn_id: turn }, value.learning);
+  if (value && Object.keys(value).length === 1 && (value.learning || value.override)) {
+    const statePath = turnStatePath(root, session, state.turn === (await readTurnState(root, session))?.turn ? undefined : turn);
+    const event = { session_id: session, turn_id: turn };
+    if (value.learning) return recordLearning(root, state, statePath, event, value.learning);
+    const { gate, reason } = value.override;
+    if (!['edit', 'stop'].includes(gate) || typeof reason !== 'string' || /[\r\n]/.test(reason) || placeholderReason(reason) || reason.trim() === '<specific reason>') {
+      throw new UsageError('An override needs gate edit or stop and a meaningful one-line reason.');
+    }
+    const previous = state.overrides?.epoch === state.epoch ? state.overrides : {};
+    state.overrides = { ...previous, epoch: state.epoch, [gate]: reason };
+    await recordContext.run({ harness: state.harness ?? null, sessionId: session, turnId: turn, epoch: state.epoch },
+      () => logHookEvent(root, { hook: 'gateOverride', gate, disposition: 'recorded', reason: redact(reason) }, event));
+    await atomicJson(statePath, state);
+    return value.override;
+  }
   const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && state.epoch !== state.userEpoch && previous !== null; const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
   if ((renewed || state.epoch === state.userEpoch) && value?.continuation) throw new UsageError('A new user message or renewed feedback requires explicit decisions.');
   turnDecision(value, renewed && value && Object.keys(value).every(key => ['feedback', 'userCorrection'].includes(key)) ? required : checks);
@@ -146,7 +175,7 @@ export async function recordTurn(root, session, turn, value) { return withTurnLo
   }
   const decidedAt = new Date().toISOString(); let requestedAt = decidedAt;
   try { requestedAt = await readFile(`${path}.${state.epoch}.requested`, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const merged = renewed ? { ...previous?.value, ...value } : value; if (renewed) delete merged.continuation; const history = previous?.epoch === state.epoch ? previous.decisions.slice(0, -1) : previous?.decisions ?? []; const decisions = [...history, { requestedAt, decidedAt, decision: merged }];
+  const merged = renewed ? { ...previous?.value, ...value } : value; if (renewed) delete merged.continuation; const history = previous?.epoch === state.epoch ? previous.decisions.slice(0, -1) : previous?.decisions ?? []; const decisions = [...history, { requestedAt, decidedAt, epoch: state.epoch, disposition: 'recorded', decision: merged }];
   await atomicJson(path, { value: merged, epoch: state.epoch, userEpoch: state.userEpoch, userDecisionIndex: state.userDecisionIndex ?? 0, decisions }, { mode: 0o600 }); return merged;
 }); }
 const adrReference = reference => typeof reference === 'string' && /^(?:[\w-]+\/)*adrs?\/[\w-][\w.-]*\.md$/i.test(reference);
@@ -170,10 +199,16 @@ async function recordedFoundation(root, reference) {
 }
 async function editingEvent(root, state, statePath, event, policy) {
   const path = decisionPath(root, event.session_id, state.turn), staged = currentDecision(await jsonFile(path, null));
+  const modifying = modifyingTool(event);
   if (event.hook_event_name === 'PostToolUse') {
     const worktree = await worktreeFingerprint(root);
     if (worktree !== state.worktree) {
-      await claimFile(`${path}.edited`); if (staged?.epoch !== state.epoch) state.shellPending = state.epoch;
+      await claimFile(`${path}.edited`);
+      if (!modifying && policy.checks.length) {
+        const disposition = staged?.epoch === state.epoch ? 'decision' : overrideFor(state, 'edit') ? 'override' : 'unchecked';
+        if (disposition === 'unchecked') state.shellPending = state.epoch;
+        await logHookEvent(root, { hook: 'turnGate', status: 'observed-edit', disposition }, event);
+      }
       state.worktree = worktree; await atomicJson(statePath, state);
     }
     if (policy.checks.some(check => check.id === 'feedback') && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
@@ -181,16 +216,25 @@ async function editingEvent(root, state, statePath, event, policy) {
       const epoch = randomUUID(); await atomicJson(statePath, { ...state, epoch, ...(state.shellPending === state.epoch ? { shellPending: epoch } : {}) }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event);
     } return {};
   }
-  if (!modifyingTool(event) && state.shellPending !== state.epoch) return {};
+  if (!modifying && state.shellPending !== state.epoch) return {};
   const foundation = staged?.userEpoch === state.userEpoch ? staged?.value?.requirements?.foundation : undefined;
   if (foundation && !await recordedFoundation(root, foundation)) {
-    await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: ['requirements'] }, event);
+    await logHookEvent(root, { hook: 'turnGate', status: 'block', disposition: 'denied', checks: ['requirements'] }, event);
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Resolve the foundation with the user through $geppetto-spec. Reference the approved config choice or ADR, or record a new user-approved ADR with requirements.foundation = {adr, approvedDecision} with ${recordCommand(event.session_id, state.turn)}.` } };
   }
-  if (policy.checks.length && staged?.epoch !== state.epoch && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString())) {
+  const strict = event.harness === 'codex';
+  const override = strict && overrideFor(state, 'edit');
+  const needsDecision = policy.checks.length && staged?.epoch !== state.epoch;
+  const first = needsDecision && !override && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString());
+  if (needsDecision && !override && (first || strict && modifying)) {
     const needed = !staged || state.epoch === 'initial' || state.epoch === state.userEpoch ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
-    await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: needed.map(check => check.id) }, event);
-    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${foundationReminder} Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };   }
+    await logHookEvent(root, { hook: 'turnGate', status: 'block', disposition: modifying ? 'denied' : 'recovery', retry: !first, checks: needed.map(check => check.id) }, event);
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `${foundationReminder} Before editing, record ${needed.map(check => check.id).join(', ')} with ${recordCommand(event.session_id, state.turn)} from the project root. ${needed.map(({ id, question, skill }) => `${id}: ${question} Apply $${skill} if true; fields: ${decisionFields(id).join(', ')}.`).join(' ')} ${strict ? `To record an explicit override, run ${overrideCommand(event, state, 'edit')} with the real reason. ` : ''}Use the SessionStart schema or Turn record in "${fileURLToPath(new URL('../assets/templates/hooks/README.md', import.meta.url))}".` } };   }
+  if (!modifying) return {};
+  if (policy.checks.length) {
+    const disposition = override ? 'override' : needsDecision ? 'unchecked' : 'decision';
+    await logHookEvent(root, { hook: 'turnGate', status: 'allow', disposition }, event);
+  }
   await claimFile(`${path}.edited`); return {};
 }
 const reviewPolicy = async root => ({ ...reviewGateDefaults, ...(await jsonFile(resolve(root, '.geppetto/config.json'), {})).hooks?.reviewGate });
@@ -227,13 +271,16 @@ async function changedLines(root, before, after) {
     return result.stdout.split('\t').slice(0, 2).reduce((sum, count) => sum + Number(count || 0), 0);
   } finally { for (const suffix of ['before', 'after']) await unlink(`${prefix}.${suffix}`).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
 }
-export async function recordReview(root, base, outcome) {
+export async function recordReview(root, base, outcome, { session, turn } = {}) {
   if (!['passed', 'findings'].includes(outcome)) throw new UsageError('Review outcome must be passed or findings after independent review completes.');
   base = gitOutput(root, ['rev-parse', '--verify', `${base}^{commit}`]); await ignoreLocalFiles(root, ['/reviews.jsonl', '/hook-state/']);
   const current = await reviewSnapshot(root, base, await reviewPolicy(root));
   await atomicJson(resolve(root, '.geppetto/hook-state', `review-${base}-${current.hash}.json`), current.snapshot);
   const record = { hash: current.hash, base, ts: new Date().toISOString(), outcome };
-  await appendRecord(root, 'reviews', record); return record;
+  const state = session ? await readTurnState(root, session, turn) : null;
+  if (session && (!state || (turn && state.turn !== turn))) throw new UsageError('Review recording needs a matching active session and turn.');
+  const identity = state ? { harness: state.harness ?? null, sessionId: session, turnId: state.turn, epoch: state.epoch } : {};
+  await appendRecord(root, 'reviews', { ...record, ...identity }); return record;
 }
 async function completionEvent(event) {
   const kind = event.hook_event_name;
@@ -257,7 +304,13 @@ async function completionEvent(event) {
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
     const prior = event.turn_id ? currentDecision(await jsonFile(decisionPath(root, event.session_id, event.turn_id), null)) : null;
     fresh = !prior;
-    state = { transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), learningFiles: await learningFiles(root), ...(await reviewSnapshot(root, base, policy)) };
+    state = { harness: event.harness, transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), learningFiles: await learningFiles(root), ...(await reviewSnapshot(root, base, policy)) };
+    await atomicJson(statePath, state);
+  }
+  const context = recordContext.getStore();
+  if (context) Object.assign(context, { turnId: state.turn, epoch: state.epoch });
+  if (!state.harness && event.harness) {
+    state.harness = event.harness;
     await atomicJson(statePath, state);
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
@@ -275,7 +328,7 @@ async function completionEvent(event) {
       }
       if (!fresh && checkpoint.userMessage && state.userEpoch !== `user-${checkpoint.userMessage}`) {
         const prior = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null));
-        state.userEpoch = `user-${checkpoint.userMessage}`; state.epoch = state.userEpoch;
+        state.userEpoch = `user-${checkpoint.userMessage}`; state.epoch = state.userEpoch; if (context) context.epoch = state.epoch;
         delete state.learningOutcome; delete state.learningRecorded; state.learningFiles = await learningFiles(root);
         state.userDecisionIndex = prior?.userEpoch === state.userEpoch ? prior.userDecisionIndex : prior?.decisions.length ?? 0;
         if (state.shellPending) state.shellPending = state.epoch;
@@ -299,12 +352,16 @@ async function completionEvent(event) {
   if (status === 'block') for (const record of records.slice(0, -1).reverse()) {
     if (await jsonFile(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`), null) === current.snapshot && (await reviewSnapshot(root, record.base, policy)).hash === record.hash) { status = 'reviewed'; break; }
   }
-  if (status === 'block' && /(?:Independent review blocked|Revisione indipendente bloccata):\s*\S.+/i.test(event.last_assistant_message ?? '')) status = 'blocker';
-  const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const reasons = status === 'block' ? [`Code changed without an independent review: run $geppetto-verify. After any completed independent review (CLI, delegate or harness), record it before fixing findings: node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-review --base ${state.base} --outcome <passed|findings>. Fixes below the configured threshold reuse that review; otherwise state the concrete blocker.`] : [];
-  let block = reasons.length > 0 && !event.stop_hook_active; const blockPath = `${statePath}.${digest(state.turn)}.blocked`;
-  if (block) block = await claimFile(blockPath, status);
+  if (event.harness !== 'codex' && status === 'block' && /(?:Independent review blocked|Revisione indipendente bloccata):\s*\S.+/i.test(event.last_assistant_message ?? '')) status = 'blocker';
+  const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const reasons = status === 'block' ? [`Code changed without an independent review: run $geppetto-verify. After any completed independent review (CLI, delegate or harness), record it before fixing findings: node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-review --base ${state.base} --outcome <passed|findings> --session ${JSON.stringify(event.session_id)} --turn ${JSON.stringify(state.turn)}. Fixes below the configured threshold reuse that review.${event.harness !== 'codex' ? ' State the concrete blocker if review is unavailable.' : ''}`] : [];
+  const strict = event.harness === 'codex';
+  if (strict && status === 'block' && overrideFor(state, 'stop')) { status = 'override'; reasons.length = 0; }
+  let block = reasons.length > 0 && (strict || !event.stop_hook_active); const blockPath = `${statePath}.${digest(state.turn + ':' + state.epoch)}.blocked`;
+  const retry = event.stop_hook_active === true || await exists(blockPath);
+  const first = block && await claimFile(blockPath, status);
+  if (block && !strict) block = first;
   if (status === 'block' && !block) status = 'second-stop';
-  await logHookEvent(root, { hook: 'reviewGate', status, lines, sinceReview, hash: current.hash }, event);
+  await logHookEvent(root, { hook: 'reviewGate', status, disposition: block ? (first ? 'denied' : 'retry-denied') : status === 'second-stop' ? 'unresolved' : status, retry, lines, sinceReview, hash: current.hash }, event);
   if (staged && !block) {
     const marker = `${decisionPath(root, event.session_id, state.turn)}.recorded`; if (await claimFile(marker)) try {
       const transcriptPath = state.transcript_path ?? null, transcriptOffset = transcriptPath ? (await lstat(transcriptPath)).size : null; const decisions = staged.decisions, first = decisions[0]; const edited = await lstat(`${decisionPath(root, event.session_id, state.turn)}.edited`).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error; });
@@ -313,13 +370,20 @@ async function completionEvent(event) {
     } catch (error) { await unlink(marker); throw error; }
   }
   let review_blocked = false; try { review_blocked = !['reviewed', 'below-threshold'].includes(status) && (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  return { ...(block ? { decision: 'block', reason: reasons.join('\n') } : {}), review_blocked }; }); }
+  return { ...(block ? { decision: 'block', reason: [...reasons, ...(strict ? [`For an explicit override, run ${overrideCommand(event, state, 'stop')} with the real reason.`] : [])].join('\n') } : {}), review_blocked }; }); }
 async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
-  if (process.env.GEPPETTO_LEARNING_CHILD !== '1') await logReads(event, { home });
-  if (event.session_id && !event.stop_hook_active && process.env.GEPPETTO_LEARNING_CHILD !== '1' && ['SessionStart', 'Stop'].includes(event.hook_event_name)) await captureResources(event, { home, runCommand });
-  if (event.hook_event_name === 'SessionStart') return process.env.GEPPETTO_LEARNING_CHILD === '1' ? {} : sessionStart(event, { home });
+  const learningChild = process.env.GEPPETTO_LEARNING_CHILD === '1';
+  if (event.hook_event_name === 'SessionStart') {
+    if (learningChild) return {};
+    if (event.session_id) await captureResources(event, { home, runCommand });
+    return sessionStart(event, { home });
+  }
   const { review_blocked, ...review } = await completionEvent(event);
+  if (!learningChild) {
+    await logReads(event, { home });
+    if (event.hook_event_name === 'Stop' && event.session_id && !event.stop_hook_active) await captureResources(event, { home, runCommand });
+  }
   if (review.hookSpecificOutput?.permissionDecision === 'deny') return review;
   const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now); const native = await nativeMemoryEvent(event, { home }); if (event.hook_event_name === 'UserPromptSubmit') return {};
   if (native.hookSpecificOutput) {
@@ -347,6 +411,13 @@ async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) 
     return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };   }
   return {}; }
 export async function handleEvent(event, options) {
+  const harness = event?.turn_id || process.env.PLUGIN_ROOT ? 'codex'
+    : process.env.CLAUDE_PLUGIN_ROOT || (event?.session_id && event.hook_event_name !== 'SessionStart') ? 'claude' : null;
+  const context = { harness, sessionId: event?.session_id ?? null, turnId: event?.turn_id ?? null, epoch: null, ...(event?.hook_event_name === 'Stop' && { stopAttemptId: randomUUID() }) };
+  return recordContext.run(context, () => handleWithEvidence(event && { ...event, harness }, options));
+}
+
+async function handleWithEvidence(event, options) {
   try { return await dispatch(event, options); }
   catch (error) {
     if (['PreToolUse', 'PostToolUse'].includes(event?.hook_event_name)) { console.error(`Geppetto ${event.hook_event_name} diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); return {}; }
@@ -368,6 +439,6 @@ export const main = async args => {
     console.log(JSON.stringify(await recordTurn(await projectRoot('.'), opts['--session'], opts['--turn'], value))); return 0;
   }
   if (!opts['--record-review'] || !opts['--base'] || !opts['--outcome'] || opts._.length) throw new UsageError('Usage: hook.mjs --record-review --base <ref> --outcome <passed|findings>');
-  console.log(JSON.stringify(await recordReview(await projectRoot('.'), opts['--base'], opts['--outcome']))); return 0;
+  console.log(JSON.stringify(await recordReview(await projectRoot('.'), opts['--base'], opts['--outcome'], { session: opts['--session'], turn: opts['--turn'] }))); return 0;
 };
 if (isMain(import.meta.url)) await cli(main);
