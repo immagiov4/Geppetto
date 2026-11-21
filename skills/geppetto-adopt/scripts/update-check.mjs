@@ -1,13 +1,15 @@
 import { mkdir, readFile, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicJson, claimFile, exists, jsonFile, run, userHome } from './common.mjs';
 import { connectCodex, hookTrust, samePath } from './codex-hook-trust.mjs';
-import { maintenanceJobs, maintenanceLauncherText } from './maintenance.mjs';
+import { maintenanceJobs, maintenanceLauncherText, maintenanceRegistrationStatus } from './maintenance.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
 import { parseJobRegistry } from './memory-jobs.mjs';
 import { learningCommand } from './learn-runner.mjs';
+import { logHookEvent } from './hook-events.mjs';
 
 const upstream = 'https://api.github.com/repos/immagiov4/Geppetto';
 const pluginId = 'geppetto@geppetto';
@@ -29,8 +31,8 @@ function installedPlugin(target, root) {
     : inventory.find(plugin => plugin.id === pluginId && plugin.enabled !== false);
 }
 
-async function codexTrustStatus(root, registration) {
-  const client = connectCodex({ cwd: root });
+async function codexTrustStatus(root, registration, options) {
+  const client = connectCodex({ cwd: root, ...options });
   try {
     await client.initialize();
     const inventory = await hookTrust(client, { project: root });
@@ -53,6 +55,42 @@ async function github(path, signal = AbortSignal.timeout(8000)) {
 
 const day = 86_400_000;
 
+async function startupDiagnostic(root, home, epoch, phase) {
+  const directory = resolve(home, '.geppetto');
+  await mkdir(directory, { recursive: true });
+  if (await claimFile(resolve(directory, 'update-' + phase + '-' + epoch + '.error'))) {
+    await logHookEvent(root, { hook: 'updateCheck', status: 'error', phase, modelCalls: 0 });
+  }
+}
+
+async function startupTrust(root, home, epoch, version, plugin, checkTrust) {
+  const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {});
+  const registration = machine.hooks?.codex;
+  if (!plugin && !registration) return 'unknown';
+  const key = createHash('sha256').update(JSON.stringify([root, version, plugin, registration])).digest('hex');
+  const cache = resolve(home, '.geppetto', 'update-trust-' + key + '.json');
+  const saved = await jsonFile(cache, {});
+  if (saved.epoch === epoch) return saved.status;
+  const lock = cache + '.' + epoch + '.lock';
+  if (!await claimFile(lock)) return 'checking';
+  try {
+    const concurrent = await jsonFile(cache, {});
+    if (concurrent.epoch === epoch) return concurrent.status;
+    let status;
+    try {
+      status = await checkTrust(root, plugin || registration?.source === 'plugin' ? undefined : registration, { timeoutMs: 1000 })
+        ? 'trusted' : 'approval required';
+    } catch {
+      status = 'unknown';
+      await startupDiagnostic(root, home, epoch, 'trust');
+    }
+    await atomicJson(cache, { epoch, status });
+    return status;
+  } finally {
+    await unlink(lock);
+  }
+}
+
 async function latestVersion(signal) {
   const release = await github('/releases/latest', signal);
   const version = release.tag_name?.match(/^v(\d+\.\d+\.\d+)$/)?.[1];
@@ -60,16 +98,26 @@ async function latestVersion(signal) {
   return { version, tag: release.tag_name };
 }
 
-async function readUpdateNotice(root, { home = userHome(), now = Date.now } = {}) {
+// Release tags and package manifests use three numeric components.
+function olderVersion(installed, published) {
+  if (!/^\d+\.\d+\.\d+$/.test(installed ?? '') || !/^\d+\.\d+\.\d+$/.test(published ?? '')) return false;
+  const comparison = installed.split('.').map((part, i) => Number(part) - Number(published.split('.')[i]));
+  return (comparison.find(difference => difference !== 0) ?? 0) < 0;
+}
+
+async function readUpdateNotice(root, { home = userHome(), now = Date.now, harness, checkTrust = codexTrustStatus } = {}) {
+  const targets = harness === 'claude' ? ['claude'] : harness === 'codex' ? ['codex', 'agents'] : ['claude', 'codex', 'agents'];
   const local = await jsonFile(resolve(root, '.geppetto/install.json'), {});
-  const user = !Object.keys(local.installations ?? {}).length;
+  const user = root === home || !targets.some(name => local.installations?.[name]);
   const manifest = user ? await jsonFile(resolve(home, '.geppetto/install.json'), {}) : local;
-  const target = ['claude', 'codex', 'agents'].find(name => manifest.installations?.[name]);
+  const target = targets.find(name => manifest.installations?.[name]);
   if (!target) return '';
   const epoch = Math.floor(now() / day);
   const cache = resolve(home, '.geppetto/update-status.json');
   const attempted = resolve(home, '.geppetto/update-attempt');
-  let status = await jsonFile(cache, {});
+  let status;
+  try { status = await jsonFile(cache, {}); }
+  catch { await startupDiagnostic(root, home, epoch, 'cache'); status = {}; }
   if (status.epoch !== epoch && (await jsonFile(attempted, {})).epoch !== epoch) {
     await mkdir(dirname(cache), { recursive: true });
     const lock = resolve(home, '.geppetto', `update-attempt-${epoch}.lock`);
@@ -82,7 +130,7 @@ async function readUpdateNotice(root, { home = userHome(), now = Date.now } = {}
         status = { epoch, ...release, sha: await releaseCommit(release.tag, signal), scheduler: await schedulerSnapshot(home) };
         await atomicJson(cache, status);
       } catch {
-        // The explicit checker surfaces upstream errors. A startup failure is retried tomorrow.
+        await startupDiagnostic(root, home, epoch, 'upstream');
       } finally {
         await unlink(lock);
       }
@@ -90,16 +138,28 @@ async function readUpdateNotice(root, { home = userHome(), now = Date.now } = {}
   }
   if (status.epoch !== epoch) return '';
   const packageVersion = (await jsonFile(new URL('../../../package.json', import.meta.url), {})).version;
-  const pinDrift = !user && await checkPin(root, status.sha, () => {});
+  const upgradeAvailable = olderVersion(packageVersion, status.version);
+  // A cache from before installation cannot diagnose the current release's CI pin.
+  const pinDrift = !user && !olderVersion(status.version, packageVersion) && await checkPin(root, status.sha, () => {});
   const maintenanceDrift = await machineDrift(user ? home : root, manifest.source, home, { log: () => {}, scheduler: status.scheduler ?? {} });
-  if (status.version === packageVersion && status.version === manifest.source?.version && !pinDrift && !maintenanceDrift) return '';
-  return `Geppetto ${status.version} is published. Run node "${installer}" --check-update --target ${target} ${user ? '--user' : `--project "${root}"`} before reconciling.`;
+  const plugin = manifest.installations[target]?.plugin === true;
+  const trust = !upgradeAvailable && (target === 'codex' || target === 'agents')
+    ? await startupTrust(root, home, epoch, packageVersion, plugin, checkTrust) : 'trusted';
+  const reasons = [olderVersion(manifest.source?.version, packageVersion) && 'adoption behind',
+    pinDrift && 'project CI pin', maintenanceDrift && 'maintenance registration',
+    !['trusted', 'checking'].includes(trust) && ('Codex hook trust: ' + trust)].filter(Boolean);
+  if (!upgradeAvailable && !reasons.length) return '';
+  const summary = upgradeAvailable ? 'Geppetto ' + status.version + ' is published.' : 'Geppetto installation needs repair (' + reasons.join(', ') + ').';
+  return summary + ' Run node "' + installer + '" --check-update --target ' + target
+    + (user ? ' --user' : ' --project "' + root + '"') + (plugin ? ' --plugin-hooks' : '') + ' before reconciling.';
 }
 export async function updateNotice(root, options) {
   try {
     return await readUpdateNotice(root, options);
   } catch {
-    // Optional update state must not prevent other SessionStart notices.
+    const { home = userHome(), now = Date.now } = options ?? {};
+    try { await startupDiagnostic(root, home, Math.floor(now() / day), 'local'); }
+    catch { console.error('Geppetto update notice failed to record its diagnostic.'); }
     return '';
   }
 }
@@ -120,27 +180,11 @@ async function checkPin(root, releaseSha, log = console.log) {
   log(`Project CI pin: ${matches ? 'current' : 'missing or outdated'}`);
   return !matches;
 }
-function localJobStatus(name, job) {
-  if (job?.status !== 'scheduled') return null;
-  const id = `Geppetto-${name}`;
-  if (job.scheduler === 'windows-task-scheduler') {
-    const query = run('schtasks.exe', ['/Query', '/TN', id, '/XML'], { timeout: 2000 });
-    if (query.status !== 0) return 'missing';
-    return /<Enabled>false<\/Enabled>/i.test(query.stdout) ? 'disabled' : 'scheduled';
-  }
-  if (job.scheduler === 'cron') {
-    const list = run('crontab', ['-l'], { timeout: 2000 });
-    const found = list.status === 0 && list.stdout.split(/\r?\n/).some(line => !line.trimStart().startsWith('#') && line.endsWith(`# ${id}`));
-    return found ? 'scheduled' : 'missing';
-  }
-  return job.id ? 'registered externally' : 'missing';
-}
-
-async function schedulerSnapshot(home, machine) {
+async function schedulerSnapshot(home, machine, execute) {
   machine ??= await jsonFile(resolve(home, '.geppetto/machine.json'), {});
-  return Object.fromEntries(maintenanceJobs.map(name => [name, localJobStatus(name, machine.jobs?.[name])]));
+  return Object.fromEntries(maintenanceJobs.map(name => [name, maintenanceRegistrationStatus(name, machine.jobs?.[name], { home, execute })]));
 }
-async function machineDrift(root, source, home = userHome(), { log = console.log, scheduler } = {}) {
+async function machineDrift(root, source, home = userHome(), { log = console.log, scheduler, execute } = {}) {
   const local = await jsonFile(resolve(root, '.geppetto/config.json'), {});
   const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {});
   const launcherPath = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
@@ -155,15 +199,15 @@ async function machineDrift(root, source, home = userHome(), { log = console.log
   const memory = await memoryConfiguration(root, home);
   const registryPath = memory?.localPath && resolve(memory.localPath, 'jobs.md');
   const registry = registryPath && await exists(registryPath) ? parseJobRegistry(await readFile(registryPath, 'utf8')) : [];
-  const schedule = scheduler ?? await schedulerSnapshot(home, machine);
+  const schedule = scheduler ?? await schedulerSnapshot(home, machine, execute);
   let drift = !launcherCurrent;
   for (const name of maintenanceJobs) {
     const job = machine.jobs?.[name];
     const owner = job?.status === 'scheduled-elsewhere' ? job.machine : hostname();
     const registered = !registryPath || registry.some(row => row.job === name && row.machine === owner && row.scheduler === job?.scheduler && row.cadence === job?.cadence);
-    const schedulerMissing = ['missing', 'disabled'].includes(schedule[name]);
+    const schedulerMissing = ['missing', 'disabled', 'action differs', 'cadence differs'].includes(schedule[name]);
     const scheduled = ['scheduled', 'scheduled-elsewhere'].includes(job?.status) && registered && !schedulerMissing;
-    if (schedulerMissing) log(`${name}: native registration missing or disabled`);
+    if (schedulerMissing) log(`${name}: native registration ${schedule[name]}`);
     const disabled = !job || job.status === 'disabled' || job.status === 'scheduled-elsewhere';
     const healthy = local.maintenance?.enabled === false ? disabled : scheduled;
     log(`${name}: ${job?.status ?? 'missing'}${registered ? '' : ' (registry entry missing or different)'}`);
@@ -171,15 +215,20 @@ async function machineDrift(root, source, home = userHome(), { log = console.log
   }
   return drift;
 }
-export async function checkUpdate({ root, target, user, manifest, plugin, shellQuote }) {
+export async function checkUpdate({ root, target, user, manifest, plugin, shellQuote, execute, home = userHome() }) {
   const { version, tag } = await latestVersion();
   console.log(`Published Geppetto: ${version}`);
 
   const installedVersion = manifest.installations[target] ? manifest.source?.version : undefined;
   console.log(`Adoption (${target}): ${installedVersion ?? 'missing'}`);
+  const bundled = await jsonFile(resolve(installer, '../../../../package.json'), {});
+  if (olderVersion(version, bundled.version) || olderVersion(version, installedVersion)) {
+    console.log('The published release is older than this installation. Recheck after the matching package is published.');
+    return 0;
+  }
   const commit = user ? null : await releaseCommit(tag);
   const pinDrift = !user && await checkPin(root, commit);
-  const maintenanceDrift = installedVersion && await machineDrift(root, manifest.source);
+  const maintenanceDrift = installedVersion && await machineDrift(root, manifest.source, home, { execute });
   const drift = installedVersion !== version || pinDrift || maintenanceDrift;
   let installPlugin = false;
   let repairPlugin = false;
@@ -207,7 +256,6 @@ export async function checkUpdate({ root, target, user, manifest, plugin, shellQ
     console.log(target === 'claude' && installPlugin ? 'claude plugin install geppetto@geppetto' : update);
   }
   if (drift || repairPlugin || repairTrust) {
-    const bundled = await jsonFile(resolve(installer, '../../../../package.json'), {});
     const checkout = `geppetto-${version}`;
     const installPath = shellQuote(bundled.version === version ? installer : `${checkout}/skills/geppetto-adopt/scripts/install.mjs`);
     if (bundled.version !== version) console.log(`git clone --branch ${tag} https://github.com/immagiov4/Geppetto.git ${checkout}`);

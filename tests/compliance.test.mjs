@@ -41,6 +41,9 @@ test('Codex requires a recorded decision before retrying a denied edit', async t
   assert.equal(codex.checkedEdits, 1);
   assert.equal(codex.uncheckedEdits, 0);
   assert.ok(codex.joined >= 4);
+  assert.equal(codex.eligibleEditTurns, 1);
+  assert.equal(codex.eligibleStopTurns, 1);
+  assert.equal(codex.failedEvaluations, 0);
 });
 
 test('Codex retries Stop only after a learning outcome or recorded override', async t => {

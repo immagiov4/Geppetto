@@ -9,10 +9,17 @@ import { commandArgs, commandSegments, toolCommand, toolName } from './turn-chec
 
 const minimumCommandMs = 5000;
 const defaultSuite = /(?:^|[ :_-])(?:tests?|pytest|unittest|vitest|jest|check|lint|build|typecheck)(?:$|[ :_.-])/i;
+export function structuredPrAction(event) {
+  const match = /(?:^|__)github__(create|merge)_pull_request$|(?:^|__)github_(create|merge)_pull_request$|(?:^|__)pull_request_(create|merge)$/.exec(toolName(event));
+  return match?.slice(1).find(Boolean);
+}
+
 const subcommandTools = /^(?:npm|pnpm|yarn|bun|git|gh|cargo|go|dotnet|make)$/;
 
 export function metricOperation(event, config) {
   const tool = toolName(event);
+  const prAction = structuredPrAction(event);
+  if (prAction) return { kind: 'command', key: 'github pr ' + prAction, always: true };
   if (/^(?:Agent|Task|spawn_agent|delegate_task|wait_agent|task_result|t3_thread_wait)$/i.test(tool)) return { kind: 'delegate', key: tool.toLowerCase() };
   if (!/^(?:Bash|PowerShell|shell|exec_command)$/i.test(tool) || event.tool_input?.run_in_background) return;
   const command = toolCommand(event);

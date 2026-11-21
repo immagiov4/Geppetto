@@ -1,9 +1,11 @@
+import { turnStatePath } from '../skills/geppetto-adopt/scripts/turn-messages.mjs';
 import { projectDataPath } from '../skills/geppetto-adopt/scripts/project-records.mjs';
 import { test } from 'node:test';
+import { metricsAudit } from '../skills/geppetto-adopt/scripts/metrics-audit.mjs';
 import assert from 'node:assert/strict';
 import { rmSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fixture, put, get, git, invoke, config } from './helpers.mjs';
+import { fixture, put, get, git, invoke, config, reviewFixture, invokeReview } from './helpers.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 
 const lines = (n, prefix = 'line') => Array.from({ length: n }, (_, i) => `${prefix} ${i}\n`).join('');
@@ -47,7 +49,7 @@ test('untracked source blocks Codex Stop retries until an override, with a fresh
 });
 test('matching review passes, small post-review edits pass, substantial post-review edits block', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit'); put(cwd, 'app.mjs', lines(80));
-  const recorded = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed'], { cwd });
+  const recorded = invokeReview(t, cwd, 'passed', 'gate', 'one');
   assert.equal(recorded.status, 0, recorded.stderr); const record = JSON.parse(get(cwd, projectDataPath(cwd, 'reviews.jsonl')));
   assert.match(record.hash, /^[a-f\d]{64}$/); assert.match(record.base, /^[a-f\d]{40}$/); assert.equal(record.outcome, 'passed'); assert.ok(record.ts);
   assert.doesNotMatch(get(cwd, projectDataPath(cwd, 'reviews.jsonl')), /line 40/);
@@ -74,9 +76,9 @@ test('old dirty source passes; Codex requires a recorded override for active Sto
 test('deletions and staged edits count, and an earlier matching review remains valid', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit');
   put(cwd, 'app.mjs', lines(80)); git(cwd, ['add', 'app.mjs']);
-  assert.equal(invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'findings'], { cwd }).status, 0);
+  assert.equal(invokeReview(t, cwd, 'findings', 'gate', 'one').status, 0);
   put(cwd, 'app.mjs', lines(120));
-  assert.equal(invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed'], { cwd }).status, 0);
+  assert.equal(invokeReview(t, cwd, 'passed', 'gate', 'one').status, 0);
   put(cwd, 'app.mjs', lines(80)); assert.deepEqual(await send('Stop'), {}, 'the first review matches again');
   await send('UserPromptSubmit', { turn_id: 'two' }); put(cwd, 'app.mjs', '');
   assert.equal((await send('Stop', { turn_id: 'two' })).decision, 'block');
@@ -97,7 +99,7 @@ test('concurrent Codex Stops both require completion and record one first denial
 test('a reviewed clean diff cannot hide a source file replaced by a directory or binary', async t => {
   for (const replacement of ['directory', 'binary']) {
     const { cwd, send } = project(t); await send('UserPromptSubmit');
-    assert.equal(invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed'], { cwd }).status, 0);
+    assert.equal(invokeReview(t, cwd, 'passed', 'gate', 'one').status, 0);
     rmSync(resolve(cwd, 'app.mjs'));
     if (replacement === 'directory') mkdirSync(resolve(cwd, 'app.mjs')); else put(cwd, 'app.mjs', '\0binary');
     assert.equal((await send('Stop')).decision, 'block');
@@ -107,10 +109,56 @@ test('a reviewed clean diff cannot hide a source file replaced by a directory or
 test('delegate findings recorded by CLI satisfy the gate through small fixes and clear a prior block', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit'); put(cwd, 'app.mjs', lines(80));
   const blocked = await send('Stop'); assert.match(blocked.reason, /--record-review.*--outcome/);
-  assert.equal(invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'findings'], { cwd }).status, 0);
+  assert.equal(invokeReview(t, cwd, 'findings', 'gate', 'one').status, 0);
   put(cwd, 'app.mjs', lines(85)); assert.deepEqual(await send('Stop'), {});
   assert.equal(get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse).filter(row => row.hook === 'reviewGate').at(-1).status, 'below-threshold');
   put(cwd, 'app.mjs', lines(120));
   await send('UserPromptSubmit', { turn_id: 'next' }); put(cwd, 'app.mjs', lines(160));
   assert.equal((await send('Stop', { turn_id: 'next' })).decision, 'block');
+});
+
+test('a review assertion with no review evidence cannot clear a blocked Stop', async t => {
+  const { cwd, send } = project(t); await send('UserPromptSubmit');
+  put(cwd, 'new.mjs', lines(40, 'new'));
+  assert.equal((await send('Stop')).decision, 'block');
+  const claimed = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed',
+    '--session', 'gate', '--turn', 'one'], { cwd });
+  assert.equal(claimed.status, 2, claimed.stdout);
+  const stale = reviewFixture(t, cwd);
+  const unsigned = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed',
+    '--session', 'gate', '--turn', 'one', '--evidence', stale], { cwd });
+  assert.equal(unsigned.status, 2, unsigned.stdout);
+  put(cwd, 'new.mjs', lines(41, 'new'));
+  const outdated = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed',
+    '--session', 'gate', '--turn', 'one', '--evidence', stale], { cwd, env: { CODEX_HOME: resolve(stale, '.codex') } });
+  assert.equal(outdated.status, 2, outdated.stdout);
+  assert.equal((await send('Stop', { stop_hook_active: true })).decision, 'block');
+});
+
+test('disabling the review gate does not disable the requirements decision before an edit', async t => {
+  const { cwd } = project(t);
+  put(cwd, '.geppetto/config.json', { ...config(), hooks: { reviewGate: { enabled: false } } });
+  const context = { cwd, session_id: 'requirements', turn_id: 'one' };
+  await handleEvent({ ...context, hook_event_name: 'UserPromptSubmit' });
+  const result = await handleEvent({ ...context, hook_event_name: 'PreToolUse', tool_name: 'apply_patch',
+    tool_input: { patch: '*** Begin Patch\n*** Delete File: app.mjs\n*** End Patch' } });
+  assert.equal(result.hookSpecificOutput?.permissionDecision, 'deny');
+});
+
+test('tool and Stop diagnostic rows survive a broken turn state and bound repeated failures', async t => {
+  const { cwd, send } = project(t); await send('UserPromptSubmit');
+  put(cwd, turnStatePath(cwd, 'gate'), '{');
+  for (const hook_event_name of ['PreToolUse', 'PostToolUse', 'Stop', 'PreToolUse']) {
+    await send(hook_event_name, { tool_name: 'apply_patch', tool_input: {} });
+  }
+  const events = get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events.filter(row => row.hook === 'completion' && row.status === 'error')
+    .map(row => [row.phase, row.turnId, row.epoch]), [
+    ['PreToolUse', 'one', null], ['PostToolUse', 'one', null], ['Stop', 'one', null],
+  ]);
+  const audit = await metricsAudit(cwd, { key: 'fixture', execute: () => ({ status: 1 }) });
+  const coverage = audit.compliance.find(row => row.harness === 'codex');
+  assert.equal(coverage.failedEvaluations, 3);
+  assert.equal(coverage.unjoinedEvaluations, 3);
+  assert.equal(coverage.eligibleStopTurns, 1);
 });

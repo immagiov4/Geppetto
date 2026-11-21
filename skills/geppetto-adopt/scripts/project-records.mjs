@@ -45,11 +45,11 @@ async function recoverProjectRecords(root) {
   return directory;
 }
 
-export async function projectRecords(root, name, { currentWorktree = false } = {}) {
+export async function projectRecords(root, name, { currentWorktree = false, recover = true } = {}) {
   if (!journals.includes(name)) throw new Error(`Unknown Geppetto journal: ${name}`);
-  const directory = await recoverProjectRecords(root), records = [];
+  const directory = recover ? await recoverProjectRecords(root) : projectDataPath(root, ''), records = [];
   if (directory !== resolve(root, '.geppetto')) {
-    for (const file of (await readdir(resolve(directory, 'legacy'))).sort()) {
+    for (const file of (await readdir(resolve(directory, 'legacy')).catch(error => { if (error.code === 'ENOENT') return []; throw error; })).sort()) {
       if (!file.startsWith(`${name}-`) || !file.endsWith('.json')) continue;
       const imported = JSON.parse(await readOptional(resolve(directory, 'legacy', file)));
       records.push(...lines(imported.text).map(row => ({ ...row, worktree: row.worktree ?? imported.worktree })));

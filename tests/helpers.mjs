@@ -1,6 +1,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, realpathSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve, dirname, basename, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, spawn } from 'node:child_process';
@@ -71,4 +72,51 @@ export function parallel(script, args, { cwd, home = cwd }) {
   });
 }
 export function git(dir, args, options = {}) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true, ...options }); }
+
+/** Fake runner artifacts for hook tests; these fixtures do not invoke a model. */
+export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD') {
+  const directory = fixture(t);
+  const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+  const patch = git(root, ['diff', '--binary', '--no-ext-diff', base, '--'], { maxBuffer: 8 * 1024 * 1024 }).stdout;
+  const paths = new Set([
+    ...git(root, ['diff', '--name-only', '--no-renames', '-z', base, '--']).stdout.split('\0'),
+    ...git(root, ['ls-files', '--others', '--exclude-standard', '-z']).stdout.split('\0'),
+  ].filter(path => path && !path.startsWith('.geppetto/')));
+  const hashes = { 'diff.patch': sha(patch) };
+  for (const path of paths) {
+    try { hashes['after/' + path] = sha(readFileSync(resolve(root, path))); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  const findings = outcome === 'findings' ? [{ id: 'fixture' }] : [];
+  const stages = ['questions', 'investigate', ...(findings.length ? ['verify'] : [])];
+  const threads = stages.map(() => randomUUID());
+  const started = Date.now();
+  const day = new Date(started).toISOString().slice(0, 10).replaceAll('-', '/');
+  const calls = stages.map((stage, index) => {
+    const response = JSON.stringify(stage === 'verify' ? { accepted_findings: findings }
+      : stage === 'investigate' ? { report: { findings } } : { questions: [] });
+    put(directory, stage + '.json', response);
+    const events = [
+      { type: 'thread.started', thread_id: threads[index] },
+      { type: 'turn.completed', usage: { output_tokens: 30 } },
+    ];
+    put(directory, stage + '.events.jsonl', events.map(JSON.stringify).join('\n'));
+    put(directory, '.codex/sessions/' + day + '/rollout-fixture-' + threads[index] + '.jsonl', [
+      { type: 'session_meta', payload: { id: threads[index] } },
+      { type: 'event_msg', payload: { type: 'task_complete', last_agent_message: response } },
+    ].map(JSON.stringify).join('\n'));
+    return { stage, status: 'completed', started_at: started / 1000, exit_code: 0, response_sha256: sha(response) };
+  });
+  put(directory, 'findings.json', { findings });
+  put(directory, 'metrics.json', { status: 'complete', strategy: 'questions', changed_paths: [...paths],
+    case_fingerprint: hashes, calls, thread_ids: threads });
+  return directory;
+}
+
+export function invokeReview(t, root, outcome, session, turn, evidence = reviewFixture(t, root, outcome)) {
+  const args = ['--record-review', '--base', 'HEAD', '--outcome', outcome, '--evidence', evidence];
+  if (session) args.push('--session', session, '--turn', turn);
+  return invoke('hook.mjs', args, { cwd: root, env: { CODEX_HOME: resolve(evidence, '.codex') } });
+}
+
 export const config = () => ({ version: 1, docs: { root: 'docs', style: 'project', referenceRepo: null }, sections: { pr: ['Observability'], featureDocs: ['Observability'], optional: ['Verification'] }, review: { engine: 'code-review' }, unitCoverage: 'behaviour', packs: [], pillars: {}, hooks: {} });

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.20.0
+
+- Require a complete foundation decision record and a matching independent review result. Keep edit decisions active when the Stop review gate is disabled.
+- Report installation drift for the running harness, including missing Codex trust and stale Windows task registrations. Older release caches no longer advertise a downgrade.
+- Count anomalous operations separately from reminders, require evidence for a diagnosis and include structured GitHub PR results. The metrics audit reports errors and unknown gate coverage.
+- Migration: update both plugins and reapprove Codex hooks. The contextual review recorder requires output artifacts. Previously recorded reviews remain in the journal, and earlier ADRs can be expanded using the turn record format.
+
 ## 0.19.0
 
 - Mention unusual operation durations once per key and turn. Explicit expectations and approved thresholds take precedence over observed timings and cold-start floors.
@@ -21,6 +28,7 @@
 
 - Discuss and record foundational design choices before implementation. The edit gate keeps a declared pending foundation blocked until a configuration decision or an architectural decision record is available.
 - Design shared diagnostics up front, then add feature views to that shared design.
+- Migration: update the installed plugin or generated skills to receive the decision checks. Existing configuration choices carry forward.
 
 ## 0.15.0
 

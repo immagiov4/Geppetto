@@ -179,6 +179,13 @@ for (const platform of ['win32', 'linux']) test(`${platform} maintenance launche
       if (args[0] === '-l') return { status: 0, stdout: cron };
       cron = opts.input; return { status: 0 };
     }
+    if (_binary === 'schtasks.exe') {
+      if (!windowsTasks.has(args[2])) return { status: 1 };
+      return { status: 0, stdout: '<Task><Triggers><CalendarTrigger><StartBoundary>2026-11-21T09:00:00</StartBoundary>' +
+        '<ScheduleByWeek><WeeksInterval>1</WeeksInterval><DaysOfWeek><Monday /></DaysOfWeek></ScheduleByWeek>' +
+        '</CalendarTrigger></Triggers><Actions Context="Author"><Exec><Command>wscript.exe</Command><Arguments>"' +
+        resolve(home, '.geppetto/maintenance.vbs') + '" ' + name + '</Arguments></Exec></Actions></Task>' };
+    }
     if (!args.includes('-EncodedCommand')) return { status: 0 };
     const id = `Geppetto-${name}`; windowsTasks.add(id); registrations++;
     return { status: 0, stdout: JSON.stringify({ id, nextRun: '2026-11-02T09:00:00' }) };

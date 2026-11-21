@@ -4,9 +4,11 @@ import { readFileSync } from 'node:fs';
 import { readFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
 import { resolve, relative, matchesGlob, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { completedReviewSession } from './review-evidence.mjs';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { cli, isMain, hookMain, run, UsageError, projectRoot, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, recordContext, exists, contained, rejectSymlinks } from './common.mjs';
+import { cli, isMain, hookMain, run, UsageError, projectRoot, userHome, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, recordContext, exists, contained, rejectSymlinks } from './common.mjs';
 import { messageCheckpoint, withTurnLock, turnStatePath, readTurnState, decisionPath, currentDecision } from './turn-messages.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
@@ -96,7 +98,7 @@ async function learningGate(root, state, statePath, event, staged) {
 }
 async function sessionStart(event, options) {
   let memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
-  const notice = await updateNotice(root, options);
+  const notice = await updateNotice(root, { ...options, harness: event.harness });
   if (notice) {
     const additionalContext = [memory.hookSpecificOutput?.additionalContext, notice].filter(Boolean).join('\n');
     memory = { ...memory, hookSpecificOutput: { ...memory.hookSpecificOutput, hookEventName: 'SessionStart', additionalContext } };
@@ -134,7 +136,7 @@ export async function recordTurn(root, session, turn, value) { return withTurnLo
     const event = { session_id: session, turn_id: turn };
     if (value.learning) return recordLearning(root, state, statePath, event, value.learning);
     const { gate, reason } = value.override;
-    if (!['edit', 'stop'].includes(gate) || typeof reason !== 'string' || /[\r\n]/.test(reason) || placeholderReason(reason) || reason.trim() === '<specific reason>') {
+    if (!['edit', 'stop'].includes(gate) || typeof reason !== 'string' || /[\r\n]/.test(reason) || placeholderReason(reason) || ['<specific reason>', 'whatever'].includes(reason.trim().toLowerCase())) {
       throw new UsageError('An override needs gate edit or stop and a meaningful one-line reason.');
     }
     const previous = state.overrides?.epoch === state.epoch ? state.overrides : {};
@@ -153,10 +155,13 @@ export async function recordTurn(root, session, turn, value) { return withTurnLo
   if (previous && previous.userEpoch === state.userEpoch && previous.value.requirements?.foundation && requirements && !foundation) {
     throw new UsageError('Resolve the declared foundation with a recorded decision before editing.');
   }
-  if (foundation && typeof foundation === 'object') {
+  const pending = previous?.userEpoch === state.userEpoch && isPendingFoundation(previous?.value.requirements?.foundation);
+  const subject = pending ? previous.value.requirements.what : requirements?.what;
+  if (pending && requirements && requirements.what !== subject) throw new UsageError('Keep the pending foundation subject when resolving it.');
+  if (foundation && typeof foundation === 'object' && !pendingScope(foundation)) {
     const { adr, approvedDecision } = foundation;
-    if (!adrReference(adr) || typeof approvedDecision !== 'string' || !approvedDecision.trim()) {
-      throw new UsageError('Supply an adr/ Markdown path and the user-approved decision text.');
+    if (!adrReference(adr) || !validFoundationRecord(approvedDecision, subject)) {
+      throw new UsageError('Supply an adr/ Markdown path and a complete user-approved decision record. See the Turn record reference.');
     }
     const destination = resolve(root, adr);
     await rejectSymlinks(destination);
@@ -170,7 +175,7 @@ export async function recordTurn(root, session, turn, value) { return withTurnLo
       }
     }
     requirements.foundation = adr;
-  } else if (foundation !== undefined && foundation !== false && foundation !== 'pending' && !await recordedFoundation(root, foundation)) {
+  } else if (foundation !== undefined && foundation !== false && !isPendingFoundation(foundation) && !await recordedFoundation(root, foundation, pending ? subject : undefined)) {
     throw new UsageError('Use pending, a populated foundations.<key>, or an existing project-relative Markdown decision record.');
   }
   const decidedAt = new Date().toISOString(); let requestedAt = decidedAt;
@@ -179,10 +184,51 @@ export async function recordTurn(root, session, turn, value) { return withTurnLo
   await atomicJson(path, { value: merged, epoch: state.epoch, userEpoch: state.userEpoch, userDecisionIndex: state.userDecisionIndex ?? 0, decisions }, { mode: 0o600 }); return merged;
 }); }
 const adrReference = reference => typeof reference === 'string' && /^(?:[\w-]+\/)*adrs?\/[\w-][\w.-]*\.md$/i.test(reference);
-async function recordedFoundation(root, reference) {
+const pendingScope = reference => reference && typeof reference === 'object' && Object.keys(reference).length === 1 &&
+  Array.isArray(reference.pending) && reference.pending.length > 0 &&
+  reference.pending.every(path => typeof path === 'string' && /^[\w.-][\w*?./ -]*$/.test(path) && !path.split('/').includes('..'))
+  ? reference.pending : undefined;
+const isPendingFoundation = reference => reference === 'pending' || Boolean(pendingScope(reference));
+
+function validFoundationRecord(text, subject) {
+  if (typeof text !== 'string') return false;
+  const fields = new Map();
+  for (const section of text.trim().split(/^## /m).slice(1)) {
+    const boundary = section.indexOf('\n');
+    if (boundary < 0) return false;
+    const heading = section.slice(0, boundary).trim();
+    if (fields.has(heading)) return false;
+    fields.set(heading, section.slice(boundary + 1).trim());
+  }
+  const meaningful = value => value && !placeholderReason(value) && !/^for now[.!]?$/i.test(value);
+  const required = ['Subject', 'Approval', 'Decision', 'Assumption', 'Inspectability'];
+  if (!required.every(heading => meaningful(fields.get(heading))) || subject && fields.get('Subject') !== subject) return false;
+  const alternatives = fields.get('Alternatives')?.split(/^### /m).slice(1) ?? [];
+  const names = alternatives.map(option => option.split('\n', 1)[0].trim());
+  return alternatives.length >= 2 && names.every(meaningful) && new Set(names).size === names.length &&
+    alternatives.every(option => ['Pros', 'Cons', 'Risks'].every(label => {
+      const line = option.split(/\r?\n/).find(line => line.startsWith('- ' + label + ': '));
+      return meaningful(line?.slice(label.length + 4).trim());
+    }));
+}
+
+function withinPendingScope(root, event, scope) {
+  const input = event.tool_input;
+  const path = input?.file_path ?? input?.path;
+  const patch = typeof input === 'string' ? input : input?.patch;
+  const move = [input?.source, input?.destination].filter(value => typeof value === 'string');
+  const targets = move.length === 2 ? move : typeof path === 'string' ? [path] : typeof patch === 'string'
+    ? [...patch.matchAll(/^\*\*\* (?:Add File|Delete File|Update File|Move to): (.+)$/gm)].map(match => match[1]) : [];
+  return targets.length === 0 || targets.some(target => {
+    const absolute = resolve(event.cwd ?? root, target);
+    return contained(root, absolute) && scope.some(glob => matchesGlob(relative(root, absolute).replaceAll('\\', '/'), glob));
+  });
+}
+
+async function recordedFoundation(root, reference, subject) {
   if (typeof reference !== 'string') return false;
   const key = /^foundations\.([a-z]+)$/.exec(reference)?.[1];
-  if (key) {
+  if (key && !subject) {
     const { foundations } = await jsonFile(resolve(root, '.geppetto/config.json'), {});
     return typeof foundations?.[key] === 'string' && !placeholderReason(foundations[key]);
   }
@@ -191,7 +237,7 @@ async function recordedFoundation(root, reference) {
   if (!contained(root, path)) return false;
   try {
     await rejectSymlinks(path);
-    return (await lstat(path)).isFile() && Boolean((await readFile(path, 'utf8')).trim());
+    return (await lstat(path)).isFile() && validFoundationRecord(await readFile(path, 'utf8'), subject);
   } catch (error) {
     if (error.message?.endsWith('Reconcile symbolic link before writing') || ['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error.code)) return false;
     throw error;
@@ -205,7 +251,9 @@ async function editingEvent(root, state, statePath, event, policy) {
     if (worktree !== state.worktree) {
       await claimFile(`${path}.edited`);
       if (!modifying && policy.checks.length) {
-        const disposition = staged?.epoch === state.epoch ? 'decision' : overrideFor(state, 'edit') ? 'override' : 'unchecked';
+        const openFoundation = staged?.userEpoch === state.userEpoch && isPendingFoundation(staged?.value.requirements?.foundation);
+        const disposition = openFoundation ? 'unchecked'
+          : staged?.epoch === state.epoch ? 'decision' : overrideFor(state, 'edit') ? 'override' : 'unchecked';
         if (disposition === 'unchecked') state.shellPending = state.epoch;
         await logHookEvent(root, { hook: 'turnGate', status: 'observed-edit', disposition }, event);
       }
@@ -218,9 +266,10 @@ async function editingEvent(root, state, statePath, event, policy) {
   }
   if (!modifying && state.shellPending !== state.epoch) return {};
   const foundation = staged?.userEpoch === state.userEpoch ? staged?.value?.requirements?.foundation : undefined;
-  if (foundation && !await recordedFoundation(root, foundation)) {
+  const scope = pendingScope(foundation);
+  if (foundation && (!scope || withinPendingScope(root, event, scope)) && !await recordedFoundation(root, foundation)) {
     await logHookEvent(root, { hook: 'turnGate', status: 'block', disposition: 'denied', checks: ['requirements'] }, event);
-    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Resolve the foundation with the user through $geppetto-spec. Reference the approved config choice or ADR, or record a new user-approved ADR with requirements.foundation = {adr, approvedDecision} with ${recordCommand(event.session_id, state.turn)}.` } };
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Resolve the foundation with the user through $geppetto-spec. Use the Turn record reference to supply the complete ADR, then record it with ${recordCommand(event.session_id, state.turn)}.` } };
   }
   const strict = event.harness === 'codex';
   const override = strict && overrideFor(state, 'edit');
@@ -271,14 +320,75 @@ async function changedLines(root, before, after) {
     return result.stdout.split('\t').slice(0, 2).reduce((sum, count) => sum + Number(count || 0), 0);
   } finally { for (const suffix of ['before', 'after']) await unlink(`${prefix}.${suffix}`).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
 }
-export async function recordReview(root, base, outcome, { session, turn } = {}) {
+async function verifiedReview(root, base, outcome, directory, session, codexHome) {
+  const metrics = await jsonFile(resolve(directory, 'metrics.json'), null);
+  const report = await jsonFile(resolve(directory, 'findings.json'), null);
+  const fail = () => { throw new UsageError('Supply a completed independent review output that matches the current diff and outcome.'); };
+  if (metrics?.status !== 'complete' || !Array.isArray(report?.findings) ||
+      (outcome === 'findings') !== Boolean(report.findings.length)) fail();
+  const required = metrics.strategy === 'questions' ? ['questions', 'investigate']
+    : metrics.strategy === 'generic' ? ['search-1', 'search-2'] : [];
+  const { calls, thread_ids: threads, case_fingerprint: fingerprint, changed_paths: paths } = metrics;
+  if (!required.length || !Array.isArray(calls) || !Array.isArray(threads) ||
+      calls.length < required.length || calls.length !== threads.length ||
+      threads.includes(session) || new Set(threads).size !== threads.length ||
+      !required.every((stage, index) => calls[index]?.stage === stage) ||
+      new Set(calls.map(call => call.stage)).size !== calls.length || !Array.isArray(paths) || !fingerprint) fail();
+  const responses = {};
+  for (const [index, call] of calls.entries()) {
+    if (!/^(questions|investigate|search-[12]|verify)$/.test(call.stage) || call.status !== 'completed' ||
+        call.exit_code !== 0 || typeof threads[index] !== 'string' || !threads[index]) fail();
+    const response = await readFile(resolve(directory, call.stage + '.json'), 'utf8');
+    if (digest(response) !== call.response_sha256 ||
+        !await completedReviewSession(codexHome, threads[index], call, response)) fail();
+    responses[call.stage] = JSON.parse(response);
+    const events = (await readFile(resolve(directory, call.stage + '.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    if (!events.some(event => event.type === 'thread.started' && event.thread_id === threads[index]) ||
+        !events.some(event => event.type === 'turn.completed' && event.usage && Number(event.usage.output_tokens) > 0) ||
+        events.some(event => ['turn.failed', 'error'].includes(event.type))) fail();
+  }
+  const candidates = metrics.strategy === 'questions' ? responses.investigate?.report?.findings
+    : [...(responses['search-1']?.findings ?? []), ...(responses['search-2']?.findings ?? [])];
+  if (!Array.isArray(candidates) || Boolean(candidates.length) !== Boolean(responses.verify)) fail();
+  const accepted = responses.verify?.accepted_findings ?? [];
+  const byId = (left, right) => left.id.localeCompare(right.id, 'en');
+  if (!Array.isArray(accepted) || !isDeepStrictEqual(accepted.toSorted(byId), report.findings.toSorted(byId))) fail();
+  if (fingerprint['diff.patch'] !== await diffDigest(root, ['diff', '--binary', '--no-ext-diff', base, '--'], '')) fail();
+  const changed = gitOutput(root, ['diff', '--name-only', '--no-renames', '-z', base, '--'], { trim: false }).split('\0').filter(Boolean);
+  const untracked = gitOutput(root, ['ls-files', '--others', '--exclude-standard', '-z'], { trim: false })
+    .split('\0').filter(path => path && !path.startsWith('.geppetto/'));
+  if (![...changed, ...untracked].every(path => paths.includes(path))) fail();
+  for (const path of paths) {
+    if (typeof path !== 'string' || !contained(root, resolve(root, path))) fail();
+    const file = resolve(root, path);
+    await rejectSymlinks(file);
+    const contents = await readFile(file).catch(error => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    const expected = fingerprint['after/' + path];
+    const canonical = contents && changed.includes(path) && !contents.includes(0)
+      ? digest(contents.toString('utf8').replaceAll('\r\n', '\n')) : undefined;
+    if ((contents === null ? undefined : digest(contents)) !== expected &&
+        (canonical === undefined || canonical !== expected)) fail();
+  }
+  return { kind: 'review-runner', sessions: threads };
+}
+
+export async function recordReview(root, base, outcome, { session, turn, evidence, codexHome = process.env.CODEX_HOME || resolve(userHome(), '.codex') } = {}) {
   if (!['passed', 'findings'].includes(outcome)) throw new UsageError('Review outcome must be passed or findings after independent review completes.');
-  base = gitOutput(root, ['rev-parse', '--verify', `${base}^{commit}`]); await ignoreLocalFiles(root, ['/reviews.jsonl', '/hook-state/']);
-  const current = await reviewSnapshot(root, base, await reviewPolicy(root));
-  await atomicJson(resolve(root, '.geppetto/hook-state', `review-${base}-${current.hash}.json`), current.snapshot);
-  const record = { hash: current.hash, base, ts: new Date().toISOString(), outcome };
+  base = gitOutput(root, ['rev-parse', '--verify', `${base}^{commit}`]);
+  if (!evidence) throw new UsageError('Review recording requires --evidence <review-output-directory>.');
   const state = session ? await readTurnState(root, session, turn) : null;
   if (session && (!state || (turn && state.turn !== turn))) throw new UsageError('Review recording needs a matching active session and turn.');
+  const policy = await reviewPolicy(root);
+  const current = await reviewSnapshot(root, base, policy);
+  const verified = await verifiedReview(root, base, outcome, resolve(root, evidence), session, codexHome);
+  if ((await reviewSnapshot(root, base, policy)).hash !== current.hash) throw new UsageError('The reviewed diff changed during recording.');
+  await ignoreLocalFiles(root, ['/reviews.jsonl', '/hook-state/']);
+  await atomicJson(resolve(root, '.geppetto/hook-state', `review-${base}-${current.hash}.json`), current.snapshot);
+  const record = { hash: current.hash, base, ts: new Date().toISOString(), outcome, evidence: verified,
+    provenance: state ? 'active-turn' : 'external' };
   const identity = state ? { harness: state.harness ?? null, sessionId: session, turnId: state.turn, epoch: state.epoch } : {};
   await appendRecord(root, 'reviews', { ...record, ...identity }); return record;
 }
@@ -314,7 +424,7 @@ async function completionEvent(event) {
     await atomicJson(statePath, state);
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
-  const turnConfig = await jsonFile(resolve(root, '.geppetto/config.json'), {}); if ((policy.enabled !== false && turnPolicy(turnConfig).checks.length) || (state.transcript_path && turnConfig.hooks?.learnNudge?.enabled !== false)) {
+  const turnConfig = await jsonFile(resolve(root, '.geppetto/config.json'), {}); if (turnPolicy(turnConfig).checks.length || (state.transcript_path && turnConfig.hooks?.learnNudge?.enabled !== false)) {
     try { if (checkpointError) throw checkpointError; checkpoint ??= await messageCheckpoint(state.transcript_path, state.promptCursor); }
     catch (error) {
       if (!state.messageError) { state.messageError = error.code ?? 'invalid-transcript'; await atomicJson(statePath, state); await logHookEvent(root, { hook: 'turnGate', status: 'transcript-unavailable', reason: state.messageError, modelCalls: 0 }, event); }
@@ -341,10 +451,10 @@ async function completionEvent(event) {
   }
   if (kind === 'UserPromptSubmit') return {};
   if (kind === 'Stop') { const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const learning = await learningGate(root, state, statePath, event, staged); if (learning.decision) return learning; }
-  if (policy.enabled === false) return {};
   if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(turnConfig));
+  if (policy.enabled === false) return {};
   if (kind !== 'Stop') return {};
-  const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
+  const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (record.evidence?.kind === 'review-runner' && await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
   const last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy); const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null); const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);
   let status = 'below-threshold';
   if (records.some(record => record.base === last.base && record.hash === current.hash)) status = 'reviewed';
@@ -353,7 +463,7 @@ async function completionEvent(event) {
     if (await jsonFile(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`), null) === current.snapshot && (await reviewSnapshot(root, record.base, policy)).hash === record.hash) { status = 'reviewed'; break; }
   }
   if (event.harness !== 'codex' && status === 'block' && /(?:Independent review blocked|Revisione indipendente bloccata):\s*\S.+/i.test(event.last_assistant_message ?? '')) status = 'blocker';
-  const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const reasons = status === 'block' ? [`Code changed without an independent review: run $geppetto-verify. After any completed independent review (CLI, delegate or harness), record it before fixing findings: node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-review --base ${state.base} --outcome <passed|findings> --session ${JSON.stringify(event.session_id)} --turn ${JSON.stringify(state.turn)}. Fixes below the configured threshold reuse that review.${event.harness !== 'codex' ? ' State the concrete blocker if review is unavailable.' : ''}`] : [];
+  const staged = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null)); const reasons = status === 'block' ? [`Code changed without an independent review: run $geppetto-verify. Record the completed review runner output before fixing findings: node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-review --base ${state.base} --outcome <passed|findings> --evidence <review-output-directory> --session ${JSON.stringify(event.session_id)} --turn ${JSON.stringify(state.turn)}. Fixes below the configured threshold reuse that review.${event.harness !== 'codex' ? ' State the concrete blocker if review is unavailable.' : ''}`] : [];
   const strict = event.harness === 'codex';
   if (strict && status === 'block' && overrideFor(state, 'stop')) { status = 'override'; reasons.length = 0; }
   let block = reasons.length > 0 && (strict || !event.stop_hook_active); const blockPath = `${statePath}.${digest(state.turn + ':' + state.epoch)}.blocked`;
@@ -377,7 +487,7 @@ async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) 
   if (event.hook_event_name === 'SessionStart') {
     if (learningChild) return {};
     if (event.session_id) await captureResources(event, { home, runCommand });
-    return sessionStart(event, { home });
+    return sessionStart(event, { home, now });
   }
   const { review_blocked, ...review } = await completionEvent(event);
   if (!learningChild) {
@@ -411,8 +521,8 @@ async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) 
     return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };   }
   return {}; }
 export async function handleEvent(event, options) {
-  const harness = event?.turn_id || process.env.PLUGIN_ROOT ? 'codex'
-    : process.env.CLAUDE_PLUGIN_ROOT || (event?.session_id && event.hook_event_name !== 'SessionStart') ? 'claude' : null;
+  const harness = options?.harness ?? (event?.turn_id || process.env.PLUGIN_ROOT ? 'codex'
+    : process.env.CLAUDE_PLUGIN_ROOT || (event?.session_id && event.hook_event_name !== 'SessionStart') ? 'claude' : null);
   const context = { harness, sessionId: event?.session_id ?? null, turnId: event?.turn_id ?? null, epoch: null, ...(event?.hook_event_name === 'Stop' && { stopAttemptId: randomUUID() }) };
   return recordContext.run(context, () => handleWithEvidence(event && { ...event, harness }, options));
 }
@@ -420,25 +530,45 @@ export async function handleEvent(event, options) {
 async function handleWithEvidence(event, options) {
   try { return await dispatch(event, options); }
   catch (error) {
-    if (['PreToolUse', 'PostToolUse'].includes(event?.hook_event_name)) { console.error(`Geppetto ${event.hook_event_name} diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); return {}; }
-    if (event?.hook_event_name !== 'Stop') throw error;
+    const phase = event?.hook_event_name;
+    if (!['PreToolUse', 'PostToolUse', 'Stop'].includes(phase)) throw error;
+    const diagnostic = error => redact(error.message).replace(/[\r\n]+/g, ' ').slice(0, 500);
+    let journalError;
     try {
-      const root = await projectRoot(event.cwd ?? '.'); const statePath = turnStatePath(root, event.session_id ?? 'unknown');
-      const state = await withTurnLock(`${statePath}.lock`, () => jsonFile(statePath, null)).catch(() => null); // Diagnostic recovery must tolerate the broken state itself.
-      await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
-      const marker = `${statePath}.${digest(event.turn_id ?? state?.turn ?? 'unknown')}.error`; if (await claimFile(marker)) try { await logHookEvent(root, { hook: 'completion', status: 'error', error: redact(error.message) }, event); }
-      catch (cause) { await unlink(marker); throw cause; }
-    } catch (cause) { console.error(`Stop diagnostic failed: ${redact(cause.message)}; original error: ${redact(error.message)}`); }
-    return {};   }
+      const root = await projectRoot(event.cwd ?? '.');
+      const statePath = turnStatePath(root, event.session_id ?? 'unknown');
+      // Recovery must tolerate the state corruption that brought the hook here.
+      const state = await jsonFile(statePath, null).catch(() => null);
+      const context = recordContext.getStore();
+      if (context && state && (!event.turn_id || event.turn_id === state.turn)) {
+        context.turnId ??= state.turn;
+        context.epoch ??= state.epoch;
+      }
+      await ignoreLocalFiles(root, ['/hook-state/']);
+      await mkdir(dirname(statePath), { recursive: true });
+      const marker = statePath + '.' + digest(JSON.stringify([context?.turnId, context?.epoch, phase])) + '.error';
+      if (await claimFile(marker)) try {
+        await logHookEvent(root, { hook: 'completion', phase, status: 'error', eligibleEdit: phase === 'PreToolUse' && modifyingTool(event), error: diagnostic(error) }, event);
+      } catch (cause) { await unlink(marker); throw cause; }
+    } catch (cause) {
+      journalError = cause;
+    }
+    if (phase !== 'Stop' || journalError) {
+      const fallback = journalError ? ' Journal error: ' + diagnostic(journalError) : '';
+      console.error('Geppetto ' + phase + ' diagnostic: ' + diagnostic(error) + fallback);
+    }
+    return {};
+  }
 }
 export const main = async args => {
-  if (!args.length) try { return await hookMain(args, 'Hook', handleEvent); } catch (error) { console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); console.log('{}'); return 0; }
-  const opts = parseArgs(args, { flags: ['--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn'] });
+  const nativeHarness = args.length === 2 && args[0] === '--harness' && ['codex', 'claude'].includes(args[1]) ? args[1] : undefined;
+  if (!args.length || nativeHarness) try { return await hookMain([], 'Hook', event => handleEvent(event, { harness: nativeHarness })); } catch (error) { console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); console.log('{}'); return 0; }
+  const opts = parseArgs(args, { flags: ['--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn', '--evidence'] });
   if (opts['--record-turn'] && opts['--session'] && opts._.length === 0 && Object.keys(opts).every(key => ['_', '--record-turn', '--session', '--turn'].includes(key))) {
     let value; try { value = JSON.parse(opts['--record-turn'] === '-' ? readFileSync(0, 'utf8') : opts['--record-turn']); } catch { throw new UsageError('Turn decision must be JSON.'); }
     console.log(JSON.stringify(await recordTurn(await projectRoot('.'), opts['--session'], opts['--turn'], value))); return 0;
   }
-  if (!opts['--record-review'] || !opts['--base'] || !opts['--outcome'] || opts._.length) throw new UsageError('Usage: hook.mjs --record-review --base <ref> --outcome <passed|findings>');
-  console.log(JSON.stringify(await recordReview(await projectRoot('.'), opts['--base'], opts['--outcome'], { session: opts['--session'], turn: opts['--turn'] }))); return 0;
+  if (!opts['--record-review'] || !opts['--base'] || !opts['--outcome'] || opts._.length) throw new UsageError('Usage: hook.mjs --record-review --base <ref> --outcome <passed|findings> --evidence <review-output-directory>');
+  console.log(JSON.stringify(await recordReview(await projectRoot('.'), opts['--base'], opts['--outcome'], { session: opts['--session'], turn: opts['--turn'], evidence: opts['--evidence'] }))); return 0;
 };
 if (isMain(import.meta.url)) await cli(main);
