@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { unlink } from 'node:fs/promises';
-import { appendRecord, claimFile } from './common.mjs';
+import { appendRecord, claimFile, recordContext } from './common.mjs';
 import { logHookEvent } from './hook-events.mjs';
 import { redactValue } from './signal.mjs';
 import { commandArgs, commandSegments, toolCommand, toolName } from './turn-checks.mjs';
@@ -41,18 +41,21 @@ export function metricOperation(event, config) {
 export async function finishMetric(root, state, event, records, endedAt) {
   const start = records.findLast(row => row.kind === 'PreToolUse' && row.id === event.tool_use_id);
   if (!start?.operation || endedAt < start.at) return;
-  const { kind, key, scoped, always } = start.operation, durationMs = endedAt - start.at;
+  const { kind, key, scoped, always, limits } = start.operation, durationMs = endedAt - start.at;
   const response = event.tool_response, output = typeof response === 'string' ? response : '';
   if (kind !== 'delegate' && (response?.session_id || response?.sessionId || response?.backgroundTaskId || /(?:Process running with session ID|^Session ID:|Command running in background with ID)/im.test(output))) return;
-  if (kind === 'command' && !always && durationMs < minimumCommandMs) return;
+  if (kind === 'command' && !always && durationMs < minimumCommandMs && !limits?.expectedMs && !limits?.warnMs) return;
   const claim = resolve(state, 'metric-' + createHash('sha256').update(event.tool_use_id).digest('hex'));
   if (!await claimFile(claim)) return;
   const exit = response?.exit_code ?? response?.exitCode ?? Number(output.match(/(?:Process exited with code |(?:^|\n)Exit code:?\s*)(-?\d+)/)?.[1]);
   const ok = event.tool_error || response?.isError || response?.is_error ? false : Number.isInteger(exit) ? exit === 0 : undefined;
   try {
-    await appendRecord(root, 'metrics', redactValue({ ts: new Date(endedAt).toISOString(), kind, key, scoped, durationMs,
+    const identity = recordContext.getStore();
+    const row = redactValue({ ts: new Date(endedAt).toISOString(), kind, key, scoped, durationMs, ...(limits && { limits }), metricId: createHash('sha256').update(event.session_id + ':' + event.tool_use_id).digest('hex'),
       ...(kind === 'delegate' && { startedAt: start.at, endedAt }), exit: Number.isInteger(exit) ? exit : undefined,
-      ok, sessionId: event.session_id, turnId: event.turn_id ?? null, host: hostname() }));
+      ok, sessionId: event.session_id, turnId: event.turn_id ?? identity?.turnId ?? null, host: hostname(), ...identity });
+    await appendRecord(root, 'metrics', row);
+    return row;
   } catch (error) { await unlink(claim); throw error; }
 }
 

@@ -110,7 +110,7 @@ async function sessionStart(event, options) {
   try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
   catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; }
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
-const foundationReminder = 'Resolve foundations.documentation for documentation design and foundations.observability for new or changed behaviour through $geppetto-spec. For every new or changed foundation, apply $geppetto-spec and set requirements.foundation to pending until the user decision is recorded. Then supply its foundations.<key> or project-relative Markdown decision record in an adr/ directory. For substantial work with no foundation, set requirements.foundation to false.';
+const foundationReminder = 'Resolve foundations.documentation for documentation design and foundations.observability for new or changed behaviour through $geppetto-spec. For every new or changed foundation, apply $geppetto-spec and set requirements.foundation to pending until the user decision is recorded. Then supply its foundations.<key> or project-relative Markdown decision record in an adr/ directory. For substantial work with no foundation, set requirements.foundation to false. For behaviour changes, name the affected metrics and expected budgets.';
 const recordCommand = (session, turn) => `node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-turn '<json>' --session ${JSON.stringify(session)}${turn ? ` --turn ${JSON.stringify(turn)}` : ''}`;
 const overrideFor = (state, gate) => state.overrides?.epoch === state.epoch && state.overrides[gate];
 const overrideCommand = (event, state, gate) => recordCommand(event.session_id, state.turn)
@@ -385,7 +385,7 @@ async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) 
     if (event.hook_event_name === 'Stop' && event.session_id && !event.stop_hook_active) await captureResources(event, { home, runCommand });
   }
   if (review.hookSpecificOutput?.permissionDecision === 'deny') return review;
-  const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now); const native = await nativeMemoryEvent(event, { home }); if (event.hook_event_name === 'UserPromptSubmit') return {};
+  const learning = review.decision === 'block' ? {} : await learningEvent({ ...event, review_blocked }, now, { runCommand }); const native = await nativeMemoryEvent(event, { home }); if (event.hook_event_name === 'UserPromptSubmit') return {};
   if (native.hookSpecificOutput) {
     if (learning.hookSpecificOutput) native.hookSpecificOutput.additionalContext += `\n${learning.hookSpecificOutput.additionalContext}`;
     return native;   }

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { redactValue } from './signal.mjs';
+import { timedMetric } from './metric-anomalies.mjs';
 import { resourceHost, sizeRoot } from './resource-metrics.mjs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { appendRecord, cli, exists, isMain, jsonFile, run, userHome, UsageError } from './common.mjs';
@@ -113,7 +114,13 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
   const compliance = gateCompliance([{ name: 'metrics', rows: metrics.rows }, { name: 'turns', rows: turns.rows }, { name: 'events', rows: events.rows }, { name: 'reviews', rows: reviews.rows }], start);
   const resources = metrics.rows.filter(row => row.kind === 'resource' && row.key === 'stop' && Date.parse(row.ts) >= start && (!key || row.key === key));
   const sizes = key && key !== 'disk-size' ? [] : await auditSizes(project, metrics.rows, now, home).catch(error => [{ status: 'unavailable', reason: error.code ?? 'resource roots unavailable' }]);
-  const rows = metrics.rows.filter(row => row.kind !== 'resource' && Date.parse(row.ts) >= start && (!key || row.key === key));
+  const observed = metrics.rows.filter(row => Date.parse(row.ts) >= start && (!key || row.key === key));
+  const rows = observed.filter(timedMetric);
+  const reminderId = row => JSON.stringify([row.sessionId, row.turnId, row.key]);
+  const diagnosed = new Set(metrics.rows.filter(row => row.kind === 'diagnosis').map(reminderId));
+  const delivered = observed.filter(row => row.kind === 'reminder');
+  const matched = delivered.filter(row => diagnosed.has(reminderId(row))).length;
+  const reminders = { delivered: delivered.length, diagnosed: matched, pending: delivered.length - matched };
   const groups = Map.groupBy(rows, row => row.key);
   const keys = [...groups].map(([key, group]) => {
     const times = group.map(row => row.durationMs);
@@ -141,7 +148,7 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
   const prCycle = prs?.filter(row => Date.parse(row.ts) >= start) ?? [];
   return { project, since: since ?? null, key: key ?? null, keys, topTimeSinks,
     delegates: { wallMs: mergedWall(delegates), resourceMs: sum(delegates.map(row => row.durationMs)), count: delegates.length },
-    resources, sizes, compliance, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
+    resources, sizes, compliance, reminders, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
     coverage: { metrics: metrics.coverage, turns: turns.coverage, 'hook events': events.coverage, prs: { status: prs ? 'available' : 'unknown', observed: prs?.length ?? 0, limit: 100 } } };
 }
 
@@ -172,6 +179,7 @@ export function printMetrics(report) {
   for (const row of report.compliance) {
     console.log(`Gate evidence ${row.host ?? 'unknown host'}/${row.harness ?? 'unknown harness'}: ${row.joined}/${row.records} linked (${row.identifiable} identifiable), ${row.uncheckedEdits} unchecked edits across ${row.editEpochs} edit epochs, ${row.unresolvedStops}/${row.stopEpochs} unresolved Stop epochs, ${row.stopRetries} retry attempts, ${row.editOverrides} edit and ${row.stopOverrides} Stop overrides`);
   }
+  if (report.reminders.delivered) console.log(`Timing reminders: ${report.reminders.diagnosed}/${report.reminders.delivered} diagnosed; ${report.reminders.pending} pending`);
   for (const sink of report.topTimeSinks) console.log(`Time sink ${sink.key}: ${sink.wallMs} ms wall, ${sink.resourceMs} ms summed`);
   const { delegates, decisionWaits, prCycle } = report;
   console.log(`Delegate spans: ${delegates.count}, merged host wall ${delegates.wallMs} ms, summed resource ${delegates.resourceMs} ms`);

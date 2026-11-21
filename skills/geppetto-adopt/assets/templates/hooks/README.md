@@ -66,3 +66,11 @@ Run `node <adopt>/scripts/audit.mjs --project <dir> --metrics` to rank observed 
 Durations come from matching PreToolUse and PostToolUse IDs in the existing activity log. The shared `metrics.jsonl` journal retains normalized command names, elapsed time, known outcomes and repository attribution. Test, check, lint, build and typecheck commands qualify regardless of duration; `metrics.suites` can replace the default classification with regular expressions matched against the normalized key. Git and gh calls also qualify. Other commands qualify from five seconds. Background calls and calls without a matching end event are outside coverage. A suite's scoped count identifies calls with additional positional arguments or test filters.
 
 Delegate wall time merges overlapping spans on each capturing host. Summed resource time adds the spans, including wait calls, and measures tool time rather than worker CPU use. Missing sources appear in the report. Capture failures produce a `metrics` entry in `hook-events.jsonl`, or a diagnostic on stderr when the event journal is unavailable. Capture uses no model calls.
+
+## Timing reminders
+
+A completed timed operation can emit one PostToolUse reminder per key and turn. An explicit expectation takes precedence over a maintainer-approved `metrics.thresholds[key].warnMs`. With five prior observations the slow run must exceed both baseline multipliers and last at least ten seconds. Cold-start floors are one minute for commands and suites and ten minutes for delegates. Each comparison uses preceding observations from the journal.
+
+Use `signal.mjs --metric '<json>' --session <session-id> --turn <turn-id>` with `{"kind":"expectation","key":"git status","expectedMs":500}` before an operation. After a reminder, record `{"kind":"diagnosis","key":"git status","verdict":"expected","reason":"<specific reason>"}`. Use `investigate` to record an efficiency signal. Use `threshold` with `warnMs` to record a proposal and ask the maintainer before editing configuration.
+
+Successful pull request creation and merges produce an elapsed time, recorded review rounds and timing reminder count. `audit.mjs --metrics` reports how many reminders have a diagnosis.

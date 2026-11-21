@@ -78,7 +78,14 @@ export function redact(text) {
     .replace(/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[REDACTED]@');
 }
 export async function main(args) {
-  const opts = parseArgs(args, { values: ['--category', '--scope', '--kind', '--key', '--session', '--source', '--turn', '--evidence', '--attributes', '--merge', '--reason', '--close', '--reference'], flags: ['--list', '--maintenance'] }); const root = await projectRoot('.');
+  const opts = parseArgs(args, { values: ['--category', '--scope', '--kind', '--key', '--session', '--source', '--turn', '--evidence', '--attributes', '--merge', '--reason', '--close', '--reference', '--metric'], flags: ['--list', '--maintenance'] }); const root = await projectRoot('.');
+  if (opts['--metric'] && !opts._.length) {
+    let note;
+    try { note = JSON.parse(opts['--metric']); } catch { throw new UsageError('--metric needs a JSON note.'); }
+    const { recordMetricNote } = await import('./metric-anomalies.mjs');
+    console.log(JSON.stringify(await recordMetricNote(root, note, { session: opts['--session'], turn: opts['--turn'] })));
+    return 0;
+  }
   if (opts['--list'] && !opts._.length) { console.log(JSON.stringify((await signalArchive(root)).filter(row => row.status === 'open' && !row.legacy).map(row => row.key))); return 0; }
   if (opts['--merge'] && opts['--maintenance'] && opts['--key'] && opts['--reason']?.trim()) { await maintainEvidence(root, { action: 'merge', keys: [opts['--key'], opts['--merge']], reason: opts['--reason'] }); return 0; }
   if (opts['--close'] && opts['--reference']?.trim() && opts['--reason']?.trim() && !opts._.length) {
