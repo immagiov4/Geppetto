@@ -5,6 +5,11 @@ Provider calls require screen.shareSource=true in the project configuration.
 """
 import argparse
 import concurrent.futures
+from datetime import datetime, timezone
+import socket
+import tempfile
+import threading
+import uuid
 import hashlib
 import json
 import math
@@ -81,6 +86,21 @@ def inventory(repo, ref, chunk_chars, extra_suffixes=(), exclusions=None):
     return files, chunks
 
 
+FREE_REQUESTS_PER_MINUTE = 20  # OpenRouter's published :free admission limit.
+FREE_REQUEST_INTERVAL = 60 / FREE_REQUESTS_PER_MINUTE
+free_request_lock = threading.Lock()
+next_free_request = 0.0
+
+
+def reserve_free_request():
+    global next_free_request
+    with free_request_lock:
+        delay = next_free_request - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+        next_free_request = time.monotonic() + FREE_REQUEST_INTERVAL
+
+
 def api(endpoint, payload, retries=2):
     key = os.environ.get('OPENROUTER_API_KEY')
     if not key:
@@ -88,6 +108,8 @@ def api(endpoint, payload, retries=2):
     request = urllib.request.Request('https://openrouter.ai' + endpoint,
         data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
     for attempt in range(retries + 1):
+        if payload.get('model', '').endswith(':free'):
+            reserve_free_request()
         try:
             with urllib.request.urlopen(request, timeout=180) as response:
                 result = json.load(response)
@@ -128,6 +150,11 @@ class ScoringFailure(RuntimeError):
         self.charged_usd = charged_usd
 
 
+def report_cost(response):
+    usage = response.get('usage') if isinstance(response, dict) else None
+    return usage.get('cost') if isinstance(usage, dict) else None
+
+
 def score_chunk(mode, model, request, chunk, cache, retries=2):
     dest = cache / (cache_key(mode, model, request, chunk) + '.json')
     if dest.exists():
@@ -156,9 +183,9 @@ def score_chunk(mode, model, request, chunk, cache, retries=2):
             if not isinstance(reason, str) or not reason.strip():
                 raise ValueError('Missing reason')
             reason = ' '.join(reason.split())
-        cost = response.get('usage', {}).get('cost')
-        if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0:
-            raise ValueError('Missing reported usage.cost; preserve cost accountability')
+        cost = report_cost(response)
+        if cost is not None and (isinstance(cost, bool) or not isinstance(cost, (int, float)) or not math.isfinite(cost) or cost < 0):
+            raise ValueError('Invalid reported usage.cost')
         result = {'path': chunk['path'], 'line': chunk['line'], 'offset': chunk['offset'], 'score': score,
                   'reason': reason, 'model': response.get('model'), 'cost_usd': cost, 'seconds': time.perf_counter() - start, 'retry503s': response.get('retry503s', 0)}
         temp = dest.with_suffix('.tmp')
@@ -166,7 +193,7 @@ def score_chunk(mode, model, request, chunk, cache, retries=2):
         temp.replace(dest)
         return {**result, 'cached': False, 'charged_usd': cost}
     except Exception as error:
-        reported = response.get('usage', {}).get('cost') if isinstance(response, dict) else None
+        reported = report_cost(response)
         known = isinstance(reported, (int, float)) and not isinstance(reported, bool) and math.isfinite(reported) and reported >= 0
         detail = str(error) if isinstance(error, RuntimeError) else type(error).__name__
         failure = ScoringFailure(detail, reported if known else None)
@@ -182,22 +209,164 @@ def rank(rows):
     return sorted(best.values(), key=lambda row: (-row['score'], row['path']))
 
 
+def config_choice(path):
+    try:
+        source = json.loads(path.read_text(encoding='utf-8-sig')).get('screen', {}).get('shareSource')
+    except FileNotFoundError:
+        return None
+    return source if isinstance(source, bool) else None
+
+
+def public_remote(repo):
+    try:
+        remote = git(repo, 'config', '--get', 'remote.origin.url').strip()
+        name = re.fullmatch(r'(?:https://github\.com/|ssh://git@github\.com(?::22)?/|git@github\.com:)([\w.-]+/[\w.-]+?)(?:\.git)?', remote)
+        if not name:
+            return False
+        request = urllib.request.Request('https://api.github.com/repos/' + name[1],
+                                         headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'Geppetto'})
+        with urllib.request.urlopen(request, timeout=3) as response:
+            result = json.load(response)
+        return result.get('private') is False and result.get('full_name', '').casefold() == name[1].casefold()
+    except (subprocess.CalledProcessError, urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+
+def share_source(repo, home=None):
+    project = config_choice(repo / '.geppetto/config.json')
+    if project is not None:
+        return project, 'user' if home is not None and repo == home else 'project'
+    try:
+        home = Path.home() if home is None else home
+    except RuntimeError:
+        home = None
+    user = config_choice(home / '.geppetto/config.json') if home is not None else None
+    if user is not None:
+        return user, 'user'
+    return (True, 'public') if public_remote(repo) else (None, 'unset')
+
+
+def save_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent, delete=False) as temporary:
+        json.dump(value, temporary, indent=2)
+        temporary.write('\n')
+    try:
+        os.replace(temporary.name, path)
+    finally:
+        Path(temporary.name).unlink(missing_ok=True)
+
+
+DECIDER_MODEL = re.compile(r'^perplexity/pplx-decider-v(\d+(?:\.\d+)*)(?:-\d{8})?(:free)?$')
+UTC_DAY_SECONDS = 86400
+CATALOG_ROUTE = 'https://openrouter.ai/api/v1/models?endpoints=%2Fapi%2Falpha%2Fdecisions'
+
+
+def decisions_catalog():
+    with urllib.request.urlopen(CATALOG_ROUTE, timeout=15) as response:
+        return json.load(response)['data']
+
+
+def latest_decider(home):
+    cache = home / '.geppetto' / 'latest-decider.json'
+    day = int(time.time() / UTC_DAY_SECONDS)
+    try:
+        saved = json.loads(cache.read_text(encoding='utf-8'))
+    except (FileNotFoundError, ValueError):
+        saved = {}
+    if isinstance(saved, dict) and saved.get('day') == day and isinstance(saved.get('model'), str) and DECIDER_MODEL.fullmatch(saved['model']):
+        return saved['model']
+    models = []
+    for row in decisions_catalog():
+        model = row.get('id', '')
+        match = DECIDER_MODEL.fullmatch(model) if isinstance(model, str) else None
+        if match:
+            version = tuple(int(part) for part in match[1].split('.'))
+            models.append((version, row.get('created') or 0, bool(match[2]), model))
+    if not models:
+        raise RuntimeError('No Perplexity Decider was listed by OpenRouter.')
+    model = max(models)[-1]
+    save_json(cache, {'day': day, 'model': model})
+    return model
+
+
+def resolve_turn(repo, args):
+    session = getattr(args, 'session', None)
+    turn = getattr(args, 'turn', None)
+    hook = Path(__file__).resolve().parents[2] / 'geppetto-adopt/scripts/hook.mjs'
+    if not session or turn or not hook.is_file():
+        return turn
+    result = subprocess.run(['node', str(hook), '--current-turn', '--session', session],
+                            cwd=repo, capture_output=True, text=True,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    if result.returncode:
+        raise RuntimeError('The active Geppetto turn could not be located for this session.')
+    return json.loads(result.stdout)['turn']
+
+
+def record_screen(repo, args, run, status, result, started):
+    try:
+        common = Path(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir').strip())
+        directory = common / 'geppetto' if common.is_absolute() else repo / '.geppetto'
+    except subprocess.CalledProcessError:
+        directory = repo / '.geppetto'
+    directory.mkdir(parents=True, exist_ok=True)
+    event = {'hook': 'requirementsScreen', 'status': status, 'runId': run,
+             'ts': datetime.now(timezone.utc).isoformat(), 'host': socket.gethostname(),
+             'sessionId': getattr(args, 'session', None), 'turnId': getattr(args, 'turn', None),
+             'revision': result.get('revision') or getattr(args, '_revision', None), 'worktree': str(repo), 'mode': args.mode, 'model': result.get('model'), 'servedModels': result.get('served_models'),
+             'reason': result.get('reason'), 'stage': getattr(args, '_stage', 'config'), 'fileCount': result.get('file_count'),
+             'completedChunks': result.get('completed_chunks'), 'chargedUsd': result.get('charged_usd'),
+             'elapsedMs': round((time.perf_counter() - started) * 1000)}
+    path = directory/'hook-events.jsonl'
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600), 'ab') as log:
+        log.write((json.dumps(event, separators=(',', ':')) + '\n').encode('utf-8'))
+
+
 def run(args):
+    if args.inventory_only or args.mode == 'grep':
+        return run_screen(args)
+    started = time.perf_counter()
+    args._stage = 'config'
+    args._revision = None
+    identity = uuid.uuid4().hex
+    repo = Path(args.repo).resolve()
+    try:
+        args.turn = resolve_turn(repo, args)
+        code = run_screen(args)
+        path = Path(args.output)
+        result = json.loads(path.read_text(encoding='utf-8'))
+    except Exception as error:
+        record_screen(repo, args, identity, 'failed', {'reason': type(error).__name__}, started)
+        print(json.dumps({'screenRun': identity, 'status': 'failed', 'reason': type(error).__name__}))
+        return 1
+    status = 'skipped' if result.get('skipped') else 'completed' if code == 0 else 'partial'
+    record_screen(repo, args, identity, status, result, started)
+    save_json(path, {**result, 'screenRun': identity})
+    print(json.dumps({'screenRun': identity, 'status': status}))
+    return code
+
+
+def run_screen(args):
     start = time.perf_counter()
     repo = Path(args.repo).resolve()
-    config_path = repo / '.geppetto/config.json'
-    config = json.loads(config_path.read_text(encoding='utf-8-sig')) if config_path.exists() else {}
-    if args.mode != 'grep' and not args.inventory_only and config.get('screen', {}).get('shareSource') is not True:
-        reason = 'screen.shareSource is false or absent; semantic screen skipped. Enable with python <skill>/scripts/screen.py --repo <repo> --share-source yes.'
+    sharing, scope = share_source(repo) if args.mode != 'grep' and not args.inventory_only else (None, 'local')
+    if args.mode != 'grep' and not args.inventory_only and sharing is not True:
+        reason = ('screen.shareSource is ' + ('unset; ask for the user default' if sharing is None else 'false at ' + scope + ' scope') +
+                  '; semantic screen skipped. Record the choice with --user --share-source yes or no.')
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps({'skipped': True, 'complete': False, 'reason': reason}, indent=2), encoding='utf-8')
         print(reason)
         return 0
     if any(part.casefold() == 'devdata' for part in repo.parts):
-        raise ValueError('Private data directories are outside the source boundary.')
-    request = Path(args.request_file).read_text(encoding='utf-8')
+        source = Path(git(repo, 'rev-parse', '--path-format=absolute', '--git-common-dir').strip()).resolve()
+        if any(part.casefold() == 'devdata' for part in source.parts):
+            raise ValueError('Private data repositories are outside the source boundary.')
+    args._stage = 'inventory'
+    request = Path(args.request_file).read_text(encoding='utf-8-sig')
     revision = git(repo, 'rev-parse', args.ref).strip()
+    args._revision = revision
     exclusions = []
     files, chunks = inventory(repo, revision, args.chunk_chars, args.source_suffix, exclusions)
     cache = Path(args.cache).resolve()
@@ -213,6 +382,10 @@ def run(args):
         output.write_text(json.dumps({'revision': revision, 'skipped': True, 'complete': False, 'reason': 'OPENROUTER_API_KEY is absent; semantic screen skipped.'}, indent=2), encoding='utf-8')
         print('OPENROUTER_API_KEY is absent; semantic screen skipped. Continue with lexical search and caller tracing.')
         return 0
+    if args.mode == 'decisions' and not args.model:
+        args._stage = 'catalog'
+        args.model = latest_decider(Path.home())
+    args._stage = 'decisions'
     rows, errors = [], []
     if args.mode == 'grep':
         # Plain lexical baseline: distinct request words found as literal substrings.
@@ -232,10 +405,11 @@ def run(args):
                     print(json.dumps({'completed': index, 'total': len(chunks), 'errors': len(errors)}), flush=True)
     result = {'revision': revision, 'mode': args.mode, 'model': args.model if args.mode != 'grep' else None,
               'file_count': len(files), 'chunk_count': len(chunks), 'completed_chunks': len(rows), 'errors': errors,
+              'served_models': sorted({row['model'] for row in rows if isinstance(row.get('model'), str)}),
               'complete': len(rows) == len(chunks), 'wall_seconds': time.perf_counter() - start,
-              'charged_usd': sum(row.get('charged_usd', 0) for row in rows) + sum(error['charged_usd'] or 0 for error in errors),
-              'unknown_charge_errors': sum(error['charged_usd'] is None for error in errors) + sum(row.get('retry503s', 0) for row in [*rows, *errors]),
-              'uncached_equivalent_usd': sum(row['cost_usd'] for row in rows),
+              'charged_usd': sum(row.get('charged_usd') or 0 for row in rows) + sum(error['charged_usd'] or 0 for error in errors),
+              'unknown_charge_errors': sum(row.get('charged_usd') is None for row in [*rows, *errors]) + sum(row.get('retry503s', 0) for row in [*rows, *errors]),
+              'uncached_equivalent_usd': sum(row['cost_usd'] or 0 for row in rows),
               'cached_chunks': sum(row.get('cached', False) for row in rows), 'ranking': rank(rows)}
     output.write_text(json.dumps(result, indent=2), encoding='utf-8')
     print(json.dumps({key: val for key, val in result.items() if key not in {'ranking', 'errors'}}), flush=True)
@@ -244,7 +418,10 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--repo', required=True)
+    parser.add_argument('--repo', default='.')
+    parser.add_argument('--user', action='store_true', help='Apply --share-source to the user default.')
+    parser.add_argument('--session', help='Current Geppetto session for requirements-map evidence.')
+    parser.add_argument('--turn', help='Current Geppetto turn for requirements-map evidence.')
     parser.add_argument('--ref', default='HEAD')
     parser.add_argument('--request-file')
     parser.add_argument('--output')
@@ -252,24 +429,23 @@ def main():
     parser.add_argument('--share-source', choices=['yes', 'no'], help='Record permission to send committed source to OpenRouter.')
     parser.add_argument('--inventory-only', action='store_true', help='Write the manifest for review without provider calls.')
     parser.add_argument('--source-suffix', action='append', default=[], help='Additional source suffix including its dot; repeat as needed.')
-    parser.add_argument('--mode', choices=['decisions', 'chat', 'grep'])
+    parser.add_argument('--mode', choices=['decisions', 'chat', 'grep'], default='decisions')
     parser.add_argument('--model', default='')
     parser.add_argument('--workers', type=int, default=24, help='Transport parallelism; lower when the provider rejects admission.')
     parser.add_argument('--retries', type=int, default=2, help='Additional transport attempts for HTTP 503 only; use zero for a single attempt.')
     parser.add_argument('--chunk-chars', type=int, default=24000, help='Full-coverage character windows, sized below candidate context limits.')
     args = parser.parse_args()
     if args.share_source:
-        path = Path(args.repo).resolve() / '.geppetto/config.json'
+        path = (Path.home() if args.user else Path(args.repo).resolve()) / '.geppetto/config.json'
         config = json.loads(path.read_text(encoding='utf-8-sig')) if path.exists() else {}
         config.setdefault('screen', {})['shareSource'] = args.share_source == 'yes'
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(config, indent=2) + '\n', encoding='utf-8')
-        print(f"screen.shareSource={config['screen']['shareSource']}")
+        save_json(path, config)
+        print(f"screen.shareSource={config['screen']['shareSource']} ({'user' if args.user else 'project'})")
         return 0
     if not all([args.request_file, args.output, args.cache, args.mode]):
         parser.error('Supply --request-file, --output, --cache and --mode for screening.')
-    if args.workers < 1 or args.chunk_chars < 1 or args.retries < 0 or (args.mode != 'grep' and not args.model):
-        parser.error('Use positive workers/chunk size, nonnegative retries and supply --model for provider modes.')
+    if args.workers < 1 or args.chunk_chars < 1 or args.retries < 0 or (args.mode == 'chat' and not args.inventory_only and not args.model):
+        parser.error('Use positive workers/chunk size, nonnegative retries and supply --model for chat mode.')
     return run(args)
 
 

@@ -1,3 +1,4 @@
+import { screenChoiceReminder, screenSourceStatus } from './screen-config.mjs';
 import { boundedMetricsAudit, printMetrics } from './metrics-audit.mjs';
 import { mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
@@ -69,7 +70,12 @@ export async function main(args) {
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {}); const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
   validateTurnPolicy(config);
   const turns = await localRecords(project, 'turns');
-  const report = { project, dataDirectory: projectDataPath(project, ''), foundations: foundationReport(config), node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: { enabled: config.hooks?.signalLearning?.enabled !== false, mode: 'in-turn', action: null } };
+  const report = { project, screen: await screenSourceStatus(project, { config }), dataDirectory: projectDataPath(project, ''), foundations: foundationReport(config), node: { version: process.versions.node, status: Number(process.versions.node.split('.')[0]) >= 22 ? 'present' : 'absent' }, installed: Object.keys((await jsonFile(resolve(project, '.geppetto/install.json'), { installations: {} })).installations), machine, memory: await memoryReport(project), hostLint: await hostLintReport(project, opts['--verify']), learning: { enabled: config.hooks?.signalLearning?.enabled !== false, mode: 'in-turn', action: null } };
+  const since = opts['--since'] ? Date.parse(opts['--since']) : -Infinity;
+  const screeningRuns = (await localRecords(project, 'hook-events')).filter(row =>
+    row.hook === 'requirementsScreen' && Date.parse(row.ts) >= since);
+  report.screen.runs = Object.fromEntries([...Map.groupBy(screeningRuns, row => row.status)]
+    .map(([status, rows]) => [status, rows.length]));
   report.turnChecks = turnMetrics(turns);
   report.evidence = await learningAudit(project, { since: opts['--since'] });
   if (opts['--verify']) {
@@ -86,6 +92,8 @@ export async function main(args) {
     console.log(`Memory: ${report.memory.status}`); console.log(`Unset foundations: ${report.foundations.unset.join(', ') || 'none'}`);
     console.log(`Turn checks: ${report.turnChecks.editedTurns} edited turns; median added ${report.turnChecks.medianAddedSeconds ?? 'unknown'} s; next-message corrections ${report.turnChecks.correctedNextMessage}/${report.turnChecks.classifiedNextMessages} classified, ${report.turnChecks.unclassifiedNextMessages} unknown.`);
     for (const [name, job] of Object.entries(machine.jobs ?? {})) console.log(`Job ${name}: ${job.status}${job.status === 'needs-scheduler' ? '; attach an available scheduler' : ''}`);
+    console.log(report.screen.scope === 'unset' ? screenChoiceReminder : `Semantic screening source sharing: ${report.screen.shareSource} (${report.screen.scope}); key ${report.screen.key ? 'available' : 'absent'}.`);
+    console.log(`Semantic screening runs: ${JSON.stringify(report.screen.runs)}`);
     console.log(`Signal learning: ${report.learning.enabled ? 'enabled' : report.learning.action ? 'not ready' : 'disabled'}${report.learning.action ? `; ${report.learning.action}` : ''}`);
     console.log(`Evidence: ${report.evidence.openKeys.length} open keys; ${report.evidence.neverRead.length} pages/skills never read in the window.`);
     for (const outcome of report.evidence.outcomes) console.log(`${outcome.key}: ${outcome.didNotFix ? 'did not fix; reopened' : 'no observed recurrence'}; ${outcome.neverRead.length} changed pages never read${outcome.candidateToRevert ? '; candidate to revert' : ''}`);

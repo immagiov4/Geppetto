@@ -61,7 +61,7 @@ rl.createInterface({input:process.stdin}).on('line', line => {
   if(q.method==='config/batchWrite') { for(const edit of q.params.edits){const key=JSON.parse(edit.keyPath.slice('hooks.state.'.length,-'.trusted_hash'.length));hooks.find(h=>h.key===key).trustStatus='trusted';} result={status:'ok'}; }
   console.log(JSON.stringify({id:q.id,result}));
 });`);
-    return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: resolve(home, '.codex'), ...(temporary ? { PATH: `${temporary}${delimiter}${process.env.PATH}` } : {}), ...env } });
+    return spawnSync(process.execPath, [resolve(scripts, script), ...args], { cwd, input, encoding: 'utf8', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home, OPENROUTER_API_KEY: '', CODEX_HOME: resolve(home, '.codex'), ...(temporary ? { PATH: `${temporary}${delimiter}${process.env.PATH}` } : {}), ...env } });
   } finally { if (temporary) rmSync(temporary, { recursive: true, force: true }); }
 }
 export function parallel(script, args, { cwd, home = cwd }) {

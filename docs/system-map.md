@@ -5,6 +5,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Concern | Source owner under `skills/geppetto-adopt/scripts/` |
 |---|---|
 | Project installation and ownership | `install.mjs` |
+| Source-sharing setup and requirements screening evidence | `screen-config.mjs` and `requirements-blast-radius/scripts/screen.py` |
 | Published versions, startup notices and installation drift | `update-check.mjs` |
 | Operation timing, anomalies and metrics audit | `metrics.mjs`, `metric-anomalies.mjs`, `metrics-audit.mjs` |
 | Shared hooks, job identities and memory | `machine.mjs` |

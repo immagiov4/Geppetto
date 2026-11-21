@@ -174,7 +174,7 @@ test('configuration generates questions, validation and custom skill instruction
   await send('UserPromptSubmit'); assert.equal(record(decision).status, 2); assert.equal(record({ privacy: { applies: true, reason: 'none' } }).status, 2);
   assert.equal(record({ privacy: { applies: true, reason: 'The export includes account details.' } }).status, 0);
   assert.deepEqual(await edit(), {}); await send('Stop'); assert.equal(rows()[0].privacy.applies, true);
-  const empty = project(t, { turnChecks: [] }); assert.deepEqual(await empty.send('SessionStart'), {}); assert.deepEqual(await empty.edit(), {}); assert.deepEqual(await empty.send('Stop'), {});
+  const empty = project(t, { turnChecks: [], screen: { shareSource: false } }); assert.deepEqual(await empty.send('SessionStart'), {}); assert.deepEqual(await empty.edit(), {}); assert.deepEqual(await empty.send('Stop'), {});
 });
 test('invalid and duplicate check definitions fail at the configuration boundary', async t => {
   for (const turnChecks of [[{ id: 'x', question: '', skill: 'test' }], [{ id: 'review', question: 'Question?', skill: 'test' }], [{ id: 'x', question: 'Question?', skill: 'test' }, { id: 'x', question: 'Question?', skill: 'test' }], { checks: [], rearmOn: [{ tool: '[' }] }]) {
