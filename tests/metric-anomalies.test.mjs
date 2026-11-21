@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { config, fixture, get, git, put } from './helpers.mjs';
+import { config, fixture, get, git, invoke, put } from './helpers.mjs';
 import { learningEvent } from '../skills/geppetto-adopt/scripts/learn-nudge.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 import { metricAnomaly, metricBaselines, prTimingNote, recordMetricNote } from '../skills/geppetto-adopt/scripts/metric-anomalies.mjs';
@@ -51,7 +51,9 @@ test('a diagnosed reminder counts once and an investigation creates an efficienc
   const result = await learningEvent({ ...event, tool_use_id: 'call', hook_event_name: 'PostToolUse', tool_response: { exit_code: 0 } }, () => 1200);
   assert.match(result.hookSpecificOutput.additionalContext, /expectation: 100 ms/);
   const note = { kind: 'diagnosis', key, verdict: 'investigate', reason: 'The temporary drive took longer than expected to scan.' };
-  assert.equal((await recordMetricNote(cwd, note, { session, turn })).verdict, 'investigate');
+  const recorded = invoke('signal.mjs', ['--metric', JSON.stringify(note), '--session', session, '--turn', turn], { cwd });
+  assert.equal(recorded.status, 0, recorded.stderr);
+  assert.equal(JSON.parse(recorded.stdout).verdict, 'investigate');
   assert.equal((await recordMetricNote(cwd, note, { session, turn })).duplicate, true);
   assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'signals.jsonl'))).category, 'efficiency');
   const audit = await metricsAudit(cwd, { key, execute: () => ({ status: 1 }) });

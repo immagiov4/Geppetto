@@ -98,4 +98,4 @@ export async function main(args) {
   const entry = await recordSignal(root, { text: opts._[0], kind, scope: opts['--scope'] ?? 'project', key: opts['--key'], session: opts['--session'], category: opts['--category'], source: opts['--source'], turn: opts['--turn'], evidence: opts['--evidence'], attributes });
   console.log(`Signal ${entry.duplicate ? 'already counted' : 'recorded'}: ${entry.key}`); return 0;
 }
-if (isMain(import.meta.url)) await cli(main);
+if (isMain(import.meta.url)) void cli(main);
