@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve, dirname, basename, delimiter } from 'node:path';
+import { reviewMaterialSeal } from '../skills/geppetto-adopt/scripts/review-evidence.mjs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, spawn } from 'node:child_process';
 
@@ -74,7 +75,7 @@ export function parallel(script, args, { cwd, home = cwd }) {
 export function git(dir, args, options = {}) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true, ...options }); }
 
 /** Fake runner artifacts for hook tests; these fixtures do not invoke a model. */
-export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD') {
+export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome) {
   const directory = fixture(t);
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const patch = git(root, ['diff', '--binary', '--no-ext-diff', base, '--'], { maxBuffer: 8 * 1024 * 1024 }).stdout;
@@ -101,8 +102,9 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD') {
       { type: 'turn.completed', usage: { output_tokens: 30 } },
     ];
     put(directory, stage + '.events.jsonl', events.map(JSON.stringify).join('\n'));
-    put(directory, '.codex/sessions/' + day + '/rollout-fixture-' + threads[index] + '.jsonl', [
+    put(nativeHome ?? resolve(directory, '.codex'), 'sessions/' + day + '/rollout-fixture-' + threads[index] + '.jsonl', [
       { type: 'session_meta', payload: { id: threads[index] } },
+      { type: 'response_item', payload: { role: 'user', content: [{ type: 'input_text', text: 'Review material SHA-256: ' + reviewMaterialSeal(hashes) }] } },
       { type: 'event_msg', payload: { type: 'task_complete', last_agent_message: response } },
     ].map(JSON.stringify).join('\n'));
     return { stage, status: 'completed', started_at: started / 1000, exit_code: 0, response_sha256: sha(response) };
@@ -113,7 +115,7 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD') {
   return directory;
 }
 
-export function invokeReview(t, root, outcome, session, turn, evidence = reviewFixture(t, root, outcome)) {
+export function invokeReview(t, root, outcome, session, turn, nativeHome, evidence = reviewFixture(t, root, outcome, 'HEAD', nativeHome)) {
   const args = ['--record-review', '--base', 'HEAD', '--outcome', outcome, '--evidence', evidence];
   if (session) args.push('--session', session, '--turn', turn);
   return invoke('hook.mjs', args, { cwd: root, env: { CODEX_HOME: resolve(evidence, '.codex') } });

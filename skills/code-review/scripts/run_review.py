@@ -131,6 +131,9 @@ def check_completion(exit_code, events):
 
 def run_call(args, frozen, label, prompt, schema_path, metrics):
     unchanged(args.case, frozen)
+    material_seal = hashlib.sha256(json.dumps(sorted(frozen.items()), ensure_ascii=False,
+                                              separators=(",", ":")).encode("utf-8")).hexdigest()
+    prompt += f"\nReview material SHA-256: {material_seal}\n"
     prompt += f"\nBudget: up to {getattr(args, 'tool_budget', 24)} effective tool calls and {args.timeout_seconds:g} seconds per session. Tool count is an instructed limit.\n"
     (args.output / f"{label}.prompt.txt").write_text(prompt, encoding="utf-8")
     response_path = args.output / f"{label}.json"

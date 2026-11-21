@@ -174,10 +174,12 @@ WScript.Quit status
     const owned = previous?.id === id && previous.scheduler === 'windows-task-scheduler';
     const observed = owned && maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute });
     const reconcile = ['action differs', 'cadence differs'].includes(observed);
-    const replacement = reconcile ? 'Set-ScheduledTask -TaskName $id -Action $action -Trigger $trigger | Out-Null;' : '';
+    const enable = observed === 'disabled';
+    const replacement = reconcile ? 'Set-ScheduledTask -TaskName $id -Action $action -Trigger $trigger | Out-Null;'
+      : enable ? 'Enable-ScheduledTask -TaskName $id | Out-Null;' : '';
     const code = `$ErrorActionPreference='Stop'; $id=${psQuote(id)}; $task=Get-ScheduledTask -TaskName $id -ErrorAction SilentlyContinue; $action=New-ScheduledTaskAction -Execute '${windowsAction}' -Argument ${psQuote(args)}; $trigger=New-ScheduledTaskTrigger -Weekly -DaysOfWeek ${windowsDay} -At '${windowsTime}'; if ($task) { ${replacement} if (!$task.Actions.Count -or $task.Actions.Count -ne 1 -or ('${reconcile}' -eq 'false' -and ($task.Actions.Execute -ne '${windowsAction}' -or $task.Actions.Arguments -ne ${psQuote(args)}))) { throw 'Existing task action changed during reconciliation' } } else { $settings=New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable; $task=Register-ScheduledTask -TaskName $id -Action $action -Trigger $trigger -Settings $settings }; $info=Get-ScheduledTaskInfo -TaskName $id; @{id=$id;nextRun=$info.NextRunTime.ToString('o')} | ConvertTo-Json -Compress`; const result = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
     if (result.status !== 0) throw new Error(`Windows maintenance registration failed: ${result.stderr?.trim() || result.error?.message}`);
-    if (reconcile && maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute }) !== 'scheduled') throw new Error('Updated Windows maintenance task did not pass verification.');
+    if ((reconcile || enable) && maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute }) !== 'scheduled') throw new Error('Updated Windows maintenance task did not pass verification.');
     const registered = JSON.parse(result.stdout);
     return { ...registered, scheduler: 'windows-task-scheduler', cadence, disable: `schtasks.exe /Change /TN ${id} /DISABLE`, status: 'scheduled', host };   }
   const listed = execute('crontab', ['-l']);

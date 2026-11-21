@@ -83,6 +83,21 @@ test('a successful PR merge adds one line using the recorded PR interval', async
   });
   assert.match(note, /^Geppetto PR #12: 12000 ms elapsed .*0 recorded review rounds and 0 anomalous operations in this worktree window\.$/);
   assert.equal(await prTimingNote(cwd, event, { ok: false }, () => assert.fail('failed merges use no host lookup')), '');
+  const branch = { ...event, tool_input: { command: 'gh pr merge work/topic --squash' } };
+  const branchNote = await prTimingNote(cwd, branch, { ok: true }, (program, args) => {
+    assert.equal(program, 'gh');
+    assert.equal(args[2], 'work/topic');
+    return { status: 0, stdout: JSON.stringify({ number: 18, state: 'MERGED', createdAt: '2026-11-01T00:00:00Z', mergedAt: '2026-11-01T00:00:12Z' }) };
+  });
+  assert.match(branchNote, /^Geppetto PR #18/);
+  const connector = { tool_name: 'mcp__codex_apps__github_merge_pull_request',
+    tool_input: { repository_full_name: 'owner/repo', pr_number: 18 }, tool_response: { merged: true } };
+  const connectorNote = await prTimingNote(cwd, connector, {}, (program, args) => {
+    assert.equal(program, 'gh');
+    assert.equal(args[2], 'https://github.com/owner/repo/pull/18');
+    return { status: 0, stdout: JSON.stringify({ number: 18, state: 'MERGED', createdAt: '2026-11-01T00:00:00Z', mergedAt: '2026-11-01T00:00:12Z' }) };
+  });
+  assert.match(connectorNote, /^Geppetto PR #18/);
 });
 
 test('a structured PR result enters timing capture and binds its summary to the returned number', async t => {
@@ -90,7 +105,7 @@ test('a structured PR result enters timing capture and binds its summary to the 
   git(cwd, ['init', '-q']);
   put(cwd, '.geppetto/config.json', { ...config(), hooks: { learnNudge: { enabled: false }, signalLearning: { enabled: false } } });
   const event = { cwd, session_id: 'session', turn_id: 'turn', tool_use_id: 'structured-pr',
-    tool_name: 'mcp__codex_apps__github_create_pull_request', tool_input: { owner: 'owner', repo: 'repo' } };
+    tool_name: 'mcp__codex_apps__github_create_pull_request', tool_input: { repository_full_name: 'owner/repo' } };
   await learningEvent({ ...event, hook_event_name: 'PreToolUse' }, () => 1000);
   const result = await learningEvent({ ...event, hook_event_name: 'PostToolUse',
     tool_response: { number: 4, url: 'https://api.github.com/repos/owner/repo/pulls/4' } }, () => 11000, {

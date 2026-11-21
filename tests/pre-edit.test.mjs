@@ -5,6 +5,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, get, git, invoke, config, restoreEnv } from './helpers.mjs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 const decision = { requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false } };
 function project(t, settings = {}, nested = false) {
@@ -282,4 +283,8 @@ test('a scoped pending foundation blocks its own paths and permits a known unrel
   await send('PostToolUse', { tool_name: 'exec_command', tool_input: { command: 'opaque tool' } });
   const rows = get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
   assert.equal(rows.findLast(row => row.status === 'observed-edit').disposition, 'unchecked');
+  const script = fileURLToPath(new URL('../skills/geppetto-adopt/scripts/hook.mjs', import.meta.url)).replaceAll('\\', '/');
+  const recordCommand = 'node "' + script + '" --record-turn \'{}\' --session "session" --turn "turn"';
+  assert.ok(!denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand } })));
+  assert.ok(denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand + '; Write-Output later' } })));
 });

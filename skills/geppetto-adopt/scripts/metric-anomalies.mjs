@@ -90,15 +90,15 @@ export async function prTimingNote(root, event, row, execute = run) {
   const pullUrl = /https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/i;
   const explicit = command?.positional[2] ?? '';
   const returnedUrl = result?.pullRequest?.html_url ?? result?.pullRequest?.url ?? result?.html_url ?? result?.url;
-  const owner = event.tool_input?.owner;
-  const repository = event.tool_input?.repo;
+  const input = event.tool_input;
+  const repository = input?.repository_full_name ?? (input?.owner && input?.repo ? input.owner + '/' + input.repo : undefined);
   const number = result?.pullRequest?.number ?? result?.number ??
-    (structured === 'merge' && result?.merged === true ? event.tool_input?.pull_number : undefined);
+    (structured === 'merge' && result?.merged === true ? input?.pr_number ?? input?.pull_number : undefined);
   const publicUrl = typeof returnedUrl === 'string' ? returnedUrl.match(pullUrl)?.[0] : undefined;
-  const structuredTarget = publicUrl ?? (Number.isSafeInteger(number) && /^[\w.-]+$/.test(owner ?? '') && /^[\w.-]+$/.test(repository ?? '')
-      ? 'https://github.com/' + owner + '/' + repository + '/pull/' + number : undefined);
+  const structuredTarget = publicUrl ?? (Number.isSafeInteger(number) && /^[\w.-]+\/[\w.-]+$/.test(repository ?? '')
+    ? 'https://github.com/' + repository + '/pull/' + number : undefined);
   if (structured && !structuredTarget) return '';
-  const target = structuredTarget ?? response.match(pullUrl)?.[0] ?? (pullUrl.test(explicit) || /^\d+$/.test(explicit) ? explicit : undefined);
+  const target = structuredTarget ?? response.match(pullUrl)?.[0] ?? (explicit && !explicit.startsWith('-') ? explicit : undefined);
   const repo = command?.flags.get('--repo') ?? command?.flags.get('-R');
   const cwd = resolve(root, event.tool_input?.workdir ?? event.tool_input?.cwd ?? '.');
   const view = execute('gh', ['pr', 'view', ...(target ? [target] : []), ...(repo ? ['--repo', repo] : []),

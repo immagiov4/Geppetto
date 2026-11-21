@@ -5,7 +5,7 @@ import { readFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
 import { resolve, relative, matchesGlob, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { completedReviewSession } from './review-evidence.mjs';
+import { completedReviewSession, reviewMaterialSeal } from './review-evidence.mjs';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { cli, isMain, hookMain, run, UsageError, projectRoot, userHome, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, recordContext, exists, contained, rejectSymlinks } from './common.mjs';
@@ -16,7 +16,7 @@ import { redact, localRecords, signalArchive, resolveSignals, redactValue, learn
 import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
 import { placeholderReason } from './gate-sections.mjs';
-import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, commandArgs, userTurnDecision } from './turn-checks.mjs';
+import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, commandArgs, commandSegments, userTurnDecision } from './turn-checks.mjs';
 function sectionFeedback(body, cwd, runCommand) {
   const result = runCommand(process.execPath, [fileURLToPath(new URL('./gate-sections.mjs', import.meta.url)), '--pr', '-'], { cwd, input: body });
   if (result.status === 0) return 'Geppetto: PR sections pass.';
@@ -243,6 +243,16 @@ async function recordedFoundation(root, reference, subject) {
     throw error;
   }
 }
+function isTurnRecorder(event, state) {
+  const parts = commandSegments(toolCommand(event)).filter(part => part.trim());
+  if (parts.length !== 1) return false;
+  const { executable, positional, flags } = commandArgs(parts[0]);
+  return /^node$/i.test(executable ?? '') && positional.length === 1 &&
+    resolve(event.cwd ?? '.', positional[0]) === fileURLToPath(import.meta.url) &&
+    flags.size === 3 && typeof flags.get('--record-turn') === 'string' &&
+    flags.get('--session') === event.session_id && flags.get('--turn') === state.turn;
+}
+
 async function editingEvent(root, state, statePath, event, policy) {
   const path = decisionPath(root, event.session_id, state.turn), staged = currentDecision(await jsonFile(path, null));
   const modifying = modifyingTool(event);
@@ -264,7 +274,7 @@ async function editingEvent(root, state, statePath, event, policy) {
       const epoch = randomUUID(); await atomicJson(statePath, { ...state, epoch, ...(state.shellPending === state.epoch ? { shellPending: epoch } : {}) }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event);
     } return {};
   }
-  if (!modifying && state.shellPending !== state.epoch) return {};
+  if (!modifying && (state.shellPending !== state.epoch || isTurnRecorder(event, state))) return {};
   const foundation = staged?.userEpoch === state.userEpoch ? staged?.value?.requirements?.foundation : undefined;
   const scope = pendingScope(foundation);
   if (foundation && (!scope || withinPendingScope(root, event, scope)) && !await recordedFoundation(root, foundation)) {
@@ -286,6 +296,7 @@ async function editingEvent(root, state, statePath, event, policy) {
   }
   await claimFile(`${path}.edited`); return {};
 }
+const nativeReviewHome = () => process.env.CODEX_HOME || resolve(userHome(), '.codex');
 const reviewPolicy = async root => ({ ...reviewGateDefaults, ...(await jsonFile(resolve(root, '.geppetto/config.json'), {})).hooks?.reviewGate });
 async function diffDigest(root, args, suffix) {
   const hash = createHash('sha256');
@@ -335,12 +346,13 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
       !required.every((stage, index) => calls[index]?.stage === stage) ||
       new Set(calls.map(call => call.stage)).size !== calls.length || !Array.isArray(paths) || !fingerprint) fail();
   const responses = {};
+  const seal = reviewMaterialSeal(fingerprint);
   for (const [index, call] of calls.entries()) {
     if (!/^(questions|investigate|search-[12]|verify)$/.test(call.stage) || call.status !== 'completed' ||
         call.exit_code !== 0 || typeof threads[index] !== 'string' || !threads[index]) fail();
     const response = await readFile(resolve(directory, call.stage + '.json'), 'utf8');
     if (digest(response) !== call.response_sha256 ||
-        !await completedReviewSession(codexHome, threads[index], call, response)) fail();
+        !await completedReviewSession(codexHome, threads[index], call, response, seal)) fail();
     responses[call.stage] = JSON.parse(response);
     const events = (await readFile(resolve(directory, call.stage + '.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
     if (!events.some(event => event.type === 'thread.started' && event.thread_id === threads[index]) ||
@@ -375,7 +387,7 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
   return { kind: 'review-runner', sessions: threads };
 }
 
-export async function recordReview(root, base, outcome, { session, turn, evidence, codexHome = process.env.CODEX_HOME || resolve(userHome(), '.codex') } = {}) {
+export async function recordReview(root, base, outcome, { session, turn, evidence, codexHome = nativeReviewHome() } = {}) {
   if (!['passed', 'findings'].includes(outcome)) throw new UsageError('Review outcome must be passed or findings after independent review completes.');
   base = gitOutput(root, ['rev-parse', '--verify', `${base}^{commit}`]);
   if (!evidence) throw new UsageError('Review recording requires --evidence <review-output-directory>.');
@@ -383,7 +395,8 @@ export async function recordReview(root, base, outcome, { session, turn, evidenc
   if (session && (!state || (turn && state.turn !== turn))) throw new UsageError('Review recording needs a matching active session and turn.');
   const policy = await reviewPolicy(root);
   const current = await reviewSnapshot(root, base, policy);
-  const verified = await verifiedReview(root, base, outcome, resolve(root, evidence), session, codexHome);
+  if (state && !state.reviewArchive) throw new UsageError('Start a fresh session so the hook can identify its native archive.');
+  const verified = await verifiedReview(root, base, outcome, resolve(root, evidence), session, state?.reviewArchive ?? codexHome);
   if ((await reviewSnapshot(root, base, policy)).hash !== current.hash) throw new UsageError('The reviewed diff changed during recording.');
   await ignoreLocalFiles(root, ['/reviews.jsonl', '/hook-state/']);
   await atomicJson(resolve(root, '.geppetto/hook-state', `review-${base}-${current.hash}.json`), current.snapshot);
@@ -392,7 +405,7 @@ export async function recordReview(root, base, outcome, { session, turn, evidenc
   const identity = state ? { harness: state.harness ?? null, sessionId: session, turnId: state.turn, epoch: state.epoch } : {};
   await appendRecord(root, 'reviews', { ...record, ...identity }); return record;
 }
-async function completionEvent(event) {
+async function completionEvent(event, reviewArchive) {
   const kind = event.hook_event_name;
   if (process.env.GEPPETTO_LEARNING_CHILD === '1' || !event.session_id || !['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'].includes(kind)) return {};
   const root = await projectRoot(event.cwd ?? '.'); if (!await exists(resolve(root, '.geppetto/config.json'))) return {}; const policy = await reviewPolicy(root);
@@ -414,7 +427,7 @@ async function completionEvent(event) {
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
     const prior = event.turn_id ? currentDecision(await jsonFile(decisionPath(root, event.session_id, event.turn_id), null)) : null;
     fresh = !prior;
-    state = { harness: event.harness, transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), learningFiles: await learningFiles(root), ...(await reviewSnapshot(root, base, policy)) };
+    state = { harness: event.harness, reviewArchive, transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), learningFiles: await learningFiles(root), ...(await reviewSnapshot(root, base, policy)) };
     await atomicJson(statePath, state);
   }
   const context = recordContext.getStore();
@@ -454,7 +467,7 @@ async function completionEvent(event) {
   if (['PreToolUse', 'PostToolUse'].includes(kind)) return editingEvent(root, state, statePath, event, turnPolicy(turnConfig));
   if (policy.enabled === false) return {};
   if (kind !== 'Stop') return {};
-  const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (record.evidence?.kind === 'review-runner' && await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
+  const records = []; for (const record of await localRecords(root, 'reviews', { currentWorktree: true })) if (record.provenance === 'active-turn' && record.evidence?.kind === 'review-runner' && await exists(resolve(root, '.geppetto/hook-state', `review-${record.base}-${record.hash}.json`))) records.push(record);
   const last = records.at(-1); const current = await reviewSnapshot(root, last?.base ?? state.base, policy); const lines = await changedLines(root, state.snapshot, current.snapshot); const reviewed = last && await jsonFile(resolve(root, '.geppetto/hook-state', `review-${last.base}-${last.hash}.json`), null); const sinceReview = reviewed === null || reviewed === undefined ? lines : await changedLines(root, reviewed, current.snapshot);
   let status = 'below-threshold';
   if (records.some(record => record.base === last.base && record.hash === current.hash)) status = 'reviewed';
@@ -481,7 +494,7 @@ async function completionEvent(event) {
   }
   let review_blocked = false; try { review_blocked = !['reviewed', 'below-threshold'].includes(status) && (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return { ...(block ? { decision: 'block', reason: [...reasons, ...(strict ? [`For an explicit override, run ${overrideCommand(event, state, 'stop')} with the real reason.`] : [])].join('\n') } : {}), review_blocked }; }); }
-async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) {
+async function dispatch(event, { runCommand = run, now = Date.now, home, codexHome = nativeReviewHome() } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   const learningChild = process.env.GEPPETTO_LEARNING_CHILD === '1';
   if (event.hook_event_name === 'SessionStart') {
@@ -489,7 +502,7 @@ async function dispatch(event, { runCommand = run, now = Date.now, home } = {}) 
     if (event.session_id) await captureResources(event, { home, runCommand });
     return sessionStart(event, { home, now });
   }
-  const { review_blocked, ...review } = await completionEvent(event);
+  const { review_blocked, ...review } = await completionEvent(event, resolve(codexHome));
   if (!learningChild) {
     await logReads(event, { home });
     if (event.hook_event_name === 'Stop' && event.session_id && !event.stop_hook_active) await captureResources(event, { home, runCommand });

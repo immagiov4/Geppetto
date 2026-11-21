@@ -19,19 +19,19 @@ test('global review hook leaves an unadopted repository alone', async t => {
   assert.deepEqual(await handleEvent({ ...event, hook_event_name: 'Stop' }), {});
 });
 function project(t) {
-  const cwd = fixture(t);
+  const cwd = fixture(t), nativeHome = fixture(t);
   for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) assert.equal(git(cwd, args).status, 0);
   put(cwd, 'app.mjs', lines(40)); put(cwd, '.geppetto/config.json', config());
   git(cwd, ['add', '.']); git(cwd, ['commit', '-qm', 'baseline']);
   const send = async (hook_event_name, extra = {}) => {
-    const result = await handleEvent({ cwd, session_id: 'gate', turn_id: 'one', hook_event_name, ...extra });
+    const result = await handleEvent({ cwd, session_id: 'gate', turn_id: 'one', hook_event_name, ...extra }, { codexHome: nativeHome });
     if (hook_event_name === 'UserPromptSubmit') {
       const recorded = invoke('hook.mjs', ['--record-turn', JSON.stringify({ continuation: true }), '--session', 'gate', '--turn', extra.turn_id ?? 'one'], { cwd });
       assert.equal(recorded.status, 0, recorded.stderr);
     }
     return result;
   };
-  return { cwd, send };
+  return { cwd, send, nativeHome };
 }
 test('untracked source blocks Codex Stop retries until an override, with a fresh check next turn', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit');
@@ -48,8 +48,8 @@ test('untracked source blocks Codex Stop retries until an override, with a fresh
   assert.match(get(cwd, projectDataPath(cwd, 'hook-events.jsonl')), /reviewGate/);
 });
 test('matching review passes, small post-review edits pass, substantial post-review edits block', async t => {
-  const { cwd, send } = project(t); await send('UserPromptSubmit'); put(cwd, 'app.mjs', lines(80));
-  const recorded = invokeReview(t, cwd, 'passed', 'gate', 'one');
+  const { cwd, send, nativeHome } = project(t); await send('UserPromptSubmit'); put(cwd, 'app.mjs', lines(80));
+  const recorded = invokeReview(t, cwd, 'passed', 'gate', 'one', nativeHome);
   assert.equal(recorded.status, 0, recorded.stderr); const record = JSON.parse(get(cwd, projectDataPath(cwd, 'reviews.jsonl')));
   assert.match(record.hash, /^[a-f\d]{64}$/); assert.match(record.base, /^[a-f\d]{40}$/); assert.equal(record.outcome, 'passed'); assert.ok(record.ts);
   assert.doesNotMatch(get(cwd, projectDataPath(cwd, 'reviews.jsonl')), /line 40/);
@@ -74,11 +74,11 @@ test('old dirty source passes; Codex requires a recorded override for active Sto
   assert.equal((await send('Stop', { turn_id: 'two', last_assistant_message: 'Independent review blocked: the requested CLI is unavailable.' })).decision, 'block');
 });
 test('deletions and staged edits count, and an earlier matching review remains valid', async t => {
-  const { cwd, send } = project(t); await send('UserPromptSubmit');
+  const { cwd, send, nativeHome } = project(t); await send('UserPromptSubmit');
   put(cwd, 'app.mjs', lines(80)); git(cwd, ['add', 'app.mjs']);
-  assert.equal(invokeReview(t, cwd, 'findings', 'gate', 'one').status, 0);
+  assert.equal(invokeReview(t, cwd, 'findings', 'gate', 'one', nativeHome).status, 0);
   put(cwd, 'app.mjs', lines(120));
-  assert.equal(invokeReview(t, cwd, 'passed', 'gate', 'one').status, 0);
+  assert.equal(invokeReview(t, cwd, 'passed', 'gate', 'one', nativeHome).status, 0);
   put(cwd, 'app.mjs', lines(80)); assert.deepEqual(await send('Stop'), {}, 'the first review matches again');
   await send('UserPromptSubmit', { turn_id: 'two' }); put(cwd, 'app.mjs', '');
   assert.equal((await send('Stop', { turn_id: 'two' })).decision, 'block');
@@ -98,8 +98,8 @@ test('concurrent Codex Stops both require completion and record one first denial
 });
 test('a reviewed clean diff cannot hide a source file replaced by a directory or binary', async t => {
   for (const replacement of ['directory', 'binary']) {
-    const { cwd, send } = project(t); await send('UserPromptSubmit');
-    assert.equal(invokeReview(t, cwd, 'passed', 'gate', 'one').status, 0);
+    const { cwd, send, nativeHome } = project(t); await send('UserPromptSubmit');
+    assert.equal(invokeReview(t, cwd, 'passed', 'gate', 'one', nativeHome).status, 0);
     rmSync(resolve(cwd, 'app.mjs'));
     if (replacement === 'directory') mkdirSync(resolve(cwd, 'app.mjs')); else put(cwd, 'app.mjs', '\0binary');
     assert.equal((await send('Stop')).decision, 'block');
@@ -107,9 +107,9 @@ test('a reviewed clean diff cannot hide a source file replaced by a directory or
 });
 
 test('delegate findings recorded by CLI satisfy the gate through small fixes and clear a prior block', async t => {
-  const { cwd, send } = project(t); await send('UserPromptSubmit'); put(cwd, 'app.mjs', lines(80));
+  const { cwd, send, nativeHome } = project(t); await send('UserPromptSubmit'); put(cwd, 'app.mjs', lines(80));
   const blocked = await send('Stop'); assert.match(blocked.reason, /--record-review.*--outcome/);
-  assert.equal(invokeReview(t, cwd, 'findings', 'gate', 'one').status, 0);
+  assert.equal(invokeReview(t, cwd, 'findings', 'gate', 'one', nativeHome).status, 0);
   put(cwd, 'app.mjs', lines(85)); assert.deepEqual(await send('Stop'), {});
   assert.equal(get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse).filter(row => row.hook === 'reviewGate').at(-1).status, 'below-threshold');
   put(cwd, 'app.mjs', lines(120));
@@ -118,16 +118,17 @@ test('delegate findings recorded by CLI satisfy the gate through small fixes and
 });
 
 test('a review assertion with no review evidence cannot clear a blocked Stop', async t => {
-  const { cwd, send } = project(t); await send('UserPromptSubmit');
+  const { cwd, send, nativeHome } = project(t); await send('UserPromptSubmit');
   put(cwd, 'new.mjs', lines(40, 'new'));
   assert.equal((await send('Stop')).decision, 'block');
   const claimed = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed',
     '--session', 'gate', '--turn', 'one'], { cwd });
   assert.equal(claimed.status, 2, claimed.stdout);
-  const stale = reviewFixture(t, cwd);
+  const foreign = reviewFixture(t, cwd);
   const unsigned = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed',
-    '--session', 'gate', '--turn', 'one', '--evidence', stale], { cwd });
+    '--session', 'gate', '--turn', 'one', '--evidence', foreign], { cwd, env: { CODEX_HOME: resolve(foreign, '.codex') } });
   assert.equal(unsigned.status, 2, unsigned.stdout);
+  const stale = reviewFixture(t, cwd, 'passed', 'HEAD', nativeHome);
   put(cwd, 'new.mjs', lines(41, 'new'));
   const outdated = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed',
     '--session', 'gate', '--turn', 'one', '--evidence', stale], { cwd, env: { CODEX_HOME: resolve(stale, '.codex') } });
