@@ -18,6 +18,16 @@ test('install question and recap cover every capability choice', t => {
   for (const name of ['Memory:', 'hooks=', 'screen.shareSource=true', 'signals=', 'review=', 'maintenance.enabled=false', 'ci.enabled=false', 'OPENROUTER_API_KEY']) assert.ok(result.stdout.includes(name), result.stdout);
 });
 
+
+test('install with a configured OpenRouter key asks once before changing an unresolved project', async t => {
+  const cwd = fixture(t), home = fixture(t);
+  const result = invoke('install.mjs', ['--target', 'claude', '--project', cwd, '--plugin-hooks'],
+    { cwd, home, env: { OPENROUTER_API_KEY: 'fixture' } });
+  assert.equal(result.status, 2, result.stdout);
+  assert.match(result.stdout, /source sharing is unset/i);
+  assert.equal(existsSync(cwd + '/.geppetto/install.json'), false);
+});
+
 test('declined answers turn off what an earlier installation started', async t => {
   const { reconcileMachine } = await import('../skills/geppetto-adopt/scripts/machine.mjs');
   const { handleEvent } = await import('../skills/geppetto-adopt/scripts/hook.mjs');

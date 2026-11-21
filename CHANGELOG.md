@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.22.0
+
+- Run semantic screening as part of substantial requirements maps and retain a disposition for each attempt. Select the newest compatible Perplexity Decider through the OpenRouter Decisions catalog, with a daily cache and an explicit model override.
+- Configure source sharing once at user scope or override it per project. A verified public GitHub origin supplies the default when neither is set. Startup and audit report unresolved source sharing.
+- A workaround lesson records its resource costs and the follow-up for the underlying issue.
+- Migration: update both plugins and reapprove Codex hooks. Use the screen command to record the existing user choice when startup or audit reports it unset.
+
 ## 0.21.0
 
 - Weekly skill curation saves per-project metrics reports with operation times, storage, PR cycle, recorded overhead and up to two proposed experiments.

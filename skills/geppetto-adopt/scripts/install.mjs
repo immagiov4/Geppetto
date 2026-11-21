@@ -1,3 +1,4 @@
+import { screenChoiceReminder, screenSourceStatus } from './screen-config.mjs';
 import { readFile, readdir, mkdir, unlink, rmdir, open, writeFile, rename, mkdtemp, rm } from 'node:fs/promises';
 import { resolve, dirname, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -185,7 +186,15 @@ export async function main(args) {
   if (opts['--check-update']) {
     if (opts['--begin'] || opts['--commit'] || opts['--uninstall'] || opts['--dry-run']) throw new UsageError('--check-update is a read-only operation');
     const plugin = opts['--plugin-hooks'] || manifest.installations[target]?.plugin;
+    if ((await screenSourceStatus(root)).scope === 'unset') console.log(screenChoiceReminder);
     return checkUpdate({ root, target, user: opts['--user'], manifest, plugin, shellQuote });
+  }
+  if (!opts['--uninstall'] && !opts['--begin'] && !opts['--commit']) {
+    const screening = await screenSourceStatus(root);
+    if (screening.scope === 'unset') {
+      console.log(screenChoiceReminder);
+      if (screening.key && !opts['--dry-run']) throw new UsageError('Record the source-sharing choice before installation or update.');
+    }
   }
   if (!opts['--uninstall']) validateTurnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {}));
   if (opts['--begin'] || opts['--commit']) {
@@ -241,7 +250,9 @@ export async function main(args) {
   console.log(`Memory: ${memoryDescription(await memoryConfiguration(root))}; change with --memory <local|github|native|none>.`);
   if (!opts['--uninstall']) { const companions = await compileIntegrations(root); console.log(`Optional companions (install on yes): ${companions.suggestions.slice(0, 3).join(', ') || 'none'}. See the integration catalog for harness instructions.`); }
   const choices = await jsonFile(resolve(root, '.geppetto/config.json'), {});
-  console.log(`Choices (.geppetto/config.json): hooks=${JSON.stringify(choices.hooks ?? {})}; screen.shareSource=${choices.screen?.shareSource === true}; signals=${JSON.stringify(choices.hooks?.signalLearning ?? {})}; review=${JSON.stringify(choices.review ?? {})}; maintenance.enabled=${choices.maintenance?.enabled !== false}; jobs=${JSON.stringify(machine.jobs)}; ci.enabled=${choices.ci?.enabled !== false}. Source sharing: python <screen>/scripts/screen.py --repo <project> --share-source yes|no; key: OPENROUTER_API_KEY in the launching environment.`);
+  const screen = await screenSourceStatus(root, { config: choices });
+  if (screen.scope === 'unset') console.log(screenChoiceReminder);
+  console.log(`Choices (.geppetto/config.json): hooks=${JSON.stringify(choices.hooks ?? {})}; screen.shareSource=${screen.shareSource ?? 'unset'} (${screen.scope}); signals=${JSON.stringify(choices.hooks?.signalLearning ?? {})}; review=${JSON.stringify(choices.review ?? {})}; maintenance.enabled=${choices.maintenance?.enabled !== false}; jobs=${JSON.stringify(machine.jobs)}; ci.enabled=${choices.ci?.enabled !== false}. Source sharing: python <screen>/scripts/screen.py --user --share-source yes|no; key: OPENROUTER_API_KEY in the launching environment.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
   if (!opts['--uninstall'] && plans.some(owner => owner.target !== 'claude')) {

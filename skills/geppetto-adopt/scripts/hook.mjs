@@ -1,3 +1,4 @@
+import { matchingScreenRun, screenChoiceReminder, screenSourceStatus } from './screen-config.mjs';
 import { weeklyReportNotice } from './weekly-report.mjs';
 import { updateNotice } from './update-check.mjs';
 import { captureResources } from './resource-metrics.mjs';
@@ -100,14 +101,17 @@ async function learningGate(root, state, statePath, event, staged) {
 async function sessionStart(event, options) {
   let memory = await handleMemoryEvent(event, options); if (!event.session_id) return memory; const root = await projectRoot(event.cwd ?? '.');
   const update = await updateNotice(root, { ...options, harness: event.harness });
-  const report = await exists(resolve(root, '.geppetto/config.json')) ? await weeklyReportNotice(root, options.now()) : '';
-  const notice = [update, report].filter(Boolean).join('\n');
+  const adopted = await exists(resolve(root, '.geppetto/config.json'));
+  const hasHead = run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status === 0;
+  const [report, screen] = adopted
+    ? await Promise.all([weeklyReportNotice(root, options.now()), hasHead ? screenSourceStatus(root, options) : null]) : ['', null];
+  const notice = [update, report, screen?.scope === 'unset' && screenChoiceReminder].filter(Boolean).join('\n');
   if (notice) {
     const additionalContext = [memory.hookSpecificOutput?.additionalContext, notice].filter(Boolean).join('\n');
     memory = { ...memory, hookSpecificOutput: { ...memory.hookSpecificOutput, hookEventName: 'SessionStart', additionalContext } };
   }
   await compileIntegrations(root, options);
-  if (run('git', ['rev-parse', '--verify', 'HEAD'], { cwd: root }).status !== 0) return memory;
+  if (!hasHead) return memory;
   const policy = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); if (!policy.checks.length) return memory;
   await ignoreLocalFiles(root, ['/hook-state/']); await mkdir(resolve(root, '.geppetto/hook-state'), { recursive: true });
   if (!await claimFile(`${turnStatePath(root, event.session_id)}.startup`)) return memory;
@@ -127,7 +131,7 @@ function turnDecision(value, checks) {
   if (Object.keys(value).some(key => key !== 'userCorrection' && !checks.some(check => check.id === key)) || checks.some(check => !Object.hasOwn(value, check.id))) throw new UsageError(`Turn decision needs ${checks.map(check => check.id).join(', ')}; review is filled by the gate.`);
   for (const { id } of checks) {
     const [flag, ...reasons] = decisionFields(id), section = value[id];
-    if (!section || typeof section[flag] !== 'boolean' || Object.keys(section).some(name => ![flag, ...reasons, ...(id === 'requirements' ? ['foundation'] : [])].includes(name))) throw new UsageError(`Turn ${id}.${flag} must be boolean with its declared fields.`);
+    if (!section || typeof section[flag] !== 'boolean' || Object.keys(section).some(name => ![flag, ...reasons, ...(id === 'requirements' ? ['foundation', 'screenRun'] : [])].includes(name))) throw new UsageError(`Turn ${id}.${flag} must be boolean with its declared fields.`);
     for (const name of reasons) if ((section[flag] || name in section) && (typeof section[name] !== 'string' || /[\r\n]/.test(section[name]) || section[flag] && placeholderReason(section[name]))) throw new UsageError(`Turn ${id}.${name} needs a meaningful one-line reason.`);
   }
   return value; }
@@ -153,6 +157,12 @@ export async function recordTurn(root, session, turn, value) { return withTurnLo
   if ((renewed || state.epoch === state.userEpoch) && value?.continuation) throw new UsageError('A new user message or renewed feedback requires explicit decisions.');
   turnDecision(value, renewed && value && Object.keys(value).every(key => ['feedback', 'userCorrection'].includes(key)) ? required : checks);
   const requirements = value.requirements;
+  if (requirements?.changes && process.env.OPENROUTER_API_KEY) {
+    const screening = await screenSourceStatus(root);
+    if (screening.shareSource && !await matchingScreenRun(root, requirements.screenRun, session, turn, state.requirementsSince ?? 0)) {
+      throw new UsageError('Run the semantic screen through requirements-blast-radius with the current --session, then record requirements.screenRun from its result.');
+    }
+  }
   const foundation = requirements?.foundation;
   if (requirements?.changes && foundation === undefined) throw new UsageError('Classify requirements.foundation as false, pending, or a decision reference.');
   if (previous && previous.userEpoch === state.userEpoch && previous.value.requirements?.foundation && requirements && !foundation) {
@@ -430,7 +440,7 @@ async function completionEvent(event, reviewArchive) {
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
     const prior = event.turn_id ? currentDecision(await jsonFile(decisionPath(root, event.session_id, event.turn_id), null)) : null;
     fresh = !prior;
-    state = { harness: event.harness, reviewArchive, transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), learningFiles: await learningFiles(root), ...(await reviewSnapshot(root, base, policy)) };
+    state = { harness: event.harness, requirementsSince: Date.now(), reviewArchive, transcript_path: event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state?.transcript_path, turn: event.turn_id ?? randomUUID(), previousTurnId: state?.turn ?? null, epoch: prior?.epoch ?? 'initial', userEpoch: prior?.userEpoch, userDecisionIndex: prior?.userDecisionIndex ?? 0, initialMessagePending: !prior, promptCursor: state?.promptCursor, base, worktree: await worktreeFingerprint(root), learningFiles: await learningFiles(root), ...(await reviewSnapshot(root, base, policy)) };
     await atomicJson(statePath, state);
   }
   const context = recordContext.getStore();
@@ -454,7 +464,7 @@ async function completionEvent(event, reviewArchive) {
       }
       if (!fresh && checkpoint.userMessage && state.userEpoch !== `user-${checkpoint.userMessage}`) {
         const prior = currentDecision(await jsonFile(decisionPath(root, event.session_id, state.turn), null));
-        state.userEpoch = `user-${checkpoint.userMessage}`; state.epoch = state.userEpoch; if (context) context.epoch = state.epoch;
+        state.userEpoch = `user-${checkpoint.userMessage}`; state.requirementsSince = Date.now(); state.epoch = state.userEpoch; if (context) context.epoch = state.epoch;
         delete state.learningOutcome; delete state.learningRecorded; state.learningFiles = await learningFiles(root);
         state.userDecisionIndex = prior?.userEpoch === state.userEpoch ? prior.userDecisionIndex : prior?.decisions.length ?? 0;
         if (state.shellPending) state.shellPending = state.epoch;
@@ -579,7 +589,13 @@ async function handleWithEvidence(event, options) {
 export const main = async args => {
   const nativeHarness = args.length === 2 && args[0] === '--harness' && ['codex', 'claude'].includes(args[1]) ? args[1] : undefined;
   if (!args.length || nativeHarness) try { return await hookMain([], 'Hook', event => handleEvent(event, { harness: nativeHarness })); } catch (error) { console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); console.log('{}'); return 0; }
-  const opts = parseArgs(args, { flags: ['--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn', '--evidence'] });
+  const opts = parseArgs(args, { flags: ['--current-turn', '--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn', '--evidence'] });
+  if (opts['--current-turn'] && opts['--session'] && Object.keys(opts).every(key => ['_', '--current-turn', '--session'].includes(key)) && !opts._.length) {
+    const state = currentState(await readTurnState(await projectRoot('.'), opts['--session']));
+    if (!state) throw new UsageError('No matching active session for the requirements screen.');
+    console.log(JSON.stringify({ session: opts['--session'], turn: state.turn }));
+    return 0;
+  }
   if (opts['--record-turn'] && opts['--session'] && opts._.length === 0 && Object.keys(opts).every(key => ['_', '--record-turn', '--session', '--turn'].includes(key))) {
     let value; try { value = JSON.parse(opts['--record-turn'] === '-' ? readFileSync(0, 'utf8') : opts['--record-turn']); } catch { throw new UsageError('Turn decision must be JSON.'); }
     console.log(JSON.stringify(await recordTurn(await projectRoot('.'), opts['--session'], opts['--turn'], value))); return 0;
