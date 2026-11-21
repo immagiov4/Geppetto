@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.0
+
+- Mention unusual operation durations once per key and turn. Explicit expectations and approved thresholds take precedence over observed timings and cold-start floors.
+- Keep diagnoses and efficiency signals beside their timing evidence. Summarize elapsed time, recorded reviews and unusual operations after a successful GitHub PR creation or merge.
+- Migration: update both plugins and reapprove the Codex hooks. Existing timing rows remain readable and no new thresholds are installed.
+
 ## 0.18.0
 
 - Codex requires the outstanding decision, review or learning outcome on retries. A recorded and explained override is scoped to the current decision epoch.
