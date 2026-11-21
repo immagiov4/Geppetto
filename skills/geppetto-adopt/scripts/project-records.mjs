@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { run, rejectSymlinks } from './common.mjs';
 
-const journals = ['signals', 'turns', 'reviews', 'reads', 'hook-events', 'category-proposals'];
+const journals = ['signals', 'turns', 'reviews', 'reads', 'hook-events', 'category-proposals', 'metrics'];
 const digest = text => createHash('sha256').update(text).digest('hex');
 const lines = text => text.split('\n').filter(line => line.trim()).map(JSON.parse);
 

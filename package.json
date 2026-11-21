@@ -1,6 +1,6 @@
 {
   "name": "geppetto",
-  "version": "0.12.3",
+  "version": "0.13.0",
   "private": true,
   "license": "MIT",
   "description": "Portable engineering skills and deterministic gates",

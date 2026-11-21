@@ -1,3 +1,4 @@
+import { metricsAudit, printMetrics } from './metrics-audit.mjs';
 import { mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,10 +55,17 @@ async function verify(project) {
   } finally { await rm(temp, { recursive: true, force: true }); }
   return checks; }
 export async function main(args) {
-  const opts = parseArgs(args, { values: ['--project', '--since'], flags: ['--json', '--verify'] });
+  const opts = parseArgs(args, { values: ['--project', '--since', '--key'], flags: ['--json', '--verify', '--metrics'] });
   if (opts._.length) throw new UsageError('Usage: audit.mjs [--project <dir>] [--json] [--verify]');
   const project = resolve(opts['--project'] ?? '.');
   if (!await directory(project)) throw new Error(`${project}:1: Project directory does not exist`);
+  if (opts['--metrics']) {
+    const report = await metricsAudit(project, { since: opts['--since'], key: opts['--key'] });
+    if (opts['--json']) console.log(JSON.stringify(report, null, 2));
+    else printMetrics(report);
+    return 0;
+  }
+  if (opts['--key']) throw new UsageError('--key requires --metrics.');
   const config = await jsonFile(resolve(project, '.geppetto/config.json'), {}); const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json'), {});
   validateTurnPolicy(config);
   const turns = await localRecords(project, 'turns');
