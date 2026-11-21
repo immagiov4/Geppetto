@@ -12,3 +12,9 @@ Learning signals choose one primary problem category from project `categories`, 
 - **Correction rounds and satisfaction:** observed recurring corrections and user evidence. Separate a user's explicit preference from an inferred proxy for satisfaction; count independent episodes separately from attempts within one episode.
 
 Retain each comparison's inputs, versions, results and important limitations in the existing owner or external evidence artifact. Review metric value during periodic learning: keep, merge, revise or retire with a reason. Avoid creating a permanent dashboard for a single comparison unless it serves an agreed ongoing need.
+
+## Resource measurements
+
+Stop records three volume roles (project, home and OS temporary directory), the Git worktree count and aggregate resident bytes and counts for process families newly observed since SessionStart. Process presence is host-wide. The snapshot comparison cannot establish which session started a process. The hook excludes its ancestry and descendants and writes one diagnostic when a capture fails.
+
+The metrics audit sizes the common Git directory, registered worktrees, the Geppetto home directory, plugin caches and optional project-relative or absolute paths in `metrics.artifacts`. It totals logical file sizes and skips links. Registered worktrees inside a T3 project container contribute to one container total, with up to five largest direct child directories. Disk sizing shares a deadline across roots. A partial result identifies where the scan stopped and reports the bytes measured so far. The trend compares the current complete scan with the latest complete sample from the preceding seven-day window on the current host. GitHub PR rows include changed files, additions and deletions beside elapsed time. Weekly skill curation receives the same metrics report.

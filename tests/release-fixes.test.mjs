@@ -28,7 +28,8 @@ test('bad Stop configuration closes every delivery and logs its redacted error o
       assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), {});
     }
     const events = get(root, projectDataPath(root, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
-    assert.equal(events.length, 1); assert.match(events[0].error, /Invalid hooks.reviewGate/); assert.equal(events[0].status, 'error');
+    const completion = events.filter(event => event.hook === 'completion');
+    assert.equal(completion.length, 1); assert.match(completion[0].error, /Invalid hooks.reviewGate/); assert.equal(completion[0].status, 'error');
     const manual = invoke('hook.mjs', ['--record-turn', '{}', '--session', 'errors', '--turn', 'one'], { cwd: root }); assert.equal(manual.status, 2);
   }
 });

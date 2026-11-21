@@ -9,14 +9,10 @@ export function learningCommand(name) {
     for (const path of paths) if (existsSync(path)) return path.endsWith('.js') ? { executable: process.execPath, prefix: [path] } : { executable: path, prefix: [] };
   }
   return null; }
-function learningReferences() {
-  const root = fileURLToPath(new URL('../../', import.meta.url));
-  if (resolve(root, 'geppetto-adopt/scripts/learn-runner.mjs') !== fileURLToPath(import.meta.url) || !existsSync(resolve(root, 'geppetto-learn/SKILL.md'))) throw new Error('Run learning from the installed Geppetto package so its procedures are available.');
-  return root; }
-export async function executeLearning({ cwd, prompt, host, output = 'ignore', maintenance = false, telemetryRoot = cwd, session }) {
+export async function executeLearning({ cwd, prompt, host, output = 'ignore', maintenance = false }) {
   const command = learningCommand(host);
   if (!command) throw new Error(`Install ${host} CLI and sign in with your subscription account.`);
-  const tools = ['Read', 'Write', 'Edit', 'Glob', 'Grep', ...(maintenance ? ['MaintainEvidence'] : [])]; const server = { command: process.execPath, args: [fileURLToPath(new URL('./learner-tools.mjs', import.meta.url)), cwd, maintenance ? 'maintenance' : 'workspace-write', JSON.stringify(tools), learningReferences(), telemetryRoot, session ?? 'maintenance'] };
+  const tools = ['Read', 'Write', 'Edit', 'Glob', 'Grep', ...(maintenance ? ['MaintainEvidence'] : [])]; const server = { command: process.execPath, args: [fileURLToPath(new URL('./learner-tools.mjs', import.meta.url)), cwd, maintenance ? 'maintenance' : 'workspace-write', JSON.stringify(tools), fileURLToPath(new URL('../../', import.meta.url))] };
   const args = host === 'claude'
     ? ['-p', '--setting-sources', '', '--permission-mode', 'dontAsk', '--strict-mcp-config', '--mcp-config', JSON.stringify({ mcpServers: { geppetto_files: server } }), '--tools', '', '--allowedTools', ...tools.map(tool => `mcp__geppetto_files__${tool}`)]
     : ['exec', '--ignore-user-config', '--sandbox', 'read-only', '--config', 'forced_login_method="chatgpt"', '--config', 'approval_policy="never"', ...['shell_tool', 'multi_agent', 'multi_agent_v2', 'apps', 'plugins', 'browser_use', 'computer_use', 'image_generation', 'memories', 'code_mode', 'code_mode_only', 'skill_mcp_dependency_install'].flatMap(feature => ['--config', `features.${feature}=false`]), '--config', 'web_search="disabled"', '--config', `mcp_servers={geppetto_files={command=${JSON.stringify(server.command)},args=${JSON.stringify(server.args)},default_tools_approval_mode="approve"}}`, '-'];

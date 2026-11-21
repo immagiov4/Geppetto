@@ -1,6 +1,14 @@
-import { exists, run, UsageError } from './common.mjs';
-import { projectDataPath, projectRecords } from './project-records.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { redactValue } from './signal.mjs';
+import { resourceHost, sizeRoot } from './resource-metrics.mjs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { appendRecord, cli, exists, isMain, jsonFile, run, userHome, UsageError } from './common.mjs';
+import { projectDataPath, projectRecords, worktreePaths } from './project-records.mjs';
 
+const auditTimeout = 115000;
+const executeFile = promisify(execFile);
 const weekMs = 7 * 86400000;
 const sum = values => values.reduce((total, value) => total + value, 0);
 function distribution(values) {
@@ -32,11 +40,47 @@ const waitMs = (start, end) => {
   return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : null;
 };
 
-export async function metricsAudit(project, { since, key, now = Date.now(), execute = run } = {}) {
+async function auditSizes(project, rows, now, home) {
+  const { metrics } = await jsonFile(resolve(project, '.geppetto/config.json'), {});
+  const gitData = projectDataPath(project, '');
+  const gitRoots = gitData === resolve(project, '.geppetto') ? [] : [dirname(gitData), ...worktreePaths(project)];
+  const t3Root = resolve(home, '.t3/worktrees'), containers = new Set();
+  const individualRoots = gitRoots.filter(path => {
+    const relativePath = relative(t3Root, path);
+    const parts = relativePath.split(sep);
+    if (isAbsolute(relativePath) || parts.length < 2 || parts[0] === '..') return true;
+    containers.add(resolve(t3Root, parts[0]));
+    return false;
+  });
+  const roots = new Set([...individualRoots, ...containers,
+    resolve(home, '.geppetto'), resolve(home, '.codex/plugins/cache'), resolve(home, '.claude/plugins/cache'),
+    ...[process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR].filter(Boolean).map(path => resolve(path, 'plugins/cache')),
+    ...(metrics?.artifacts ?? []).map(path => resolve(project, path))]);
+  const ts = new Date(now).toISOString(), paths = [...roots].sort();
+  const deadline = performance.now() + 90000, sizes = new Array(paths.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    while (next < paths.length) {
+      const index = next++, path = paths[index];
+      const remaining = Math.floor(deadline - performance.now());
+      const result = remaining > 0 ? await sizeRoot(path, remaining, containers.has(path))
+        : { status: 'partial', bytes: 0, skipped: path, reason: 'deadline' };
+      sizes[index] = redactValue({ path, ...result });
+    }
+  }));
+  await appendRecord(project, 'metrics', { kind: 'resource', key: 'disk-size', host: resourceHost, ts, sizes });
+  const previous = new Map(rows.filter(row => row.key === 'disk-size' && row.host === resourceHost && Date.parse(row.ts) >= now - 2 * weekMs && Date.parse(row.ts) < now - weekMs)
+    .flatMap(row => row.sizes.filter(size => size.status === 'complete').map(size => [size.path, size.bytes])));
+  return sizes.map(size => ({ ...size, weekChangeBytes: size.status === 'complete' && previous.has(size.path) ? size.bytes - previous.get(size.path) : null }));
+}
+
+export async function metricsAudit(project, { since, key, now = Date.now(), execute = run, home = userHome() } = {}) {
   const start = since === undefined ? -Infinity : Date.parse(since);
   if (Number.isNaN(start)) throw new UsageError('--since must be an ISO date.');
   const metrics = await journal(project, 'metrics'), turns = await journal(project, 'turns');
-  const rows = metrics.rows.filter(row => Date.parse(row.ts) >= start && (!key || row.key === key));
+  const resources = metrics.rows.filter(row => row.kind === 'resource' && row.key === 'stop' && Date.parse(row.ts) >= start && (!key || row.key === key));
+  const sizes = key && key !== 'disk-size' ? [] : await auditSizes(project, metrics.rows, now, home).catch(error => [{ status: 'unavailable', reason: error.code ?? 'resource roots unavailable' }]);
+  const rows = metrics.rows.filter(row => row.kind !== 'resource' && Date.parse(row.ts) >= start && (!key || row.key === key));
   const groups = Map.groupBy(rows, row => row.key);
   const keys = [...groups].map(([key, group]) => {
     const times = group.map(row => row.durationMs);
@@ -55,17 +99,33 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
     return { ts: row.ts, turnId: row.turnId, sessionId: row.sessionId, durationMs: observed.length ? sum(observed) : null,
       decisions: observed.length, missing: waits.length - observed.length };
   }).sort((a, b) => (b.durationMs ?? -1) - (a.durationMs ?? -1));
-  const result = execute('gh', ['pr', 'list', '--state', 'merged', '--limit', '100', '--json', 'number,createdAt,mergedAt'], { cwd: project });
+  const result = execute('gh', ['pr', 'list', '--state', 'merged', '--limit', '100', '--json', 'number,createdAt,mergedAt,changedFiles,additions,deletions'], { cwd: project });
   let prs = null;
   if (result.status === 0) {
-    try { prs = JSON.parse(result.stdout).map(pr => ({ number: pr.number, ts: pr.mergedAt, durationMs: waitMs(pr.createdAt, pr.mergedAt) })); }
+    try { prs = JSON.parse(result.stdout).map(pr => ({ number: pr.number, ts: pr.mergedAt, changedFiles: pr.changedFiles ?? null, additions: pr.additions ?? null, deletions: pr.deletions ?? null, durationMs: waitMs(pr.createdAt, pr.mergedAt) })); }
     catch { /* An unreadable host response leaves coverage unknown. */ }
   }
   const prCycle = prs?.filter(row => Date.parse(row.ts) >= start) ?? [];
   return { project, since: since ?? null, key: key ?? null, keys, topTimeSinks,
     delegates: { wallMs: mergedWall(delegates), resourceMs: sum(delegates.map(row => row.durationMs)), count: delegates.length },
-    decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
+    resources, sizes, mergedPrs: prCycle, decisionWaits, prCycle: prs ? distribution(prCycle.flatMap(row => row.durationMs === null ? [] : [row.durationMs])) : null,
     coverage: { metrics: metrics.coverage, turns: turns.coverage, prs: { status: prs ? 'available' : 'unknown', observed: prs?.length ?? 0, limit: 100 } } };
+}
+
+export async function boundedMetricsAudit(project, { since, key } = {}) {
+  try {
+    const { stdout } = await executeFile(process.execPath,
+      [fileURLToPath(import.meta.url), project, JSON.stringify({ since, key })],
+      { timeout: auditTimeout, killSignal: 'SIGKILL', windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+    return JSON.parse(stdout);
+  } catch (error) {
+    if (error.code === 2) throw new UsageError(error.stderr.trim());
+    throw new Error(error.killed ? 'Metrics audit deadline exceeded.' : error.stderr?.trim() || 'Metrics audit failed.');
+  }
+}
+if (isMain(import.meta.url)) {
+  const [, , project, options] = process.argv;
+  await cli(async () => { console.log(JSON.stringify(await metricsAudit(project, JSON.parse(options)))); });
 }
 
 export function printMetrics(report) {
@@ -81,5 +141,8 @@ export function printMetrics(report) {
   console.log(`Delegate spans: ${delegates.count}, merged host wall ${delegates.wallMs} ms, summed resource ${delegates.resourceMs} ms`);
   console.log(`Decision waits: ${decisionWaits.length} recorded turns`);
   for (const row of decisionWaits.slice(0, 10)) console.log(`${row.ts} ${row.turnId}: ${row.durationMs === null ? 'unknown' : `${row.durationMs / 1000} s`} (${row.decisions} observed decisions, ${row.missing} missing)`);
+  for (const row of report.resources.slice(-10)) console.log(`Stop resources ${row.ts}: ${JSON.stringify({ worktreeCount: row.worktreeCount, volumes: row.volumes, processes: row.processes })}`);
+  for (const size of report.sizes) console.log(`Disk size: ${JSON.stringify(size)}`);
+  for (const pr of report.mergedPrs) console.log(`PR #${pr.number}: ${pr.durationMs ?? 'unknown'} ms, ${pr.changedFiles ?? '?'} files, +${pr.additions ?? '?'} -${pr.deletions ?? '?'}`);
   console.log(prCycle ? `Merged PR cycle: ${prCycle.count} observed, median ${prCycle.medianMs ?? 'unknown'} ms, p90 ${prCycle.p90Ms ?? 'unknown'} ms, max ${prCycle.maxMs ?? 'unknown'} ms` : 'Merged PR cycle: unknown');
 }

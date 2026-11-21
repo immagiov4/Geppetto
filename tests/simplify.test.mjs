@@ -19,7 +19,7 @@ test('two repositories reuse one machine hook set, memory and maintenance jobs',
   }
   const machine = JSON.parse(get(home, '.geppetto/machine.json'));
   assert.equal(Object.keys(machine.projects).length, 2);
-  assert.equal(Object.keys(machine.jobs).length, 3);
+  assert.deepEqual(Object.keys(machine.jobs).sort(), ['curate-skills', 'maintain-memory']);
   assert.equal(machine.memory.repo, memory);
   const hooks = JSON.parse(get(home, '.codex/hooks.json')).hooks;
   for (const groups of Object.values(hooks)) {

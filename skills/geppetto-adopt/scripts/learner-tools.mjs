@@ -38,7 +38,7 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
   const requestedRoot = resolve(root);
   root = await realpath(root);
   if (typeof args.path === 'string' && contained(requestedRoot, resolve(requestedRoot, args.path))) args = { ...args, path: resolve(root, relative(requestedRoot, resolve(requestedRoot, args.path))) };
-  const read = async path => { const text = redact(await readFile(path, 'utf8')); await logReads({ cwd: telemetry.root ?? root, session_id: telemetry.session ?? 'learner', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { path } }, { home: telemetry.home, readRoot: root, reference: telemetry.root && contained(root, path) ? gitOutput(root, ['rev-parse', 'HEAD']) : undefined }); return text; };
+  const read = async path => { const text = redact(await readFile(path, 'utf8')); await logReads({ cwd: telemetry.recordRevision ? requestedRoot : root, session_id: 'maintenance', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { path } }, { home: telemetry.home, readRoot: root, reference: telemetry.recordRevision && requestedRoot !== root && contained(root, path) ? gitOutput(root, ['rev-parse', 'HEAD']) : undefined }); return text; };
   if (name === 'MaintainEvidence') { if (!telemetry.maintenance || readOnly) throw new Error('Maintenance capability is unavailable'); await maintainEvidence(root, args); return 'Evidence maintenance saved'; }
   if (name === 'Read' && referenceRoot) {
     const requestedReference = resolve(referenceRoot);
@@ -63,16 +63,11 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
   const path = await learningFilePath(root, args.path);
   if (name === 'Read') return read(path);
   if (readOnly || !['Edit', 'Write'].includes(name)) throw new Error('Tool is unavailable in this learning phase');
-  let content;
-  if (name === 'Write') {
-    if (typeof args.content !== 'string') throw new Error('Write needs text content');
-    content = args.content;
-  } else {
-    if (typeof args.oldText !== 'string' || !args.oldText || typeof args.newText !== 'string') throw new Error('Edit needs oldText and newText');
-    const original = await readFile(path, 'utf8');
-    if (original.split(args.oldText).length !== 2) throw new Error('Edit requires exactly one matching occurrence');
-    content = original.replace(args.oldText, () => args.newText);
-  }
+  if (name === 'Write' && typeof args.content !== 'string') throw new Error('Write needs text content');
+  if (name === 'Edit' && (typeof args.oldText !== 'string' || !args.oldText || typeof args.newText !== 'string')) throw new Error('Edit needs oldText and newText');
+  const original = name === 'Edit' ? await readFile(path, 'utf8') : null;
+  if (original !== null && original.split(args.oldText).length !== 2) throw new Error('Edit requires exactly one matching occurrence');
+  const content = original === null ? args.content : original.replace(args.oldText, () => args.newText);
   await mkdir(dirname(path), { recursive: true }); await writeFile(path, content);
   return 'Saved project file'; }
 const schemas = JSON.parse(readFileSync(new URL('./learning-contracts.json', import.meta.url), 'utf8')).tools;
@@ -86,7 +81,7 @@ if (isMain(import.meta.url)) {
     else if (request.method === 'tools/call') {
       try {
         if (!allowed.includes(request.params.name)) throw new Error('Tool outside the configured selection');
-        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly, referenceRoot, { root: process.argv[6] ?? root, session: process.argv[7], maintenance: process.argv[3] === 'maintenance' }) }] };
+        result = { content: [{ type: 'text', text: await learningFileTool(root, request.params.name, request.params.arguments, readOnly, referenceRoot, { recordRevision: true, maintenance: process.argv[3] === 'maintenance' }) }] };
       }
       catch { result = { isError: true, content: [{ type: 'text', text: 'File operation rejected; verify the project path, tool and exact edit match.' }] }; }
     } else if (request.method === 'ping') result = {};

@@ -1,4 +1,4 @@
-import { metricsAudit, printMetrics } from './metrics-audit.mjs';
+import { boundedMetricsAudit, printMetrics } from './metrics-audit.mjs';
 import { mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,7 +60,7 @@ export async function main(args) {
   const project = resolve(opts['--project'] ?? '.');
   if (!await directory(project)) throw new Error(`${project}:1: Project directory does not exist`);
   if (opts['--metrics']) {
-    const report = await metricsAudit(project, { since: opts['--since'], key: opts['--key'] });
+    const report = await boundedMetricsAudit(project, { since: opts['--since'], key: opts['--key'] });
     if (opts['--json']) console.log(JSON.stringify(report, null, 2));
     else printMetrics(report);
     return 0;
