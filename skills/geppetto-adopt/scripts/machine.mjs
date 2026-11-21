@@ -40,7 +40,15 @@ async function attachJobs(machine, path, registry, { home, harness, source, jobs
     machine.jobs[name] = { ...previous, status: 'starting' };
     await atomicJson(path, machine);
     const osJob = ['windows-task-scheduler', 'cron'].includes(previous?.scheduler);
-    const attached = previous?.status === 'scheduled' && !osJob ? previous : jobs[name] ?? await scheduler(name, { home, host: previous?.host ?? harness, source });
+    let attached;
+    try { attached = previous?.status === 'scheduled' && !osJob ? previous : jobs[name] ??
+      await scheduler(name, { home, host: previous?.host ?? harness, source, previous }); }
+    catch (error) {
+      if (previous) machine.jobs[name] = previous;
+      else delete machine.jobs[name];
+      await atomicJson(path, machine);
+      throw error;
+    }
     machine.jobs[name] = { ...attached, source: `skills/geppetto-adopt/assets/templates/jobs/${name}.md`, status: attached ? 'scheduled' : 'needs-scheduler' };
     await atomicJson(path, machine);
     if (registry) await registry.update(rows => {
@@ -110,13 +118,18 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
       const settings = await jsonFile(hooksPath, {});
       const template = JSON.parse(await readFile(resolve(source.path, 'hooks/hooks.json'), 'utf8'));
       settings.hooks ??= {};
+      const commands = [];
       for (const [event, groups] of Object.entries(template.hooks)) {
         const kept = (settings.hooks[event] ?? []).map(group => ({ ...group, hooks: group.hooks.filter(hook => !machine.hooks[harness]?.commands?.includes(hook.command) && !/geppetto[^"\n]*[/\\](?:scripts|bin)[/\\]/i.test(hook.command ?? '')) })).filter(group => group.hooks.length);
-        const installed = groups.map(group => ({ ...group, hooks: group.hooks.map(hook => ({ ...hook, command: hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/')) })) }));
+        const installed = groups.map(group => ({ ...group, hooks: group.hooks.map(hook => {
+          const command = hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/')) + ' --harness ' + harness;
+          commands.push(command);
+          return { ...hook, command };
+        }) }));
         settings.hooks[event] = [...kept, ...installed];
       }
       await atomicJson(hooksPath, settings);
-      machine.hooks[harness] = { source: hooksPath, commands: Object.values(template.hooks).flatMap(groups => groups.flatMap(group => group.hooks.map(hook => hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/'))))) };
+      machine.hooks[harness] = { source: hooksPath, commands };
     }
     delete machine.jobs.learn;
     await refreshMaintenanceLauncher(home, source);

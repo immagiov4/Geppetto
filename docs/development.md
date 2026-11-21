@@ -13,6 +13,8 @@ Run `npm run check` for package integrity, router validation and behaviour tests
 
 Change a behaviour in the source file that already owns it. The owner table is the [system map](system-map.md). Keep user-facing documentation in English. An issue or pull request for new or changed behaviour includes Inspectability. Reviewers check that it explains how to inspect the behaviour and diagnose relevant failures. Before opening the PR, run `node skills/geppetto-adopt/scripts/gate-sections.mjs --pr <body-file>`. CI runs the same gate on the PR body. That check is separate from `npm run check`.
 
+For installed-version drift, use the [update diagnosis](../skills/geppetto-adopt/references/installation.md#update). Use the [metrics audit](../skills/geppetto-adopt/assets/templates/hooks/README.md#duration-metrics) to inspect runtime evidence for decisions, timing and pull requests.
+
 Tests use synthetic repositories and injected providers. Paid provider comparisons are separate from installation; preserve their measurements as evidence.
 Shell behaviour fixtures also require Git, Python and ripgrep; CI installs ripgrep explicitly and uses the runners' Git and Python.
 

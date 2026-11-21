@@ -36,7 +36,7 @@ test('declined answers turn off what an earlier installation started', async t =
 
   const cwd = fixture(t);
   for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) git(cwd, args);
-  put(cwd, 'README.md', '# Fixture'); put(cwd, '.geppetto/config.json', { ...config(), memory: { choice: 'none' }, hooks: { reviewGate: { enabled: false, benchmark: null }, learnNudge: { enabled: false }, signalLearning: { enabled: false } } });
+  put(cwd, 'README.md', '# Fixture'); put(cwd, '.geppetto/config.json', { ...config(), memory: { choice: 'none' }, turnChecks: [], hooks: { reviewGate: { enabled: false, benchmark: null }, learnNudge: { enabled: false }, signalLearning: { enabled: false } } });
   git(cwd, ['add', '.']); git(cwd, ['commit', '-qm', 'baseline']);
   const send = (kind, extra = {}) => handleEvent({ cwd, session_id: 's', turn_id: 't', hook_event_name: kind, ...extra });
   await send('UserPromptSubmit');

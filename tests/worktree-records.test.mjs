@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { symlink } from 'node:fs/promises';
-import { fixture, put, git } from './helpers.mjs';
+import { fixture, put, git, reviewFixture } from './helpers.mjs';
 import { appendRecord } from '../skills/geppetto-adopt/scripts/common.mjs';
 import { localRecords, signalArchive } from '../skills/geppetto-adopt/scripts/signal.mjs';
 
@@ -67,7 +67,9 @@ test('all journals survive deletion while review eligibility remains checkout-sp
 test('reusing a removed checkout path cannot inherit its archived review approval', async t => {
   const { root, other, check } = repositories(t);
   const content = Array.from({ length: 40 }, (_, i) => `export const x${i} = ${i};\n`).join('');
-  put(other, 'app.mjs', content); await recordReview(other, 'HEAD', 'passed');
+  put(other, 'app.mjs', content);
+  const evidence = reviewFixture(t, other);
+  await recordReview(other, 'HEAD', 'passed', { evidence, codexHome: resolve(evidence, '.codex') });
   check(root, ['worktree', 'remove', '--force', other]); check(root, ['worktree', 'add', '-q', other, 'other']);
   put(other, '.geppetto/config.json', { hooks: { signalLearning: { enabled: false }, learnNudge: { enabled: false } } });
   await handleEvent({ cwd: other, hook_event_name: 'UserPromptSubmit', session_id: 'replacement', turn_id: 'one' });

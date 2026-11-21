@@ -9,7 +9,54 @@ import { learningCommand, executeLearning } from './learn-runner.mjs';
 import { credentialAssignment, redact } from './signal.mjs';
 import { memorySettings } from './memory-config.mjs';
 export const maintenanceJobs = ['curate-skills', 'maintain-memory'];
-const cadence = 'weekly Monday 09:00 (local time)';
+const maintenanceWrapper = home => resolve(home, '.geppetto/maintenance.vbs');
+const windowsAction = 'wscript.exe';
+const windowsJobArguments = (home, name) => '"' + maintenanceWrapper(home) + '" ' + name;
+const windowsDay = 'Monday';
+const windowsTime = '09:00';
+const maintenanceLauncher = home => resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
+const cronInvocation = (home, name) => shQuote(process.execPath) + ' ' + shQuote(maintenanceLauncher(home)) + ' --run ' + name;
+const xmlEntities = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+export function maintenanceRegistrationStatus(name, job, { home = userHome(), execute = run } = {}) {
+  if (job?.status !== 'scheduled') return null;
+  const id = 'Geppetto-' + name;
+  if (job.scheduler === 'windows-task-scheduler') {
+    const query = execute('schtasks.exe', ['/Query', '/TN', id, '/XML'], { timeout: 2000 });
+    if (query.status !== 0) return 'missing';
+    const xml = query.stdout ?? '';
+    const disabled = /<Enabled>false<\/Enabled>/i.test(xml);
+    const elements = (input, tag) => Array.from(input.matchAll(new RegExp('<' + tag + '\\b[^>]*>([^]*?)</' + tag + '>', 'gi')),
+      match => match[1].trim().replace(/&(amp|lt|gt|quot|apos);/g, (_, entity) => xmlEntities[entity]));
+    const [actions, ...otherActions] = elements(xml, 'Actions');
+    const [action, ...otherExecutables] = elements(actions ?? '', 'Exec');
+    if (otherActions.length || otherExecutables.length || !action ||
+        elements(action, 'Command').join('').toLowerCase() !== windowsAction ||
+        elements(action, 'Arguments').join('').toLowerCase() !== windowsJobArguments(home, name).toLowerCase()) {
+      return 'action differs';
+    }
+    const [triggers] = elements(xml, 'Triggers');
+    const [trigger, ...otherTriggers] = elements(triggers ?? '', 'CalendarTrigger');
+    const boundary = trigger && elements(trigger, 'StartBoundary')[0];
+    const dayPattern = new RegExp('^<' + windowsDay + '\\s*/>$', 'i');
+    if (!trigger || otherTriggers.length ||
+        /<(?:TimeTrigger|BootTrigger|LogonTrigger|EventTrigger|SessionStateChangeTrigger|IdleTrigger|RegistrationTrigger)\b/i.test(triggers) ||
+        elements(trigger, 'WeeksInterval').join() !== '1' ||
+        !dayPattern.test(elements(trigger, 'DaysOfWeek')[0] ?? '') ||
+        boundary?.slice(11, 16) !== windowsTime) return 'cadence differs';
+    return disabled ? 'disabled' : 'scheduled';
+  }
+  if (job.scheduler === 'cron') {
+    const list = execute('crontab', ['-l'], { timeout: 2000 });
+    const owned = list.status === 0 ? list.stdout.split(/\r?\n/).filter(line =>
+      !line.trimStart().startsWith('#') && line.endsWith('# ' + id)) : [];
+    if (!owned.length) return 'missing';
+    const invocation = owned[0].trim().replace(/^(?:\S+\s+){5}/, '');
+    return owned.length === 1 && invocation === cronInvocation(home, name) + ' # ' + id ? 'scheduled' : 'action differs';
+  }
+  return job.id ? 'registered externally' : 'missing';
+}
+const cadence = 'weekly ' + windowsDay + ' ' + windowsTime + ' (local time)';
 const cronCadence = '0 9 * * 1';
 const psQuote = text => `'${text.replaceAll("'", "''")}'`;
 const shQuote = text => `'${text.replaceAll("'", "'\\''")}'`;
@@ -96,7 +143,7 @@ function nextWeeklyRun(expression) {
   if (next <= now) next.setDate(next.getDate() + 7);
   return next.toISOString(); }
 /** Inspect or attach one OS job; native harness jobs are supplied by adoption first. */
-export async function scheduleMaintenance(name, { home = userHome(), host, source, platform = process.platform, execute = run, command = learningCommand(host) }) {
+export async function scheduleMaintenance(name, { home = userHome(), host, source, platform = process.platform, execute = run, command = learningCommand(host), previous }) {
   if (!maintenanceJobs.includes(name)) throw new Error('Unknown maintenance job');
   const script = await refreshMaintenanceLauncher(home, source); const id = `Geppetto-${name}`;
   if (platform === 'win32') {
@@ -104,7 +151,7 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
     if (available.error?.code === 'ENOENT') return null;
     if (available.status !== 0) throw new Error('Windows Task Scheduler is unavailable; inspect PowerShell ScheduledTasks support.');
     if (!command) throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
-    const launcher = resolve(home, '.geppetto/maintenance.vbs');
+    const launcher = maintenanceWrapper(home);
     await mkdir(resolve(home, '.geppetto'), { recursive: true });
     const action = `"${process.execPath}" "${script}" --run `;
     await writeFile(launcher, `job = "unknown"
@@ -123,15 +170,29 @@ If Err.Number <> 0 Then
 End If
 WScript.Quit status
 `);
-    const args = `"${launcher}" ${name}`; const code = `$ErrorActionPreference='Stop'; $id=${psQuote(id)}; $task=Get-ScheduledTask -TaskName $id -ErrorAction SilentlyContinue; if ($task) { if ($task.Actions.Execute -ne 'wscript.exe' -or $task.Actions.Arguments -ne ${psQuote(args)}) { throw 'Existing task has a different action; reconcile it before adoption' } } else { $action=New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ${psQuote(args)}; $trigger=New-ScheduledTaskTrigger -Weekly -DaysOfWeek Monday -At '09:00'; $settings=New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable; $task=Register-ScheduledTask -TaskName $id -Action $action -Trigger $trigger -Settings $settings }; $info=Get-ScheduledTaskInfo -TaskName $id; @{id=$id;nextRun=$info.NextRunTime.ToString('o')} | ConvertTo-Json -Compress`; const result = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
+    const args = windowsJobArguments(home, name);
+    const owned = previous?.id === id && previous.scheduler === 'windows-task-scheduler';
+    const observed = owned && maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute });
+    const reconcile = ['action differs', 'cadence differs'].includes(observed);
+    const enable = observed === 'disabled';
+    const replacement = reconcile ? 'Set-ScheduledTask -TaskName $id -Action $action -Trigger $trigger | Out-Null;'
+      : '';
+    const code = `$ErrorActionPreference='Stop'; $id=${psQuote(id)}; $task=Get-ScheduledTask -TaskName $id -ErrorAction SilentlyContinue; $action=New-ScheduledTaskAction -Execute '${windowsAction}' -Argument ${psQuote(args)}; $trigger=New-ScheduledTaskTrigger -Weekly -DaysOfWeek ${windowsDay} -At '${windowsTime}'; if ($task) { ${replacement} if (!$task.Actions.Count -or $task.Actions.Count -ne 1 -or ('${reconcile}' -eq 'false' -and ($task.Actions.Execute -ne '${windowsAction}' -or $task.Actions.Arguments -ne ${psQuote(args)}))) { throw 'Existing task action changed during reconciliation' }; if ('${enable}' -eq 'true') { Enable-ScheduledTask -TaskName $id | Out-Null } } else { $settings=New-ScheduledTaskSettingsSet -Hidden -StartWhenAvailable; $task=Register-ScheduledTask -TaskName $id -Action $action -Trigger $trigger -Settings $settings }; $info=Get-ScheduledTaskInfo -TaskName $id; @{id=$id;nextRun=$info.NextRunTime.ToString('o')} | ConvertTo-Json -Compress`; const result = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')]);
     if (result.status !== 0) throw new Error(`Windows maintenance registration failed: ${result.stderr?.trim() || result.error?.message}`);
+    if (reconcile || enable) {
+      const verified = maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute });
+      if (reconcile && verified === 'disabled') {
+        return scheduleMaintenance(name, { home, host, source, platform, execute, command, previous });
+      }
+      if (verified !== 'scheduled') throw new Error('Updated Windows maintenance task did not pass verification.');
+    }
     const registered = JSON.parse(result.stdout);
     return { ...registered, scheduler: 'windows-task-scheduler', cadence, disable: `schtasks.exe /Change /TN ${id} /DISABLE`, status: 'scheduled', host };   }
   const listed = execute('crontab', ['-l']);
   if (listed.error?.code === 'ENOENT') return null;
   if (listed.status !== 0 && !/no crontab/i.test(listed.stderr ?? '')) throw new Error(`Cannot inspect crontab: ${listed.stderr?.trim()}`);
   if (!command) throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
-  const marker = `# ${id}`; const existing = (listed.stdout ?? '').split('\n').find(line => line.endsWith(marker)); const invocation = `${shQuote(process.execPath)} ${shQuote(script)} --run ${name}`; const expression = existing?.trim().split(/\s+/).slice(0, 5).join(' ') || cronCadence;
+  const marker = `# ${id}`; const existing = (listed.stdout ?? '').split('\n').find(line => line.endsWith(marker)); const invocation = cronInvocation(home, name); const expression = existing?.trim().split(/\s+/).slice(0, 5).join(' ') || cronCadence;
   const nextRun = nextWeeklyRun(expression); const entry = `${expression} ${invocation} ${marker}`; const lines = (listed.stdout ?? '').split('\n'); const owned = lines.filter(line => line.endsWith(marker));
   if (owned.length !== 1 || existing !== entry) {
     const kept = lines.filter(line => !line.endsWith(marker)).join('\n'); const result = execute('crontab', ['-'], { input: `${kept}${kept.endsWith('\n') ? '' : '\n'}${entry}\n` });

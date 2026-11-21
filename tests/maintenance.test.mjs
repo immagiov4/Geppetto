@@ -70,6 +70,34 @@ test('Windows scheduling reuses or registers a hidden weekly task and records it
   await assert.rejects(scheduleMaintenance('curate-skills', { home, host: 'codex', source: { path: repo }, platform: 'win32', command: {}, execute: (_binary, args) => args.includes('-EncodedCommand') ? { status: 1, stderr: 'fixture registration failure' } : { status: 0 } }), /registration failure/);
 });
 
+
+test('a disabled owned Windows task is repaired and verified before enabling', async t => {
+  const home = fixture(t), mutations = [];
+  const name = 'curate-skills';
+  let disabled = true, valid = false;
+  const execute = (program, args) => {
+    if (program === 'schtasks.exe') return { status: 0, stdout:
+      '<Task><Triggers><CalendarTrigger><StartBoundary>2026-11-21T09:00:00</StartBoundary>' +
+      '<ScheduleByWeek><WeeksInterval>1</WeeksInterval><DaysOfWeek><Monday /></DaysOfWeek></ScheduleByWeek>' +
+      '</CalendarTrigger></Triggers><Actions Context="Author"><Exec><Command>wscript.exe</Command><Arguments>"' +
+      resolve(home, '.geppetto/' + (valid ? 'maintenance.vbs' : 'stale.vbs')) + '" ' + name +
+      '</Arguments></Exec></Actions>' + (disabled ? '<Settings><Enabled>false</Enabled></Settings>' : '') + '</Task>' };
+    if (!args.includes('-EncodedCommand')) return { status: 0 };
+    const ps = Buffer.from(args.at(-1), 'base64').toString('utf16le');
+    if (ps.includes('Set-ScheduledTask -TaskName')) { mutations.push('repaired'); valid = true; }
+    if (ps.includes("'true' -eq 'true') { Enable-ScheduledTask")) {
+      assert.ok(valid, 'activation would launch an unverified task');
+      mutations.push('enabled');
+      disabled = false;
+    }
+    return { status: 0, stdout: JSON.stringify({ id: 'Geppetto-' + name, nextRun: '2026-11-23T09:00:00' }) };
+  };
+  const job = await scheduleMaintenance(name, { home, host: 'codex', source: { path: repo }, platform: 'win32', execute,
+    command: {}, previous: { id: 'Geppetto-' + name, scheduler: 'windows-task-scheduler' } });
+  assert.equal(job.status, 'scheduled');
+  assert.deepEqual(mutations, ['repaired', 'enabled']);
+});
+
 test('cron attachment preserves unrelated entries and reuses its own job without duplication', async t => {
   const home = fixture(t); let cron = '0 12 * * * echo unrelated\n', writes = 0;
   const execute = (_binary, args, options) => {
@@ -178,6 +206,13 @@ for (const platform of ['win32', 'linux']) test(`${platform} maintenance launche
     if (platform === 'linux') {
       if (args[0] === '-l') return { status: 0, stdout: cron };
       cron = opts.input; return { status: 0 };
+    }
+    if (_binary === 'schtasks.exe') {
+      if (!windowsTasks.has(args[2])) return { status: 1 };
+      return { status: 0, stdout: '<Task><Triggers><CalendarTrigger><StartBoundary>2026-11-21T09:00:00</StartBoundary>' +
+        '<ScheduleByWeek><WeeksInterval>1</WeeksInterval><DaysOfWeek><Monday /></DaysOfWeek></ScheduleByWeek>' +
+        '</CalendarTrigger></Triggers><Actions Context="Author"><Exec><Command>wscript.exe</Command><Arguments>"' +
+        resolve(home, '.geppetto/maintenance.vbs') + '" ' + name + '</Arguments></Exec></Actions></Task>' };
     }
     if (!args.includes('-EncodedCommand')) return { status: 0 };
     const id = `Geppetto-${name}`; windowsTasks.add(id); registrations++;

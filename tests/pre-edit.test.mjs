@@ -5,6 +5,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fixture, put, get, git, invoke, config, restoreEnv } from './helpers.mjs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 const decision = { requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false } };
 function project(t, settings = {}, nested = false) {
@@ -233,7 +234,17 @@ test('a declared pending foundation blocks repeated edits until its decision is 
   assert.equal(record({ ...pending, requirements: { changes: true, what: pending.requirements.what } }).status, 2);
   assert.equal(record({ ...pending, requirements: { ...pending.requirements, foundation: "docs/system-map.md" } }).status, 2);
   const adr = 'docs/adr/001-record-format.md';
-  const approvedDecision = '# Record format\nUse versioned JSON records.';
+  const approvedDecision = [
+    '# Record format',
+    '## Subject', pending.requirements.what,
+    '## Approval', 'The user chose JSON in the design turn after comparing both options.',
+    '## Decision', 'Use versioned JSON records.',
+    '## Alternatives',
+    '### JSON', '- Pros: Readable with existing tools.', '- Cons: Needs one writer.', '- Risks: Interrupted writes require atomic replacement.',
+    '### SQLite', '- Pros: Coordinates writers.', '- Cons: Requires SQL tooling.', '- Risks: Migration locks can delay other readers.',
+    '## Assumption', 'Concurrent edits remain confined to one process.',
+    '## Inspectability', 'Log rejected writes and count concurrently active writers.',
+  ].join('\n');
   const approval = { ...pending, requirements: { ...pending.requirements, foundation: { adr, approvedDecision } } };
   assert.equal(record(approval).status, 0);
   assert.equal(record(approval).status, 0);
@@ -243,4 +254,38 @@ test('a declared pending foundation blocks repeated edits until its decision is 
   await send('UserPromptSubmit', { turn_id: 'local' });
   assert.equal(record(decision, 'session', 'local').status, 0);
   assert.ok(!denied(await edit({ turn_id: 'local' })));
+});
+
+test('a pending decision cannot be cleared by a placeholder or unrelated ADR', async t => {
+  const { cwd, send, edit, record } = project(t);
+  const pending = { ...decision, requirements: { changes: true, what: 'Define a persistent record schema', foundation: 'pending' } };
+  await send('UserPromptSubmit');
+  assert.equal(record(pending).status, 0);
+  const adr = 'docs/adr/001-record-format.md';
+  assert.equal(record({ ...pending, requirements: { ...pending.requirements, foundation: { adr, approvedDecision: 'for now' } } }).status, 2);
+  put(cwd, adr, '# Another choice\nUse local cache.');
+  assert.equal(record({ ...pending, requirements: { ...pending.requirements, foundation: adr } }).status, 2);
+  assert.ok(denied(await edit()));
+});
+
+
+test('a scoped pending foundation blocks its own paths and permits a known unrelated edit', async t => {
+  const { cwd, send, edit, record } = project(t);
+  await send('UserPromptSubmit');
+  assert.equal(record({ ...decision, requirements: { changes: true, what: 'Define stored records',
+    foundation: { pending: ['src/records/**'] } } }).status, 0);
+  assert.ok(!denied(await edit({ tool_input: { file_path: 'README.md' } })));
+  assert.ok(!denied(await edit({ tool_name: 'move_file', tool_input: { source: 'README.md', destination: 'docs/readme.md' } })));
+  assert.ok(denied(await edit({ tool_name: 'move_file', tool_input: { source: 'README.md', destination: 'src/records/readme.md' } })));
+  assert.ok(denied(await edit({ tool_input: { file_path: 'src/records/store.mjs' } })));
+  assert.ok(denied(await edit({ tool_name: 'apply_patch', tool_input: {} })));
+  put(cwd, 'src/records/store.mjs', 'export const records = [];');
+  await send('PostToolUse', { tool_name: 'exec_command', tool_input: { command: 'opaque tool' } });
+  const rows = get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
+  assert.equal(rows.findLast(row => row.status === 'observed-edit').disposition, 'unchecked');
+  const script = fileURLToPath(new URL('../skills/geppetto-adopt/scripts/hook.mjs', import.meta.url)).replaceAll('\\', '/');
+  const recordCommand = 'node "' + script + '" --record-turn \'{}\' --session "session" --turn "turn"';
+  assert.ok(!denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand } })));
+  assert.ok(!denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand.replace(' --turn "turn"', '') } })));
+  assert.ok(denied(await edit({ tool_name: 'exec_command', tool_input: { command: recordCommand + '; Write-Output later' } })));
 });

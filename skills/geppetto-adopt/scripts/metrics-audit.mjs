@@ -83,6 +83,17 @@ function gateCompliance(journals, start) {
   return [...byHost].map(([hostKey, entries]) => {
     const [host, harness] = JSON.parse(hostKey);
     const identifiable = entries.filter(({ row }) => row.host && row.harness && row.sessionId && row.turnId && row.epoch);
+    const all = entries.map(({ row }) => row);
+    const evaluationFailures = all.filter(row => row.hook === 'completion' && row.status === 'error');
+    const observedTurns = rows => new Set(rows.filter(row => row.sessionId && row.turnId)
+      .map(row => JSON.stringify([row.sessionId, row.turnId])));
+    const stopGate = row => ['learningGate', 'reviewGate'].includes(row.hook);
+    const deniedTurns = observedTurns(all.filter(row => stopGate(row) && row.disposition === 'denied'));
+    const turnsFollowingDenial = observedTurns(all.filter(row => row.previousTurnId &&
+      deniedTurns.has(JSON.stringify([row.sessionId, row.previousTurnId])))).size;
+    const eligibleEditTurns = observedTurns(all.filter(row => row.edited === true || row.eligibleEdit ||
+      row.hook === 'turnGate' && ['allow', 'block', 'observed-edit'].includes(row.status))).size;
+    const eligibleStopTurns = observedTurns(all.filter(row => stopGate(row) || row.hook === 'completion' && row.phase === 'Stop')).size;
     const byEpoch = Map.groupBy(identifiable, ({ row }) => JSON.stringify([row.sessionId, row.turnId, row.epoch]));
     let joined = 0, checkedEdits = 0, uncheckedEdits = 0, editOverrides = 0;
     let editEpochs = 0, stopEpochs = 0, unresolvedStops = 0, stopRetries = 0, stopOverrides = 0;
@@ -102,7 +113,10 @@ function gateCompliance(journals, start) {
         .includes(stops.findLast(row => row.hook === hook)?.disposition))) unresolvedStops++;
     }
     return { host, harness, records: entries.length, identifiable: identifiable.length, joined,
-      editEpochs, checkedEdits, uncheckedEdits, editOverrides, stopEpochs, unresolvedStops, stopRetries, stopOverrides };
+      editEpochs, checkedEdits, uncheckedEdits, editOverrides, stopEpochs, unresolvedStops, stopRetries, stopOverrides,
+      eligibleEditTurns, eligibleStopTurns, turnsFollowingDenial, failedEvaluations: evaluationFailures.length,
+      unjoinedEvaluations: evaluationFailures.filter(row => !(row.sessionId && row.turnId && row.epoch)).length,
+      externalReviews: all.filter(row => row.provenance === 'external').length };
   }).sort((a, b) => String(a.host).localeCompare(String(b.host)) || String(a.harness).localeCompare(String(b.harness)));
 }
 
@@ -117,10 +131,12 @@ export async function metricsAudit(project, { since, key, now = Date.now(), exec
   const observed = metrics.rows.filter(row => Date.parse(row.ts) >= start && (!key || row.key === key));
   const rows = observed.filter(timedMetric);
   const reminderId = row => JSON.stringify([row.sessionId, row.turnId, row.key]);
-  const diagnosed = new Set(metrics.rows.filter(row => row.kind === 'diagnosis').map(reminderId));
+  const diagnosed = new Set(metrics.rows.filter(row => row.kind === 'diagnosis' && row.evidence).map(reminderId));
   const delivered = observed.filter(row => row.kind === 'reminder');
+  const historical = new Set(metrics.rows.filter(row => row.kind === 'diagnosis' && !row.evidence).map(reminderId));
   const matched = delivered.filter(row => diagnosed.has(reminderId(row))).length;
-  const reminders = { delivered: delivered.length, diagnosed: matched, pending: delivered.length - matched };
+  const legacy = delivered.filter(row => historical.has(reminderId(row)) && !diagnosed.has(reminderId(row))).length;
+  const reminders = { emitted: delivered.length, diagnosed: matched, pending: delivered.length - matched - legacy, ...(legacy && { legacy }) };
   const groups = Map.groupBy(rows, row => row.key);
   const keys = [...groups].map(([key, group]) => {
     const times = group.map(row => row.durationMs);
@@ -179,7 +195,8 @@ export function printMetrics(report) {
   for (const row of report.compliance) {
     console.log(`Gate evidence ${row.host ?? 'unknown host'}/${row.harness ?? 'unknown harness'}: ${row.joined}/${row.records} linked (${row.identifiable} identifiable), ${row.uncheckedEdits} unchecked edits across ${row.editEpochs} edit epochs, ${row.unresolvedStops}/${row.stopEpochs} unresolved Stop epochs, ${row.stopRetries} retry attempts, ${row.editOverrides} edit and ${row.stopOverrides} Stop overrides`);
   }
-  if (report.reminders.delivered) console.log(`Timing reminders: ${report.reminders.diagnosed}/${report.reminders.delivered} diagnosed; ${report.reminders.pending} pending`);
+  for (const row of report.compliance) console.log(`Gate coverage ${row.host ?? 'unknown host'}/${row.harness ?? 'unknown harness'}: ${row.eligibleEditTurns} eligible edit turns, ${row.eligibleStopTurns} eligible Stop turns, ${row.turnsFollowingDenial} recorded turns following a denial, ${row.failedEvaluations} evaluation errors (${row.unjoinedEvaluations} without epoch identity), ${row.externalReviews} external reviews`);
+  if (report.reminders.emitted) console.log(`Timing reminders: ${report.reminders.diagnosed}/${report.reminders.emitted} diagnosed; ${report.reminders.pending} pending`);
   for (const sink of report.topTimeSinks) console.log(`Time sink ${sink.key}: ${sink.wallMs} ms wall, ${sink.resourceMs} ms summed`);
   const { delegates, decisionWaits, prCycle } = report;
   console.log(`Delegate spans: ${delegates.count}, merged host wall ${delegates.wallMs} ms, summed resource ${delegates.resourceMs} ms`);

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { fixture, put, get, git, invoke, config, repo } from './helpers.mjs';
+import { fixture, put, get, git, invoke, config, repo, invokeReview } from './helpers.mjs';
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
 
 
@@ -59,20 +59,20 @@ test('fresh clone updates an exactly generated workflow pin but preserves user e
 });
 
 test('tracked diffs over one MiB remain gated, recordable and invalidated by further source edits', async t => {
-  const root = project(t), event = { cwd: root, session_id: 'large', turn_id: 'one' };
-  await handleEvent({ ...event, hook_event_name: 'UserPromptSubmit' });
+  const root = project(t), nativeHome = fixture(t), event = { cwd: root, session_id: 'large', turn_id: 'one' };
+  await handleEvent({ ...event, hook_event_name: 'UserPromptSubmit' }, { codexHome: nativeHome });
   assert.equal(invoke('hook.mjs', ['--record-turn', JSON.stringify(decision), '--session', event.session_id, '--turn', event.turn_id], { cwd: root }).status, 0);
   const source = Array.from({ length: 40000 }, (_, i) => `export const syntheticValue${i} = ${i};\n`).join(''); put(root, 'app.mjs', source);
   const bytes = git(root, ['diff', '--binary', 'HEAD'], { maxBuffer: 8 * 1024 * 1024 }).stdout; assert.ok(Buffer.byteLength(bytes) > 1024 * 1024);
   const stop = () => invoke('hook.mjs', [], { cwd: root, input: JSON.stringify({ ...event, hook_event_name: 'Stop' }) });
   let result = stop(); assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).decision, 'block');
-  result = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed'], { cwd: root }); assert.equal(result.status, 0, result.stderr);
+  result = invokeReview(t, root, 'passed', event.session_id, event.turn_id, nativeHome); assert.equal(result.status, 0, result.stderr);
   const hash = JSON.parse(result.stdout).hash;
   assert.equal(hash, createHash('sha256').update(bytes).digest('hex'));
   result = stop(); assert.equal(result.status, 0, result.stderr); assert.deepEqual(JSON.parse(result.stdout), {});
   assert.equal(JSON.parse(get(root, projectDataPath(root, 'turns.jsonl'))).review.status, 'reviewed');
   put(root, 'app.mjs', source + 'export const changed = true;\n');
-  result = invoke('hook.mjs', ['--record-review', '--base', 'HEAD', '--outcome', 'passed'], { cwd: root }); assert.equal(result.status, 0, result.stderr); assert.notEqual(JSON.parse(result.stdout).hash, hash);
+  result = invokeReview(t, root, 'passed', event.session_id, event.turn_id, nativeHome); assert.equal(result.status, 0, result.stderr); assert.notEqual(JSON.parse(result.stdout).hash, hash);
 });
 
 test('SessionStart supplies a resolved command and minimal schema once, so an ordinary first turn closes without a block', async t => {
