@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.0
+
+- Publish memory commits to their Git remote as soon as they are saved. Preserve existing commit hooks and report any push failure with recovery instructions.
+
 ## 0.14.0
 
 - Record available and total disk space, Git worktree count and resident memory of new processes at Stop.
