@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.0
+
+- Discuss and record foundational design choices before implementation. The edit gate keeps a declared pending foundation blocked until a configuration decision or an architectural decision record is available.
+- Design shared diagnostics up front, then add feature views to that shared design.
+
 ## 0.15.0
 
 - Publish memory commits to their Git remote as soon as they are saved. Preserve existing commit hooks and report any push failure with recovery instructions.

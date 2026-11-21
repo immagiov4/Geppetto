@@ -2,7 +2,7 @@
   "checks": [
     {
       "id": "requirements",
-      "question": "Does this software product request substantially change behavior or agreed requirements? Exclude tiny localized edits, standalone documentary research, prose work and tasks unrelated to product development.",
+      "question": "Does this software product request substantially change behavior or agreed requirements? Also check whether this work introduces or changes a foundation under geppetto-spec. Exclude tiny localized edits, standalone documentary research, prose work and tasks unrelated to product development.",
       "skill": "requirements-blast-radius"
     },
     {

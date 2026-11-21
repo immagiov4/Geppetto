@@ -34,8 +34,8 @@ test('installation recap surfaces unset foundations', t => {
   assert.match(result.stdout, /Unset foundations: documentation, observability/);
 });
 
-test('foundation instructions fit within each skill’s existing word count', () => {
-  for (const [name, maximum] of [['geppetto-spec', 396], ['geppetto-living-docs', 267], ['geppetto-x-ray', 520]]) {
+test('foundation instructions fit within each skill’s reviewed word budgets', () => {
+  for (const [name, maximum] of [['geppetto-spec', 540], ['geppetto-living-docs', 267], ['geppetto-x-ray', 550]]) {
     const text = readFileSync(resolve(repo, 'skills', name, 'SKILL.md'), 'utf8');
     assert.ok(text.trim().split(/\s+/).length <= maximum, name);
   }

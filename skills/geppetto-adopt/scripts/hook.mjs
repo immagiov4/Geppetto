@@ -1,7 +1,7 @@
 import { captureResources } from './resource-metrics.mjs';
 import { readFileSync } from 'node:fs';
 import { readFile, writeFile, unlink, lstat, mkdir } from 'node:fs/promises';
-import { resolve, relative, matchesGlob } from 'node:path';
+import { resolve, relative, matchesGlob, dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -92,7 +92,7 @@ async function sessionStart(event, options) {
   try { await logHookEvent(root, { hook: 'turnContext', status: 'injected', injectedBytes: Buffer.byteLength(text), modelCalls: 0 }, event); }
   catch (error) { await unlink(`${turnStatePath(root, event.session_id)}.startup`); throw error; }
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [memory.hookSpecificOutput?.additionalContext, text].filter(Boolean).join('\n') } }; }
-const foundationReminder = 'Resolve foundations.documentation for documentation design and foundations.observability for new or changed behaviour through $geppetto-spec. Reuse existing conventions; ask before creating one.';
+const foundationReminder = 'Resolve foundations.documentation for documentation design and foundations.observability for new or changed behaviour through $geppetto-spec. For every new or changed foundation, apply $geppetto-spec and set requirements.foundation to pending until the user decision is recorded. Then supply its foundations.<key> or project-relative Markdown decision record in an adr/ directory. For substantial work with no foundation, set requirements.foundation to false.';
 const recordCommand = (session, turn) => `node "${fileURLToPath(import.meta.url).replaceAll('\\', '/')}" --record-turn '<json>' --session ${JSON.stringify(session)}${turn ? ` --turn ${JSON.stringify(turn)}` : ''}`;
 function turnDecision(value, checks) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new UsageError('Turn decision must be an object.');
@@ -101,7 +101,7 @@ function turnDecision(value, checks) {
   if (Object.keys(value).some(key => key !== 'userCorrection' && !checks.some(check => check.id === key)) || checks.some(check => !Object.hasOwn(value, check.id))) throw new UsageError(`Turn decision needs ${checks.map(check => check.id).join(', ')}; review is filled by the gate.`);
   for (const { id } of checks) {
     const [flag, ...reasons] = decisionFields(id), section = value[id];
-    if (!section || typeof section[flag] !== 'boolean' || Object.keys(section).some(name => ![flag, ...reasons].includes(name))) throw new UsageError(`Turn ${id}.${flag} must be boolean with its declared fields.`);
+    if (!section || typeof section[flag] !== 'boolean' || Object.keys(section).some(name => ![flag, ...reasons, ...(id === 'requirements' ? ['foundation'] : [])].includes(name))) throw new UsageError(`Turn ${id}.${flag} must be boolean with its declared fields.`);
     for (const name of reasons) if ((section[flag] || name in section) && (typeof section[name] !== 'string' || /[\r\n]/.test(section[name]) || section[flag] && placeholderReason(section[name]))) throw new UsageError(`Turn ${id}.${name} needs a meaningful one-line reason.`);
   }
   return value; }
@@ -112,11 +112,56 @@ export async function recordTurn(root, session, turn, value) { return withTurnLo
   const { checks } = turnPolicy(await jsonFile(resolve(root, '.geppetto/config.json'), {})); const path = decisionPath(root, session, turn), previous = currentDecision(await jsonFile(path, null)), renewed = state.epoch !== 'initial' && state.epoch !== state.userEpoch && previous !== null; const required = renewed ? checks.filter(check => check.id === 'feedback') : checks;
   if ((renewed || state.epoch === state.userEpoch) && value?.continuation) throw new UsageError('A new user message or renewed feedback requires explicit decisions.');
   turnDecision(value, renewed && value && Object.keys(value).every(key => ['feedback', 'userCorrection'].includes(key)) ? required : checks);
+  const requirements = value.requirements;
+  const foundation = requirements?.foundation;
+  if (requirements?.changes && foundation === undefined) throw new UsageError('Classify requirements.foundation as false, pending, or a decision reference.');
+  if (previous && previous.userEpoch === state.userEpoch && previous.value.requirements?.foundation && requirements && !foundation) {
+    throw new UsageError('Resolve the declared foundation with a recorded decision before editing.');
+  }
+  if (foundation && typeof foundation === 'object') {
+    const { adr, approvedDecision } = foundation;
+    if (!adrReference(adr) || typeof approvedDecision !== 'string' || !approvedDecision.trim()) {
+      throw new UsageError('Supply an adr/ Markdown path and the user-approved decision text.');
+    }
+    const destination = resolve(root, adr);
+    await rejectSymlinks(destination);
+    await mkdir(dirname(destination), { recursive: true });
+    const contents = approvedDecision + '\n';
+    try { await writeFile(destination, contents, { flag: 'wx' }); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (!await recordedFoundation(root, adr) || await readFile(destination, 'utf8') !== contents) {
+        throw new UsageError('The ADR path already contains another decision; choose a new path.');
+      }
+    }
+    requirements.foundation = adr;
+  } else if (foundation !== undefined && foundation !== false && foundation !== 'pending' && !await recordedFoundation(root, foundation)) {
+    throw new UsageError('Use pending, a populated foundations.<key>, or an existing project-relative Markdown decision record.');
+  }
   const decidedAt = new Date().toISOString(); let requestedAt = decidedAt;
   try { requestedAt = await readFile(`${path}.${state.epoch}.requested`, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const merged = renewed ? { ...previous?.value, ...value } : value; if (renewed) delete merged.continuation; const history = previous?.epoch === state.epoch ? previous.decisions.slice(0, -1) : previous?.decisions ?? []; const decisions = [...history, { requestedAt, decidedAt, decision: merged }];
   await atomicJson(path, { value: merged, epoch: state.epoch, userEpoch: state.userEpoch, userDecisionIndex: state.userDecisionIndex ?? 0, decisions }, { mode: 0o600 }); return merged;
 }); }
+const adrReference = reference => typeof reference === 'string' && /^(?:[\w-]+\/)*adrs?\/[\w-][\w.-]*\.md$/i.test(reference);
+async function recordedFoundation(root, reference) {
+  if (typeof reference !== 'string') return false;
+  const key = /^foundations\.([a-z]+)$/.exec(reference)?.[1];
+  if (key) {
+    const { foundations } = await jsonFile(resolve(root, '.geppetto/config.json'), {});
+    return typeof foundations?.[key] === 'string' && !placeholderReason(foundations[key]);
+  }
+  if (!adrReference(reference)) return false;
+  const path = resolve(root, reference);
+  if (!contained(root, path)) return false;
+  try {
+    await rejectSymlinks(path);
+    return (await lstat(path)).isFile() && Boolean((await readFile(path, 'utf8')).trim());
+  } catch (error) {
+    if (error.message?.endsWith('Reconcile symbolic link before writing') || ['ENOENT', 'ENOTDIR', 'ELOOP'].includes(error.code)) return false;
+    throw error;
+  }
+}
 async function editingEvent(root, state, statePath, event, policy) {
   const path = decisionPath(root, event.session_id, state.turn), staged = currentDecision(await jsonFile(path, null));
   if (event.hook_event_name === 'PostToolUse') {
@@ -131,6 +176,11 @@ async function editingEvent(root, state, statePath, event, policy) {
     } return {};
   }
   if (!modifyingTool(event) && state.shellPending !== state.epoch) return {};
+  const foundation = staged?.userEpoch === state.userEpoch ? staged?.value?.requirements?.foundation : undefined;
+  if (foundation && !await recordedFoundation(root, foundation)) {
+    await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: ['requirements'] }, event);
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Resolve the foundation with the user through $geppetto-spec. Reference the approved config choice or ADR, or record a new user-approved ADR with requirements.foundation = {adr, approvedDecision} with ${recordCommand(event.session_id, state.turn)}.` } };
+  }
   if (policy.checks.length && staged?.epoch !== state.epoch && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString())) {
     const needed = !staged || state.epoch === 'initial' || state.epoch === state.userEpoch ? policy.checks : policy.checks.filter(check => check.id === 'feedback');
     await logHookEvent(root, { hook: 'turnGate', status: 'block', checks: needed.map(check => check.id) }, event);
