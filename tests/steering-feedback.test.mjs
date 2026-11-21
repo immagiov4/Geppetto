@@ -19,7 +19,7 @@ test('a new user message inside one native turn renews the decisions before the 
   await handleEvent({ ...event, hook_event_name: 'UserPromptSubmit' });
   const write = { ...event, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { path: resolve(cwd, 'app.mjs'), content: 'export const behavior = "new";' } };
   assert.equal((await handleEvent(write)).hookSpecificOutput?.permissionDecision, 'deny');
-  await recordTurn(cwd, event.session_id, event.turn_id, { requirements: { changes: true, what: 'Add public channel comments.' }, feedback: { applies: false }, frustration: { applies: false } });
+  await recordTurn(cwd, event.session_id, event.turn_id, { requirements: { changes: true, foundation: false, what: 'Add public channel comments.' }, feedback: { applies: false }, frustration: { applies: false } });
   assert.deepEqual(await handleEvent(write), {});
   await appendFile(transcript, message('Stop: you introduced a limit I did not approve. Explain the choices before imposing it.'));
   const renewed = await handleEvent(write);
@@ -58,7 +58,7 @@ test('pending user steering cannot be recorded as an agent signal and is evaluat
   await assert.rejects(recordSignal(cwd,{key:'pending-message',session:event.session_id,category:'workflow',text:'A pending user message.'}),/Record the new user message/);
   const write={...event,hook_event_name:'PreToolUse',tool_name:'Write',tool_input:{path:resolve(cwd,'app.mjs'),content:'x'}};
   const replies=await Promise.all([handleEvent(write),handleEvent(write)]);assert.equal(replies.filter(r=>r.hookSpecificOutput?.permissionDecision==='deny').length,1);assert.match(replies.find(r=>r.hookSpecificOutput)?.hookSpecificOutput.permissionDecisionReason,/record requirements, feedback, frustration/);
-  await recordTurn(cwd,event.session_id,event.turn_id,{...decision,requirements:{changes:true,what:'Explicitly requested additional behavior.'}});
+  await recordTurn(cwd,event.session_id,event.turn_id,{...decision,requirements:{changes:true,foundation:false,what:'Explicitly requested additional behavior.'}});
   assert.deepEqual(await handleEvent(write),{});
   const signal=await recordSignal(cwd,{key:'requirements-only',session:event.session_id,category:'workflow',text:'An implementation observation, not user feedback.'});assert.equal(signal.source,'agent');
 });

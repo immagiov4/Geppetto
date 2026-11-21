@@ -9,6 +9,8 @@ If `~/.geppetto/integrations.md` has a section for this skill, read it.
 
 Before implementing new or changed behaviour, design how to inspect its state and diagnose failures. Omit Inspectability when behaviour stays the same. Follow `foundations.observability` in `.geppetto/config.json`. When unset, compare approaches WITH the user through `$geppetto-spec`, record the choice and reuse it.
 
+Design the shared base upfront: operation identity, event schema, storage location, access and retention. Each feature adds diagnostic views through that base. Revisit a changed base through $geppetto-spec.
+
 Answer the maintainer's diagnostic questions:
 
 - **System:** what is running, available, waiting or making progress; which dependencies and resources explain its condition?

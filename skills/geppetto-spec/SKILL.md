@@ -7,7 +7,9 @@ description: "Specify a change before code: human flow, design limits, requireme
 
 If `~/.geppetto/integrations.md` has a section for this skill, read it.
 
-**Foundations.** Resolve `.geppetto/config.json` `foundations` or supplied values. Design inspectability for new or changed behaviour through `$geppetto-x-ray`. If `foundations.observability` is unset for that work, compare approaches WITH the user and record the choice. For documentation, likewise record `foundations.documentation`: audience, page types, structure, navigation and visuals. A prose companion refines that structure. Reuse recorded choices without asking again.
+**Foundations.** Other code, data or users depend on these choices, or reversal is costly: storage, record formats, identities, schemas, inspectability, module boundaries and external contracts. Reuse decisions in project `.geppetto/config.json` `foundations` or an ADR. For each new or changed foundation, discuss choices with the user before implementation. Recommend installed `grilling`, `grill-with-docs` or equivalent; offer installation if absent.
+
+**Question it.** If either person offers “for now”, “one file”, “we'll see” or leaves scale or access unstated, name the concrete consequence and ask for a specific answer. As fallback, ask: Who depends on this at what scale? What are two viable alternatives? For each, what are its pros, cons and risks (failure, detection, affected scope, reversal cost)? What observation would disprove the assumption? How will we inspect it? Record the approved choice and answers. While unresolved, use `requirements.foundation: "pending"`; once decided, reference its config key or ADR. Minimal-change procedures start after foundations are decided. Use `foundations.documentation` for audience, page structure, navigation and visuals.
 
 **Local fix.** For one located owner, no contract/UI change and no dependency, use the [local-fix route](references/local-fix.md): record owner, invariant and focused proof, then hand off to `$geppetto-build`. Load principle skills for unresolved concerns. Otherwise follow the full path.
 

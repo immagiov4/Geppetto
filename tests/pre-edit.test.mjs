@@ -218,3 +218,29 @@ test('audit reports delay and classified corrections only for immediate next mes
   const report = JSON.parse(result.stdout).turnChecks; assert.equal(report.medianAddedSeconds, 4); assert.equal(report.editedTurns, 2); assert.equal(report.correctedNextMessage, 1); assert.equal(report.classifiedNextMessages, 1); assert.equal(report.unclassifiedNextMessages, 1);
   assert.match(invoke('audit.mjs', [], { cwd }).stdout, /median.*4.*s.*1\/1/i);
 });
+
+test('a declared pending foundation blocks repeated edits until its decision is recorded', async t => {
+  const { cwd, send, edit, record } = project(t);
+  const pending = { ...decision, requirements: { changes: true, what: 'Define a persistent record schema', foundation: 'pending' } };
+  await send('UserPromptSubmit');
+  assert.equal(record(pending).status, 0);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await edit();
+    assert.ok(denied(result));
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /geppetto-spec/);
+  }
+  assert.equal(record(decision).status, 2);
+  assert.equal(record({ ...pending, requirements: { changes: true, what: pending.requirements.what } }).status, 2);
+  assert.equal(record({ ...pending, requirements: { ...pending.requirements, foundation: "docs/system-map.md" } }).status, 2);
+  const adr = 'docs/adr/001-record-format.md';
+  const approvedDecision = '# Record format\nUse versioned JSON records.';
+  const approval = { ...pending, requirements: { ...pending.requirements, foundation: { adr, approvedDecision } } };
+  assert.equal(record(approval).status, 0);
+  assert.equal(record(approval).status, 0);
+  assert.equal(record({ ...approval, requirements: { ...approval.requirements, foundation: { adr, approvedDecision: 'Different decision' } } }).status, 2);
+  assert.equal(get(cwd, adr).trim(), approvedDecision);
+  assert.ok(!denied(await edit()));
+  await send('UserPromptSubmit', { turn_id: 'local' });
+  assert.equal(record(decision, 'session', 'local').status, 0);
+  assert.ok(!denied(await edit({ turn_id: 'local' })));
+});
