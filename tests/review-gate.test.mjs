@@ -31,11 +31,14 @@ function project(t) {
   };
   return { cwd, send };
 }
-test('40 new source lines block once, including untracked source, and the next turn can block again', async t => {
+test('untracked source blocks Codex Stop retries until an override, with a fresh check next turn', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit');
   put(cwd, 'new.mjs', lines(40, 'new'));
   const blocked = await send('Stop'); assert.equal(blocked.decision, 'block'); assert.match(blocked.reason, /Code changed without an independent review/);
   assert.equal(get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse).find(row => row.hook === 'reviewGate').lines, 40, 'runtime dotfiles must not inflate the source count');
+  assert.equal((await send('Stop', { stop_hook_active: true })).decision, 'block');
+  const override = { override: { gate: 'stop', reason: 'The reviewer cannot reach this fixture.' } };
+  assert.equal(invoke('hook.mjs', ['--record-turn', JSON.stringify(override), '--session', 'gate', '--turn', 'one'], { cwd }).status, 0);
   assert.deepEqual(await send('Stop'), {});
   await send('UserPromptSubmit', { turn_id: 'two' }); put(cwd, 'new.mjs', lines(80, 'new'));
   assert.equal((await send('Stop', { turn_id: 'two' })).decision, 'block');
@@ -61,13 +64,12 @@ test('docs/tests-only changes pass, configurable exclusions and threshold apply'
   await send('UserPromptSubmit', { turn_id: 'two' }); put(cwd, 'generated/app.mjs', lines(80)); put(cwd, 'checks/app.mjs', lines(80)); put(cwd, 'extra.mjs', lines(40));
   assert.deepEqual(await send('Stop', { turn_id: 'two' }), {});
 });
-test('old dirty source is not a change this turn; active stop and explicit blocker close safely', async t => {
+test('old dirty source passes; Codex requires a recorded override for active Stop or a stated blocker', async t => {
   const { cwd, send } = project(t); put(cwd, 'app.mjs', lines(100)); await send('UserPromptSubmit');
   assert.deepEqual(await send('Stop'), {});
-  put(cwd, 'app.mjs', lines(140)); assert.deepEqual(await send('Stop', { stop_hook_active: true }), {});
+  put(cwd, 'app.mjs', lines(140)); assert.equal((await send('Stop', { stop_hook_active: true })).decision, 'block');
   await send('UserPromptSubmit', { turn_id: 'two' }); put(cwd, 'app.mjs', lines(180));
-  assert.deepEqual(await send('Stop', { turn_id: 'two', last_assistant_message: 'Independent review blocked: the requested CLI is unavailable.' }), {});
-  assert.match(get(cwd, projectDataPath(cwd, 'hook-events.jsonl')), /blocker/);
+  assert.equal((await send('Stop', { turn_id: 'two', last_assistant_message: 'Independent review blocked: the requested CLI is unavailable.' })).decision, 'block');
 });
 test('deletions and staged edits count, and an earlier matching review remains valid', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit');
@@ -86,9 +88,11 @@ test('disabled review gate stays quiet and malformed threshold fails explicitly'
   put(cwd, '.geppetto/config.json', { ...config(), hooks: { reviewGate: { threshold: 0 } } });
   await assert.rejects(send('UserPromptSubmit'), /Invalid hooks.reviewGate/);
 });
-test('concurrent Stop deliveries claim only one block', async t => {
+test('concurrent Codex Stops both require completion and record one first denial', async t => {
   const { cwd, send } = project(t); await send('UserPromptSubmit'); put(cwd, 'extra.mjs', lines(40));
-  const results = await Promise.all([send('Stop'), send('Stop')]); assert.equal(results.filter(result => result.decision === 'block').length, 1);
+  const results = await Promise.all([send('Stop'), send('Stop')]); assert.equal(results.filter(result => result.decision === 'block').length, 2);
+  const events = get(cwd, projectDataPath(cwd, 'hook-events.jsonl')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(events.filter(row => row.hook === 'reviewGate').map(row => row.disposition), ['denied', 'retry-denied']);
 });
 test('a reviewed clean diff cannot hide a source file replaced by a directory or binary', async t => {
   for (const replacement of ['directory', 'binary']) {
