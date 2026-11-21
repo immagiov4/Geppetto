@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.0
+
+- Use the update checker to compare the published release with your installation. Adopted projects surface stale version information at session start.
+- Migration: refresh the installed marketplace and plugin, then reconcile the project to refresh the launcher, maintenance registrations and CI pin. Reapprove Codex hooks through the installer and verify them in a fresh session.
+
 ## 0.16.0
 
 - Discuss and record foundational design choices before implementation. The edit gate keeps a declared pending foundation blocked until a configuration decision or an architectural decision record is available.
