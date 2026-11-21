@@ -15,7 +15,7 @@ test('project-wide memory results retain their originating sessions without copy
   await handleMemoryEvent({ ...common, hook_event_name: 'SessionStart', session_id: 'memory-session' }, { home });
   const [memoryResult] = records(cwd);
   assert.equal(memoryResult.sessionId, 'memory-session');
-  assert.equal(memoryResult.status, 'unavailable'); assert.equal(memoryResult.turnId, undefined);
+  assert.equal(memoryResult.status, 'unavailable'); assert.equal(memoryResult.turnId, null); assert.equal(memoryResult.epoch, null);
   assert.doesNotMatch(JSON.stringify(records(cwd)), /SYNTHETIC_PROMPT|SYNTHETIC_TOOL_INPUT/);
 });
 
