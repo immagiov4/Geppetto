@@ -19,17 +19,20 @@ export const toolName = event => typeof event.tool_name === 'string' ? event.too
 export const toolCommand = event => typeof event.tool_input === 'string' ? event.tool_input : event.tool_input?.command ?? event.tool_input?.cmd ?? '';
 export const modifyingTool = event => /^(write|edit|multiedit|apply_patch|(?:mcp__\w+__)?(?:write_file|write_text_file|append_file|edit_file|patch_file|create_file|delete_file|move_file))$/i.test(toolName(event));
 const words = command => (command.match(/(?:[^\s"']+|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? []).map(word => word.replace(/"((?:\\.|[^"\\])*)"|'([^']*)'/g, (_, double, single) => double === undefined ? single : double.replace(/\\(["\\])/g, '$1')));
-const valueFlags = new Set(['--repo', '-R', '--hostname', '--header', '-H', '--method', '-X', '--jq', '-q', '--template', '-t', '--field', '-F', '--raw-field', '-f', '--input', '--cache', '--preview', '-p', '--json', '--limit', '-L', '--branch', '-b', '--commit', '-c', '--job', '-j', '--body-file', '--body']);
-export function commandArgs(command) {
+const valueFlags = new Set(['-C', '--git-dir', '--work-tree', '--prefix', '--cwd', '--registry', '--dir', '--repo', '-R', '--hostname', '--header', '-H', '--method', '-X', '--jq', '-q', '--template', '-t', '--field', '-F', '--raw-field', '-f', '--input', '--cache', '--preview', '-p', '--json', '--limit', '-L', '--branch', '-b', '--commit', '-c', '--job', '-j', '--body-file', '--body']);
+export function commandArgs(command, { strictPrefix = false } = {}) {
   const tokens = words(command), executable = tokens.shift()?.split(/[\\/]/).at(-1)?.replace(/\.exe$/i, ''), positional = [], flags = new Map();
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]; if (!token.startsWith('-')) { positional.push(token); continue; }
+    const token = tokens[i];
+    if (strictPrefix && token === '--') { positional.push(...tokens.slice(i + 1)); break; } if (!token.startsWith('-')) { positional.push(token); continue; }
     const separator = token.indexOf('='), name = separator < 0 ? token : token.slice(0, separator);
+    if (strictPrefix && !positional.length && separator < 0 && !valueFlags.has(name) && !['-m', '--test'].includes(name)) break;
     flags.set(name, separator >= 0 ? token.slice(separator + 1) : valueFlags.has(name) ? tokens[++i] : true);
   }
   return { executable, positional, flags };
 }
-export const reviewResult = (event, policy) => (toolCommand(event).match(/(?:[^"';&|\r\n]|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? ['']).some(command => {
+export const commandSegments = command => (command.match(/(?:[^"';&|\r\n]|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? ['']);
+export const reviewResult = (event, policy) => commandSegments(toolCommand(event)).some(command => {
   const { executable, positional, flags } = commandArgs(command);
   if (words(command).some(token => ['--help', '-h'].includes(token))) return false;
   return policy.rearmOn.some(rule => {

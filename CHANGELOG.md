@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.13.0
+
+- Record elapsed time for selected commands and delegation calls in the project journal. Use `audit.mjs --metrics` to compare timings, find decision waits, and inspect merged pull request cycle times.
+
 ## 0.12.3
 
 - Record Windows maintenance startup errors when the launcher cannot start Node.
