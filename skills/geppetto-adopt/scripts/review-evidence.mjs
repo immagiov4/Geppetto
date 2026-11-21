@@ -25,7 +25,7 @@ export async function completedReviewSession(home, thread, call, response, mater
     const identified = records.some(record => record.type === 'session_meta' && record.payload?.id === thread);
     const bound = records.some(record => record.type === 'response_item' && record.payload?.role === 'user' &&
       record.payload.content?.some(part => part.type === 'input_text' &&
-        part.text?.split('\n').includes('Review material SHA-256: ' + materialSeal)));
+        part.text?.split(/\r?\n/).includes('Review material SHA-256: ' + materialSeal)));
     if (!identified || !bound) return false;
     return records.some(record => {
       const event = record.type === 'event_msg' && record.payload;

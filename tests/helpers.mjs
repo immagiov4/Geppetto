@@ -104,7 +104,7 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     put(directory, stage + '.events.jsonl', events.map(JSON.stringify).join('\n'));
     put(nativeHome ?? resolve(directory, '.codex'), 'sessions/' + day + '/rollout-fixture-' + threads[index] + '.jsonl', [
       { type: 'session_meta', payload: { id: threads[index] } },
-      { type: 'response_item', payload: { role: 'user', content: [{ type: 'input_text', text: 'Review material SHA-256: ' + reviewMaterialSeal(hashes) }] } },
+      { type: 'response_item', payload: { role: 'user', content: [{ type: 'input_text', text: 'Review fixture begins\r\nReview material SHA-256: ' + reviewMaterialSeal(hashes) + '\r\nReview fixture ends' }] } },
       { type: 'event_msg', payload: { type: 'task_complete', last_agent_message: response } },
     ].map(JSON.stringify).join('\n'));
     return { stage, status: 'completed', started_at: started / 1000, exit_code: 0, response_sha256: sha(response) };
