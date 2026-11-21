@@ -10,4 +10,6 @@ Report learning changes whose evidence recurred after the change as did not fix 
 
 Suggest catalog companions whose Geppetto sections match observed skill reads, repeated failures or review activity. Cite those observations; suggest at most three and use the catalog's harness installation procedure after an explicit yes. Refresh ~/.geppetto/integrations.md after installation.
 
+When ProposeExperiments is available, use the supplied metrics to propose up to two experiments. Give each a measured observation, a procedure and a keep/revert rule fixed before the trial. Submit both in one call. Leave the tool unused if evidence supports no proposal. Run trials only in a separately authorized working session.
+
 Run processes through the process-execution reference. Report the inspected scope, useful changes and verification result.

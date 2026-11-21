@@ -37,6 +37,22 @@
         "type": "string"
       }
     },
+    "ProposeExperiments": {
+      "proposals": {
+        "type": "array",
+        "maxItems": 2,
+        "items": {
+          "type": "object",
+          "properties": {
+            "evidence": { "type": "string" },
+            "procedure": { "type": "string" },
+            "decisionRule": { "type": "string" }
+          },
+          "required": ["evidence", "procedure", "decisionRule"],
+          "additionalProperties": false
+        }
+      }
+    },
     "MaintainEvidence": {
       "action": {
         "type": "string",

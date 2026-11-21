@@ -8,6 +8,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Published versions, startup notices and installation drift | `update-check.mjs` |
 | Operation timing, anomalies and metrics audit | `metrics.mjs`, `metric-anomalies.mjs`, `metrics-audit.mjs` |
 | Shared hooks, job identities and memory | `machine.mjs` |
+| Weekly analysis and experiment proposals | `weekly-report.mjs`, `maintenance.mjs` |
 | OS maintenance attachment and subscription CLI execution | `maintenance.mjs` |
 | PR feedback, pre-edit decisions and completion review | `hook.mjs`, `turn-checks.mjs` |
 | Learning activity and in-turn reminders | `learn-nudge.mjs` |

@@ -1,4 +1,5 @@
 import { boundedMetricsAudit } from './metrics-audit.mjs';
+import { newWeeklyDraft, disposeWeeklyDraft, publishWeeklyReport, weeklyWindowMs } from './weekly-report.mjs';
 
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, open, mkdir, readdir, access, rename } from 'node:fs/promises';
@@ -223,14 +224,32 @@ export async function main(args) {
   for (const targets of Object.values(machine.projects ?? {})) for (const [target, source] of Object.entries(targets)) targets[target] = await maintenanceSource(source);
   const memory = args[1] === 'maintain-memory' ? await memorySettings(userHome()) : null; const procedure = new URL(`../../${args[1] === 'maintain-memory' ? 'geppetto-memory' : 'skill-learning-patterns'}/SKILL.md`, import.meta.url); const source = new URL(`../assets/templates/jobs/${args[1]}.md`, import.meta.url); const roots = args[1] === 'maintain-memory' ? [memory?.localPath ?? machine.memory?.localPath].filter(Boolean) : [...new Set([...Object.keys(machine.projects), ...Object.values(machine.projects).flatMap(project => Object.values(project))])];
   if (args[2] === '--dry-run') { console.log(JSON.stringify({ job: args[1], host: job.host ?? 'codex', source: fileURLToPath(source), roots })); return 0; }
-  const { learningAudit } = await import('./audit.mjs'); const reports = await Promise.all(Object.keys(machine.projects ?? {}).map(async project => ({ project, foundations: foundationReport(await jsonFile(resolve(project, '.geppetto/config.json'), {})), evidence: await learningAudit(project), ...(args[1] === 'curate-skills' ? { metrics: await boundedMetricsAudit(project, { since: new Date(Date.now() - 14 * 86400000).toISOString() }).catch(error => ({ status: 'unavailable', reason: error.message })) } : {}), companions: await compileIntegrations(project) }))); const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(source, 'utf8')}\nResolved machine context: ${JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory, reports })}. Work only within the supplied file tools. Keep changes local for review.\n`; const log = resolve(userHome(), `.geppetto/${args[1]}.log`);
+  const observedAt = Date.now();
+  const { learningAudit } = await import('./audit.mjs'); const reports = await Promise.all(Object.keys(machine.projects ?? {}).map(async project => ({ project, foundations: foundationReport(await jsonFile(resolve(project, '.geppetto/config.json'), {})), evidence: await learningAudit(project), ...(args[1] === 'curate-skills' ? { metrics: await boundedMetricsAudit(project, { since: new Date(observedAt - weeklyWindowMs).toISOString(), now: observedAt }).catch(error => ({ status: 'unavailable', reason: error.message })) } : {}), companions: await compileIntegrations(project) }))); const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(source, 'utf8')}`; const log = resolve(userHome(), `.geppetto/${args[1]}.log`);
   if (!roots.length) await writeFile(log, 'No configured maintenance destination.\n', { flag: 'a' });
   const output = await open(log, 'a');
   try {
     for (const cwd of roots) {
       await output.write(`${cwd}\n${JSON.stringify({ reports })}\n`);
-      await executeLearning({ cwd, prompt, host: job.host ?? 'codex', output: output.fd, maintenance: args[1] === 'curate-skills' });
+      const metrics = reports.find(report => report.project === cwd)?.metrics;
+      const available = metrics && metrics.status !== 'unavailable';
+      const draft = available ? await newWeeklyDraft(cwd) : undefined;
+      try {
+        const localReports = reports.map(({ metrics, ...report }) => report.project === cwd && metrics ? { ...report, metrics } : report);
+        const context = JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory, reports: localReports });
+        const request = prompt + '\nResolved machine context: ' + context + '. Work within the supplied file tools. Keep changes local for review.\n';
+        await executeLearning({ cwd, prompt: request, host: job.host ?? 'codex', output: output.fd,
+          maintenance: args[1] === 'curate-skills', weeklyDraft: draft });
+        if (available) {
+          const path = await publishWeeklyReport(cwd, metrics, { draft });
+          await output.write('Weekly metrics report: ' + path + '\n');
+        }
+      } finally {
+        await disposeWeeklyDraft(draft);
+      }
     }
   } finally { await output.close(); }
+  const failed = reports.filter(row => row.metrics?.status === 'unavailable');
+  if (failed.length) throw new Error('Weekly metrics audit unavailable for ' + failed.length + ' project(s); previous reports were preserved.');
   return 0; }
 if (isMain(import.meta.url)) await cli(main);
