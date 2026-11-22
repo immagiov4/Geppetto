@@ -1,6 +1,6 @@
 # Spec review before implementation
 
-Give the fresh session the prompt below, the finished spec, the available design inputs (decision log, council or grilling notes, requirements map), and read access to the repository. Use the delegation interface and authorized model and settings described in [Verify](../../geppetto-verify/SKILL.md) and [Code review runtime](../../code-review/SKILL.md#choose-the-review-runtime). Keep the review result with the specification's working material so each flag can be traced to its disposition.
+Give the fresh session the prompt below, the finished spec, the available design inputs (decision log, council or grilling notes, requirements map), and read access to the repository. Choose the delegation interface and the authorized model and settings as described in [Verify](../../geppetto-verify/SKILL.md) and [Code review runtime](../../code-review/SKILL.md#choose-the-review-runtime), and send this prompt directly to a fresh session through that interface. The bundled code-review runner audits diffs and does not run this prompt. Keep the review result with the specification's working material so each flag can be traced to its disposition.
 
 ## Reviewer prompt
 

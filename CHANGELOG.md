@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Review completed full-path specifications in a fresh session with the design inputs. Resolve consequential open decisions before handing the specification to build.
+- Review completed full-path specifications in a fresh session with the design inputs, or self-review with `spec review pending` when none is available. Resolve consequential open decisions before handing the specification to build; the user decides product scope.
+- Remove the test that froze the word count of the spec, living-docs and x-ray skills.
 
 ## 0.22.0
 
