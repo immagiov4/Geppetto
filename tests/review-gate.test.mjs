@@ -161,7 +161,8 @@ test('lens review recording rejects invalid stage sequences, reports and materia
     { label: 'wrong profile', profile: 'other' },
     { label: 'extra stage', stages: [...lenses, 'gap-logic'] },
     { label: 'unneeded verify', stages: [...lenses, 'verify'] },
-    { label: 'missing verify', outcome: 'findings', stages: lenses },
+    { label: 'missing verify despite rejected report', candidates: [{ id: 'L1-1' }], stages: lenses },
+    { label: 'substituted archived stage', archivedStages: { 'lens-adversarial': 'lens-contracts' } },
     { label: 'late verify', outcome: 'findings', stages: [...lenses, 'gap-logic', 'verify'] },
     { label: 'mismatched report', outcome: 'findings', file: 'findings.json', mutate: report => {
       report.findings[0].id = 'changed';

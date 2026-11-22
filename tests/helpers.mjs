@@ -75,7 +75,7 @@ export function parallel(script, args, { cwd, home = cwd }) {
 export function git(dir, args, options = {}) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true, ...options }); }
 
 /** Fake runner artifacts for hook tests; these fixtures do not invoke a model. */
-export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome, { strategy = 'questions', profile = 'standard', stages } = {}) {
+export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome, { strategy = 'questions', profile = 'standard', stages, candidates, archivedStages = {} } = {}) {
   const directory = fixture(t);
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const patch = git(root, ['diff', '--binary', '--no-ext-diff', base, '--'], { maxBuffer: 8 * 1024 * 1024 }).stdout;
@@ -92,24 +92,28 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
   const discovery = strategy === 'lenses'
     ? ['lens-adversarial', 'lens-contracts', 'lens-rules-tests', ...(profile === 'ultra' ? ['gap-logic', 'gap-contracts-docs'] : [])]
     : strategy === 'generic' ? ['search-1', 'search-2'] : ['questions', 'investigate'];
-  stages ??= [...discovery, ...(findings.length ? ['verify'] : [])];
+  candidates ??= findings;
+  stages ??= [...discovery, ...(candidates.length ? ['verify'] : [])];
   const threads = stages.map(() => randomUUID());
   const started = Date.now();
   const day = new Date(started).toISOString().slice(0, 10).replaceAll('-', '/');
   const calls = stages.map((stage, index) => {
     const response = JSON.stringify(stage === 'verify' ? { accepted_findings: findings }
-      : stage === 'investigate' ? { report: { findings } }
-        : stage === 'questions' ? { questions: [] } : { findings: index === 0 ? findings : [] });
+      : stage === 'investigate' ? { report: { findings: candidates } }
+        : stage === 'questions' ? { questions: [] } : { findings: index === 0 ? candidates : [] });
     put(directory, stage + '.json', response);
     const events = [
       { type: 'thread.started', thread_id: threads[index] },
       { type: 'turn.completed', usage: { output_tokens: 30 } },
     ];
     put(directory, stage + '.events.jsonl', events.map(JSON.stringify).join('\n'));
+    const prompt = ['Review fixture begins', 'Review material SHA-256: ' + reviewMaterialSeal(hashes)];
+    if (strategy === 'lenses') prompt.push('Review stage: ' + (archivedStages[stage] ?? stage));
+    prompt.push('Review fixture ends');
     put(nativeHome ?? resolve(directory, '.codex'), 'sessions/' + day + '/rollout-fixture-' + threads[index] + '.jsonl', [
       { type: 'session_meta', payload: { id: threads[index] } },
       { type: 'event_msg', payload: { type: 'task_started', turn_id: 'review' } },
-      { type: 'response_item', payload: { role: 'user', content: [{ type: 'input_text', text: 'Review fixture begins\r\nReview material SHA-256: ' + reviewMaterialSeal(hashes) + '\r\nReview fixture ends' }] } },
+      { type: 'response_item', payload: { role: 'user', content: [{ type: 'input_text', text: prompt.join('\r\n') }] } },
       { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'review', last_agent_message: response } },
     ].map(JSON.stringify).join('\n'));
     return { stage, status: 'completed', started_at: started / 1000, exit_code: 0, response_sha256: sha(response) };

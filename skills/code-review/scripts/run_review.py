@@ -1,7 +1,7 @@
 """Local review with independent sessions and verifiable evidence."""
 import argparse
 from codecs import escape_decode
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
@@ -11,9 +11,11 @@ import math
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import tempfile
+from threading import Lock
 import time
 from unittest.mock import patch
 
@@ -23,6 +25,8 @@ REQUIRED = ("before", "after", "diff.patch", "contract.md", "manifest.json")
 MAX_QUESTIONS = 20
 EFFORTS = ("low", "medium", "high", "xhigh")
 MAX_DIFF_BYTES = 90_000
+MAX_SOURCE_LINE_BYTES = 1_500
+PROCESS_CLEANUP_TIMEOUT = 5
 CONTRACT_LIMIT = 12_000
 ANCHOR_LIMIT = 25
 ANCHORS = ("AGENTS.md", "*RULES*.md", "CONTRIBUTING.md", "package.json", "pyproject.toml",
@@ -146,14 +150,17 @@ class CasePacket:
     omitted_files: tuple[str, ...]
 
 
-def patch_path(header):
+def patch_path(header, snapshot):
     token = header.removesuffix("\r").removesuffix("\t")
     if token == "/dev/null":
         return None
     if token.startswith('"') and token.endswith('"'):
         token = escape_decode(token[1:-1].encode("utf-8"))[0].decode("utf-8")
-    require(token.startswith(("a/", "b/")), f"Unexpected patch path: {token}")
-    return token[2:]
+    path = Path(token)
+    require(not path.anchor and ".." not in path.parts, f"Unexpected patch path: {token}")
+    if token.startswith(("a/", "b/", "i/", "w/", "c/", "o/")) and not (snapshot / path).is_file():
+        return token[2:]
+    return token
 
 
 def source_range(side, path, start, count):
@@ -173,10 +180,9 @@ def annotate_hunk(file_diff, header, body):
     context = header.group().partition(" @@")[2].removesuffix("\r")
     annotated = [f"@@ {extent} @@{context}"]
     end = before + before_count, after + after_count
-    for line in body.split("\n")[1:]:
-        if not line:
-            continue
-        line = line.removesuffix("\r")
+    for line in body.removesuffix("\n").split("\n")[1:]:
+        carriage_return = line.endswith("\r")
+        line = line.removesuffix("\r") or " "
         sign = line[0]
         if sign == "\\":
             annotated.append(line)
@@ -191,13 +197,15 @@ def annotate_hunk(file_diff, header, body):
             after += 1
         file_diff.additions += sign == "+"
         file_diff.deletions += sign == "-"
-        annotated.append(f"{' '.join(labels)} | {line}")
+        marker = " [CR]" if carriage_return else ""
+        annotated.append(f"{' '.join(labels)} | {line}{marker}")
     require((before, after) == end, f"Hunk ranges disagree with patch body: {extent}")
     file_diff.annotated.append("\n".join(annotated))
 
 
-def parse_diff(patch_text):
+def parse_diff(case):
     """Index text hunks by both paths of a rename, sharing the annotated payload."""
+    patch_text = (case / "diff.patch").read_bytes().decode("utf-8", errors="backslashreplace")
     by_path = {}
     for block in re.split(r"(?m)(?=^diff --git )", patch_text):
         headers = list(HUNK_HEADER.finditer(block))
@@ -206,7 +214,7 @@ def parse_diff(patch_text):
         metadata = block[:headers[0].start()].split("\n")
         before = next(line[4:] for line in metadata if line.startswith("--- "))
         after = next(line[4:] for line in metadata if line.startswith("+++ "))
-        file_diff = FileDiff(patch_path(before), patch_path(after))
+        file_diff = FileDiff(patch_path(before, case / "before"), patch_path(after, case / "after"))
         ends = [header.start() for header in headers[1:]] + [len(block)]
         for header, end in zip(headers, ends):
             annotate_hunk(file_diff, header, block[header.end():end])
@@ -220,6 +228,13 @@ def snapshot_lines(path):
         return None
     content = path.read_bytes()
     return content.count(b"\n") + int(bool(content) and not content.endswith(b"\n"))
+
+
+def source_lines(raw):
+    lines = raw.decode("utf-8", errors="backslashreplace").split("\n")
+    if not lines[-1]:
+        lines.pop()
+    return [line.removesuffix("\r") for line in lines]
 
 
 def changed_index(case, changed, diffs):
@@ -262,7 +277,7 @@ def build_case_packet(case, changed, max_diff_bytes=MAX_DIFF_BYTES):
     excerpt = contract[:CONTRACT_LIMIT].decode("utf-8", errors="ignore")
     if len(contract) > CONTRACT_LIMIT:
         excerpt += "\n[Contract excerpt truncated. Read the full contract.md in the case.]"
-    diffs = parse_diff((case / "diff.patch").read_bytes().decode("utf-8", errors="backslashreplace"))
+    diffs = parse_diff(case)
     brief = f"## contract.md\n{excerpt}\n\n## Changed files\n{changed_index(case, changed, diffs)}"
     anchors = repository_anchors(case / "after")
 
@@ -345,7 +360,7 @@ def build_candidate_snippets(case, candidates, context_lines=20, max_bytes=48_00
     def source(path):
         if path not in sources:
             raw = path.read_bytes()
-            sources[path] = raw, raw.decode("utf-8", errors="backslashreplace").splitlines()
+            sources[path] = raw, source_lines(raw)
         return sources[path]
 
     for candidate in candidates:
@@ -357,20 +372,25 @@ def build_candidate_snippets(case, candidates, context_lines=20, max_bytes=48_00
         end = min(len(lines), candidate["line_end"] + context_lines)
         intervals.setdefault(("after" if after else "before", file), []).append((start, end))
 
-        previous = case / "before" / file
-        if not after or not previous.is_file():
+        if not after:
             continue
+        if diffs is None:
+            diffs = parse_diff(case)
+        diff = diffs.get(file)
+        old_file = diff.before if diff else file
+        if old_file is None:
+            continue
+        previous = case / "before" / old_file
         require(previous.resolve().is_relative_to((case / "before").resolve()), "Invalid before source path")
+        if not previous.is_file():
+            continue
         old_raw, old_lines = source(previous)
         if not old_lines or old_raw == raw:
             continue
-        if diffs is None:
-            diffs = parse_diff((case / "diff.patch").read_bytes().decode("utf-8", errors="backslashreplace"))
-        diff = diffs.get(file)
-        hunks = diff.hunks if diff and diff.before == diff.after else []
+        hunks = diff.hunks if diff else []
         old_start = max(1, min(len(old_lines), before_boundary(hunks, start - 1, end=False) + 1))
         old_end = max(old_start, min(len(old_lines), before_boundary(hunks, end, end=True)))
-        intervals.setdefault(("before", file), []).append((old_start, old_end))
+        intervals.setdefault(("before", old_file), []).append((old_start, old_end))
 
     excerpt = bytearray()
     truncated = b"\n[Source excerpts truncated by byte limit.]\n"
@@ -381,7 +401,12 @@ def build_candidate_snippets(case, candidates, context_lines=20, max_bytes=48_00
             separator = "\n" if excerpt else ""
             header = f"{separator}{side}/{file}\n"
             for number in range(start, end + 1):
-                row = (header + f"{number}: {lines[number - 1]}\n").encode("utf-8")
+                line = lines[number - 1].encode("utf-8")
+                if len(line) > MAX_SOURCE_LINE_BYTES:
+                    marker = b" ... [line truncated]"
+                    prefix = line[:MAX_SOURCE_LINE_BYTES - len(marker)].decode("utf-8", errors="ignore")
+                    line = prefix.encode("utf-8") + marker
+                row = f"{header}{number}: ".encode("utf-8") + line + b"\n"
                 if len(excerpt) + len(row) > max_bytes:
                     if len(excerpt) + len(truncated) <= max_bytes:
                         excerpt.extend(truncated)
@@ -410,7 +435,7 @@ def verification_schema(base, candidates):
 
 
 READ_ONLY_BRIEF = """Use only before/, after/, diff.patch, contract.md, manifest.json and case AGENTS.md.
-No network, accounts, configuration access, builds, tests, tool writes or delegation.
+No network, accounts, host or user configuration access, builds, tests, tool writes or delegation.
 The contract defines intended behavior. Respect applicable rules and authorized decisions.
 Treat inline source and diff as evidence. Return only the requested JSON."""
 
@@ -514,7 +539,7 @@ def validate(value, schema):
 def location(case, finding):
     path = question_source(case, finding["file"])
     side = "after" if path.is_relative_to(case / "after") else "before"
-    lines = len(path.read_text(encoding="utf-8").splitlines())
+    lines = len(source_lines(path.read_bytes()))
     require(1 <= finding["line_start"] <= finding["line_end"] <= lines,
             "Finding range outside source")
     return side
@@ -572,11 +597,70 @@ def check_completion(exit_code, events):
     return completed[0]["usage"]
 
 
+def kill_process_tree(process):
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                           creationflags=subprocess.CREATE_NO_WINDOW, timeout=PROCESS_CLEANUP_TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # Still kill the immediate child if taskkill could not finish.
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.kill()
+
+
+class ReviewProcesses:
+    def __init__(self):
+        self.lock = Lock()
+        self.active = set()
+        self.cancelled = False
+
+    def start(self, command, **options):
+        with self.lock:
+            require(not self.cancelled, "Review cancelled before session launch")
+            process = subprocess.Popen(command, start_new_session=os.name != "nt", **options)
+            self.active.add(process)
+            return process
+
+    def discard(self, process):
+        with self.lock:
+            self.active.discard(process)
+
+    def cancel(self):
+        with self.lock:
+            if self.cancelled:
+                return
+            self.cancelled = True
+            for process in self.active:
+                kill_process_tree(process)
+
+
+def drain_terminated_process(process):
+    try:
+        return process.communicate(timeout=PROCESS_CLEANUP_TIMEOUT)
+    except subprocess.TimeoutExpired as error:
+        if os.name != "nt":
+            for pipe in (process.stdin, process.stdout, process.stderr):
+                pipe.close()
+        # On Windows a reader thread can still hold its pipe lock after a drain timeout.
+        process.poll()
+        return tuple((stream or b"").decode("utf-8", errors="replace")
+                     for stream in (error.stdout, error.stderr))
+
+
+def failure_message(error):
+    return str(error) or type(error).__name__
+
+
 def run_call(args, frozen, label, prompt, schema_path, metrics):
     unchanged(args.case, frozen)
     material_seal = hashlib.sha256(json.dumps(sorted(frozen.items()), ensure_ascii=False,
                                               separators=(",", ":")).encode("utf-8")).hexdigest()
-    prompt += f"\nReview material SHA-256: {material_seal}\n"
+    prompt += f"\nReview material SHA-256: {material_seal}\nReview stage: {label}\n"
     prompt += f"\nBudget: up to {getattr(args, 'tool_budget', 24)} effective tool calls and {args.timeout_seconds:g} seconds per session. Tool count is an instructed limit.\n"
     (args.output / f"{label}.prompt.txt").write_bytes(prompt.encode("utf-8"))
     response_path = args.output / f"{label}.json"
@@ -594,21 +678,23 @@ def run_call(args, frozen, label, prompt, schema_path, metrics):
     metrics["calls"].append(record)
     if "status" in metrics:
         save(args.output / "metrics.json", metrics)
-    process = subprocess.Popen(command, cwd=args.case, stdin=subprocess.PIPE,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               encoding="utf-8", errors="replace",
-                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    processes = getattr(args, "processes", None) or ReviewProcesses()
+    process = processes.start(command, cwd=args.case, stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              encoding="utf-8", errors="replace",
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     try:
         stdout, stderr = process.communicate(prompt, timeout=args.timeout_seconds)
     except subprocess.TimeoutExpired:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        process.kill()
-        stdout, stderr = process.communicate()
         record["timed_out"] = True
+        kill_process_tree(process)
+        stdout, stderr = drain_terminated_process(process)
+    except BaseException:
+        kill_process_tree(process)
+        drain_terminated_process(process)
+        raise
     finally:
+        processes.discard(process)
         record["elapsed_seconds"] = round(time.monotonic() - started, 3)
         record["exit_code"] = process.returncode
         unchanged(args.case, frozen)
@@ -675,7 +761,7 @@ def validate_questions(case, response, schema):
     require(len(ids) == len(set(ids)), "Duplicate question identifiers")
     for question in questions:
         source = question_source(case, question["file"])
-        require(1 <= question["line"] <= len(source.read_text(encoding="utf-8").splitlines()),
+        require(1 <= question["line"] <= len(source_lines(source.read_bytes())),
                 "Question line outside source")
     return questions
 
@@ -759,40 +845,66 @@ def run_lens_stage(args, frozen, changed, packet, schema, metrics, lenses, effor
         except Exception as error:
             return local, None, error
 
-    candidates, coverage, limitations, failures = [], [], [], []
+    call_start = len(metrics["calls"])
+    prefix_threads = metrics["thread_ids"][:]
+    results, failures = {}, []
 
-    def collect(lens, result):
-        label, _, _ = lens
-        local, response, error = result
-        record = local["calls"][0] if local["calls"] else {"stage": label}
-        metrics["calls"].append(record)
-        for thread in local["thread_ids"]:
-            if thread in metrics["thread_ids"] and error is None:
-                error = ValueError("Session context reused")
-            metrics["thread_ids"].append(thread)
-        if error is not None:
-            record.update(status="failed", failure=str(error))
-            failures.append((label, error))
-            return
-        record["status"] = "completed"
-        candidates.extend(response["findings"])
-        coverage.append({"search": len(metrics["calls"]), "lens": label, "files": response["coverage"]})
-        limitations.extend(response["limitations"])
+    def collect(index, result):
+        results[index] = result
+        threads = prefix_threads[:]
+        failures.clear()
+        for slot, (local, _, error) in sorted(results.items()):
+            label = lenses[slot][0]
+            record = local["calls"][0] if local["calls"] else {"stage": label}
+            for thread in local["thread_ids"]:
+                if thread in threads and error is None:
+                    error = ValueError("Session context reused")
+                threads.append(thread)
+            if error is None:
+                record["status"] = "completed"
+            else:
+                record.update(status="failed", failure=failure_message(error))
+                failures.append((label, error))
+            metrics["calls"][call_start + slot] = record
+        metrics["thread_ids"] = threads
+        save(args.output / "metrics.json", metrics)
 
     if args.parallel_discovery:
-        with ThreadPoolExecutor(max_workers=len(lenses)) as pool:
-            for lens, result in zip(lenses, pool.map(run_lens, lenses)):
-                collect(lens, result)
-                save(args.output / "metrics.json", metrics)
+        metrics["calls"].extend({"stage": label, "status": "running"} for label, _, _ in lenses)
+        save(args.output / "metrics.json", metrics)
+        pool = ThreadPoolExecutor(max_workers=len(lenses))
+        futures = {}
+        try:
+            for index, lens in enumerate(lenses):
+                futures[pool.submit(run_lens, lens)] = index
+            for future in as_completed(futures):
+                collect(futures[future], future.result())
+        except BaseException as error:
+            args.processes.cancel()
+            pool.shutdown(wait=False, cancel_futures=True)
+            for future, index in futures.items():
+                if index not in results and future.done() and not future.cancelled() and future.exception() is None:
+                    collect(index, future.result())
+            for record in metrics["calls"][call_start:]:
+                if record["status"] == "running":
+                    record.update(status="failed", failure=failure_message(error))
+            raise
+        else:
+            pool.shutdown()
     else:
-        for lens in lenses:
-            collect(lens, run_lens(lens))
-            save(args.output / "metrics.json", metrics)
+        for index, lens in enumerate(lenses):
+            metrics["calls"].append({"stage": lens[0], "status": "running"})
+            collect(index, run_lens(lens))
             if failures:
                 break
     if failures:
         label, error = failures[0]
         raise ValueError(f"{label}: {error}") from error
+    candidates, coverage, limitations = [], [], []
+    for index, (_, response, _) in sorted(results.items()):
+        candidates.extend(response["findings"])
+        coverage.append({"search": call_start + index + 1, "lens": lenses[index][0], "files": response["coverage"]})
+        limitations.extend(response["limitations"])
     return candidates, coverage, limitations
 
 
@@ -852,6 +964,7 @@ def totals(metrics):
 
 
 def main(args):
+    started = time.monotonic()
     args.case = args.case.resolve()
     args.output = args.output.resolve()
     require(args.case.is_dir(), "Missing case")
@@ -884,7 +997,6 @@ def main(args):
     manifest = json.loads((args.case / "manifest.json").read_text(encoding="utf-8"))
     require(isinstance(manifest, dict) and isinstance(manifest.get("changed_files"), list) and
             sorted(manifest["changed_files"]) == changed, "Manifest differs from changed paths")
-    started = time.monotonic()
     args.output.mkdir(parents=True)
     schemas = {name: json.loads((ROOT / "references" / f"{name}.schema.json").read_text(encoding="utf-8"))
                for name in ("report", "verification", "questions", "triage")}
@@ -897,6 +1009,7 @@ def main(args):
                "timeout_seconds": args.timeout_seconds,
                "effort_reason": args.effort_reason, "calls": [], "thread_ids": [],
                "profile": args.profile, "parallel_discovery": args.parallel_discovery, "candidate_count": 0}
+    args.processes = ReviewProcesses()
     accepted, decisions, coverage, limitations, observations = [], [], [], [], []
     try:
         save(args.output / "metrics.json", metrics)
@@ -992,11 +1105,14 @@ def main(args):
         lines += ["", "## Limitations", ""] + [f"- {limit}" for limit in limitations]
         (args.output / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
         metrics["status"] = "complete"
-    except Exception as error:
+    except BaseException as error:
         metrics["status"] = "failed"
-        metrics["failure"] = str(error)
+        metrics["failure"] = failure_message(error)
         if metrics["calls"] and metrics["calls"][-1].get("status") in ("running", "returned"):
-            metrics["calls"][-1]["status"] = "failed"
+            record = metrics["calls"][-1]
+            record["status"] = "failed"
+            record.setdefault("failure", metrics["failure"])
+        args.processes.cancel()
         raise
     finally:
         metrics["wall_seconds"] = round(time.monotonic() - started, 3)
@@ -1034,7 +1150,8 @@ def selfcheck_lenses(case, output):
             and fields["accepted_findings"]["items"]["properties"]["id"]["enum"] == ["L1-1"],
             "Verifier identity schema is not constrained")
 
-    args = argparse.Namespace(case=case, output=output, effort="medium", parallel_discovery=True)
+    args = argparse.Namespace(case=case, output=output, effort="medium", parallel_discovery=True,
+                              processes=ReviewProcesses())
     metrics = {"calls": [], "thread_ids": []}
     report_schema = json.loads((ROOT / "references/report.schema.json").read_text(encoding="utf-8"))
 
@@ -1130,6 +1247,8 @@ def selfcheck():
             for stage in ("search-1", "search-2", "verify"):
                 run_call(args, fingerprint(case), stage, "prompt", root / "schema.json", metrics)
         for command, record in zip(commands, metrics["calls"]):
+            prompt = (output / f"{record['stage']}.prompt.txt").read_text(encoding="utf-8")
+            require(f"\nReview stage: {record['stage']}\n" in prompt, "Review stage not bound to prompt")
             require(record["status"] == "returned", "Unvalidated response marked completed")
             require(command[command.index("-m") + 1] == model, "Chosen model not passed to CLI")
             require(f"review_model={json.dumps(model)}" in command, "Chosen model not safely configured")
@@ -1172,6 +1291,9 @@ if __name__ == "__main__":
         parser.add_argument("--serial-discovery", action="store_true", help="Run discovery lenses one at a time")
         try:
             main(parser.parse_args())
+        except KeyboardInterrupt:
+            print("Review interrupted: KeyboardInterrupt", file=sys.stderr)
+            sys.exit(130)
         except Exception as error:
             print(f"Review interrupted: {error}", file=sys.stderr)
             sys.exit(1)

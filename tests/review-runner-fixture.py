@@ -3,11 +3,14 @@ import argparse
 from copy import deepcopy
 import importlib.util
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
-from threading import Barrier, Event
+from threading import Barrier, Event, Thread
+import time
 import unittest
 from unittest.mock import patch
 
@@ -247,23 +250,36 @@ class ReviewStrategyTests(unittest.TestCase):
         finding = self.prepare_lenses()
         barrier = Barrier(len(self.lens_stages), timeout=5)
         original_call = self.call
-        last_lens_returned = Event()
+        original_save = runner.save
+        last_lens_persisted = Event()
 
         def call(args, frozen, label, prompt, schema, metrics):
             if label in self.lens_stages:
                 self.assertEqual(args.effort, 'medium')
+                self.assertEqual([(record['stage'], record['status']) for record in self.read_metrics()['calls']],
+                                 [(stage, 'running') for stage in self.lens_stages])
                 barrier.wait()
             else:
                 self.assertEqual(args.effort, 'high')
             if label == self.lens_stages[0]:
-                self.assertTrue(last_lens_returned.wait(5))
+                self.assertTrue(last_lens_persisted.wait(5))
             result = original_call(args, frozen, label, prompt, schema, metrics)
             metrics['thread_ids'].append('session-' + label)
-            if label == self.lens_stages[-1]:
-                last_lens_returned.set()
             return result
 
-        with patch.object(self, 'call', side_effect=call):
+        def save(path, value):
+            original_save(path, value)
+            if path.name == 'metrics.json' and not last_lens_persisted.is_set():
+                snapshot = self.read_metrics()
+                statuses = {record['stage']: record['status'] for record in snapshot['calls']}
+                if statuses.get(self.lens_stages[-1]) == 'completed':
+                    self.assertEqual(list(statuses), list(self.lens_stages))
+                    self.assertEqual(statuses[self.lens_stages[0]], 'running')
+                    self.assertEqual(snapshot['thread_ids'], ['session-' + stage for stage in self.lens_stages
+                                                              if statuses[stage] == 'completed'])
+                    last_lens_persisted.set()
+
+        with patch.object(self, 'call', side_effect=call), patch.object(runner, 'save', side_effect=save):
             result = self.run_review()
         prompts = dict(self.calls)
         self.assertLess(list(prompts).index(self.lens_stages[-1]), list(prompts).index(self.lens_stages[0]))
@@ -334,6 +350,84 @@ class ReviewStrategyTests(unittest.TestCase):
         self.assertEqual(limited.inline_diff_bytes, source_bytes)
         self.assertIn('a1 | +value = 2', limited.text)
 
+    def test_packet_resolves_noprefix_and_mnemonic_paths_against_the_snapshots(self):
+        for file, old, new in (
+            ('producer.py', 'producer.py', 'producer.py'),
+            ('a/producer.py', 'a/producer.py', 'a/producer.py'),
+            ('producer.py', 'i/producer.py', 'w/producer.py'),
+            ('producer.py', 'c/producer.py', 'i/producer.py'),
+            ('producer.py', 'o/producer.py', 'w/producer.py'),
+        ):
+            with self.subTest(old=old, new=new):
+                for side, content in (('before', 'value = 1\n'), ('after', 'value = 2\n')):
+                    source = self.case / side / file
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    source.write_bytes(content.encode())
+                (self.case / 'diff.patch').write_bytes(
+                    f'diff --git {old} {new}\n--- {old}\n+++ {new}\n'
+                    '@@ -1 +1 @@\n-value = 1\n+value = 2\n'.encode())
+                packet = runner.build_case_packet(self.case, [file])
+                self.assertIn(f'@@ before/{file}:1-1 -> after/{file}:1-1 @@', packet.text)
+                self.assertEqual(packet.omitted_files, ())
+
+    def test_packet_counts_suppressed_blank_context_and_preserves_carriage_returns(self):
+        (self.case / 'diff.patch').write_bytes(
+            b'diff --git a/producer.py b/producer.py\n--- a/producer.py\n+++ b/producer.py\n'
+            b'@@ -1,4 +1,4 @@\n LF context\n\n-value = 1\n+value = 1\r\n CRLF context\r\n')
+        packet = runner.build_case_packet(self.case, ['producer.py'])
+        self.assertIn('b1 a1 |  LF context\nb2 a2 |  \nb3 | -value = 1\na3 | +value = 1 [CR]\n'
+                      'b4 a4 |  CRLF context [CR]', packet.text)
+
+    def test_source_validation_and_excerpts_count_only_physical_lf_lines(self):
+        (self.case / 'after/producer.py').write_bytes('text = "a\u2028b\u2029c"\r\nvalue = 2\n'.encode())
+        candidate = {'file': 'producer.py', 'line_start': 2, 'line_end': 2}
+        self.assertEqual(runner.location(self.case, candidate), 'after')
+        snippets = runner.build_candidate_snippets(self.case, [candidate], context_lines=0)
+        self.assertIn('after/producer.py\n2: value = 2\n', snippets)
+        with self.assertRaisesRegex(ValueError, 'Finding range outside source'):
+            runner.location(self.case, dict(candidate, line_start=3, line_end=3))
+        schema = json.loads((runner.ROOT / 'references/questions.schema.json').read_text(encoding='utf8'))
+        response = {'questions': [dict(self.question, line=3)], 'limitations': []}
+        with self.assertRaisesRegex(ValueError, 'Question line outside source'):
+            runner.validate_questions(self.case, response, schema)
+
+    def test_edited_rename_projects_the_candidate_to_the_original_path_and_line(self):
+        (self.case / 'after/producer.py').unlink()
+        (self.case / 'before/producer.py').write_bytes(b'unchanged\nvalue = 1\ntail\n')
+        (self.case / 'after/renamed.py').write_bytes(b'inserted\nunchanged\nvalue = 2\ntail\n')
+        (self.case / 'diff.patch').write_bytes(
+            b'diff --git a/producer.py b/renamed.py\nsimilarity index 60%\n'
+            b'rename from producer.py\nrename to renamed.py\n--- a/producer.py\n+++ b/renamed.py\n'
+            b'@@ -0,0 +1 @@\n+inserted\n@@ -2 +3 @@\n-value = 1\n+value = 2\n')
+        snippets = runner.build_candidate_snippets(
+            self.case, [{'file': 'renamed.py', 'line_start': 3, 'line_end': 3}], context_lines=0)
+        self.assertIn('before/producer.py\n2: value = 1\n', snippets)
+        self.assertIn('after/renamed.py\n3: value = 2\n', snippets)
+
+    def test_oversized_multibyte_line_leaves_room_for_later_candidates(self):
+        (self.case / 'after/producer.py').write_bytes(('€' * 20_000 + '\nvalue = 2\n').encode())
+        (self.case / 'after/z.py').write_bytes(b'use(value)\n')
+        candidates = [{'file': file, 'line_start': line, 'line_end': line}
+                      for file, line in (('producer.py', 2), ('z.py', 1))]
+        snippets = runner.build_candidate_snippets(self.case, candidates, max_bytes=2_000)
+        self.assertIn('[line truncated]\n2: value = 2\n', snippets)
+        self.assertIn('after/z.py\n1: use(value)\n', snippets)
+
+    def test_wall_seconds_includes_the_initial_snapshot_scan(self):
+        self.args.strategy = 'generic'
+        clock = 0
+        fingerprint = runner.fingerprint
+
+        def scan(case):
+            nonlocal clock
+            clock += 1
+            return fingerprint(case)
+
+        with patch.object(runner.time, 'monotonic', side_effect=lambda: clock):
+            with patch.object(runner, 'fingerprint', side_effect=scan):
+                self.run_review()
+        self.assertEqual(self.read_metrics()['wall_seconds'], clock)
+
     def test_lenses_reject_invalid_efforts_budgets_and_profiles_before_launch(self):
         cases = [
             ({'strategy': 'generic', 'profile': 'ultra'}, 'ultra.*lenses'),
@@ -388,7 +482,9 @@ class ReviewStrategyTests(unittest.TestCase):
         self.outputs['verify']['decisions'][0]['id'] = 'L1-99'
         with self.assertRaisesRegex(ValueError, 'outside enumeration'):
             self.run_review()
-        self.assertEqual(self.read_metrics()['calls'][-1]['status'], 'failed')
+        metrics = self.read_metrics()
+        self.assertEqual(metrics['calls'][-1]['status'], 'failed')
+        self.assertIn('outside enumeration', metrics['calls'][-1]['failure'])
         self.assertFalse((self.args.output / 'report.md').exists())
 
     def test_parallel_failure_preserves_healthy_stage_and_skips_verification(self):
@@ -423,6 +519,59 @@ class ReviewStrategyTests(unittest.TestCase):
         with patch.object(self, 'call', side_effect=call), self.assertRaisesRegex(ValueError, 'contents changed'):
             self.run_review()
         self.assertFalse((self.args.output / 'report.md').exists())
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX process group cleanup')
+    def test_timeout_kills_a_descendant_holding_the_session_pipes(self):
+        child = ("import subprocess, sys; "
+                 "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(8)'])")
+        popen = subprocess.Popen
+        self.args.output.mkdir()
+        self.args.timeout_seconds = 1
+        metrics = {'calls': [], 'thread_ids': []}
+
+        def launch(_command, **options):
+            return popen([sys.executable, '-c', child], **options)
+
+        with patch.object(runner.subprocess, 'Popen', side_effect=launch):
+            with self.assertRaisesRegex(ValueError, 'time limit reached'):
+                runner.run_call(self.args, runner.fingerprint(self.case), 'verify', 'prompt',
+                                self.case / 'schema.json', metrics)
+        self.assertTrue(metrics['calls'][0]['timed_out'])
+        self.assertLess(metrics['calls'][0]['elapsed_seconds'], 6)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX SIGINT delivery')
+    def test_sigint_during_parallel_discovery_terminates_children_and_persists_failure(self):
+        self.prepare_lenses()
+        self.args.timeout_seconds = 4
+        popen = subprocess.Popen
+        processes = []
+        ready = Event()
+
+        def launch(_command, **options):
+            process = popen([sys.executable, '-c', 'import time; time.sleep(15)'], **options)
+            processes.append(process)
+            if len(processes) == len(self.lens_stages):
+                ready.set()
+            return process
+
+        def interrupt():
+            if ready.wait(4):
+                os.kill(os.getpid(), signal.SIGINT)
+
+        interrupter = Thread(target=interrupt, daemon=True)
+        interrupter.start()
+        started = time.monotonic()
+        with patch.object(runner.subprocess, 'Popen', side_effect=launch), self.assertRaises(KeyboardInterrupt):
+            runner.main(self.args)
+        interrupter.join(4)
+        self.assertEqual(len(processes), len(self.lens_stages))
+        for process in processes:
+            self.assertEqual(process.wait(timeout=2), -signal.SIGKILL)
+        metrics = self.read_metrics()
+        self.assertEqual(metrics['status'], 'failed')
+        self.assertIn('KeyboardInterrupt', metrics['failure'])
+        self.assertEqual([call['status'] for call in metrics['calls']], ['failed'] * len(self.lens_stages))
+        self.assertLess(time.monotonic() - started, self.args.timeout_seconds)
 
 
 if __name__ == '__main__':

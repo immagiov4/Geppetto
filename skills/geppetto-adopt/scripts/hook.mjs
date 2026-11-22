@@ -371,8 +371,9 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
     if (!/^(questions|investigate|search-[12]|lens-(?:adversarial|contracts|rules-tests)|gap-(?:logic|contracts-docs)|verify)$/.test(call.stage) || call.status !== 'completed' ||
         call.exit_code !== 0 || typeof threads[index] !== 'string' || !threads[index]) fail();
     const response = await readFile(resolve(directory, call.stage + '.json'), 'utf8');
+    const expectedStage = strategy === 'lenses' ? call.stage : undefined;
     if (digest(response) !== call.response_sha256 ||
-        !await completedReviewSession(codexHome, threads[index], call, response, seal)) fail();
+        !await completedReviewSession(codexHome, threads[index], call, response, seal, expectedStage)) fail();
     responses[call.stage] = JSON.parse(response);
     const events = (await readFile(resolve(directory, call.stage + '.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
     if (!events.some(event => event.type === 'thread.started' && event.thread_id === threads[index]) ||
