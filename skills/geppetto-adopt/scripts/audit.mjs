@@ -46,7 +46,7 @@ async function verify(project) {
       { name: 'sections-invalid-fixture', script: sectionGate, args: ['--pr', '-', '--config', resolve(temp, 'config.json')], input: '```\n## Observability\nLogs\n```', expected: 1 },
       { name: 'agents-valid-fixture', script: agentGate, args: ['--file', resolve(temp, 'AGENTS.md')], expected: 0 },
       { name: 'agents-invalid-fixture', script: agentGate, args: ['--file', resolve(temp, 'large.md'), '--max-lines', '1'], expected: 1 },
-      { name: 'project-agents-budget', script: agentGate, args: ['--file', resolve(project, 'AGENTS.md')], expected: 0 },
+      { name: 'project-agents-pointers', script: agentGate, args: ['--file', resolve(project, 'AGENTS.md')], expected: 0 },
     ];
     for (const fixture of fixtures) {
       if (!await file(fixture.script)) { checks.push({ name: fixture.name, pass: false, reason: `${fixture.script}:1: Installed gate missing` }); continue; }

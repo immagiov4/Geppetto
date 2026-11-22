@@ -8,7 +8,7 @@ function pointerPath(target, base) {
   try { path = decodeURIComponent(path); } catch { throw new Error(`${base}:1: Invalid path encoding: ${target}`); }
   return path.startsWith('~/') ? resolve(userHome(), path.slice(2)) : resolve(dirname(base), path);
 }
-export async function checkAgents(file, { maxLines = 300, maxBytes = 16384 } = {}) {
+export async function checkAgents(file, { maxLines, maxBytes } = {}) {
   const errors = []; const visited = new Set(); let bytes = 0; let lines = 0;
   async function visit(path, stack = []) {
     const identity = await realpath(path);
@@ -37,13 +37,13 @@ export async function checkAgents(file, { maxLines = 300, maxBytes = 16384 } = {
   await visit(resolve(file));
   const claude = resolve(dirname(file), 'CLAUDE.md');
   if (await exists(claude)) await visit(claude);
-  if (lines > maxLines) errors.push(`${file}:1: Line budget exceeded (${lines} > ${maxLines})`);
-  if (bytes > maxBytes) errors.push(`${file}:1: UTF-8 byte budget exceeded (${bytes} > ${maxBytes})`);
+  if (maxLines !== undefined && lines > maxLines) errors.push(`${file}:1: Line budget exceeded (${lines} > ${maxLines})`);
+  if (maxBytes !== undefined && bytes > maxBytes) errors.push(`${file}:1: UTF-8 byte budget exceeded (${bytes} > ${maxBytes})`);
   return { errors, lines, bytes, files: visited.size };
 }
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--file', '--max-lines', '--max-bytes'] });
-  if (opts._.length) throw new UsageError('Usage: gate-agents.mjs [--file AGENTS.md] [--max-lines 300] [--max-bytes 16384]');
+  if (opts._.length) throw new UsageError('Usage: gate-agents.mjs [--file AGENTS.md] [--max-lines <n>] [--max-bytes <n>]');
   const budgets = {};
   for (const [option, key] of [['--max-lines', 'maxLines'], ['--max-bytes', 'maxBytes']]) {
     if (opts[option] !== undefined) {

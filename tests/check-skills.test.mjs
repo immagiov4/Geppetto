@@ -48,11 +48,13 @@ test('a broken procedure pointer reports its file and line', t => {
   assert.ok(checkPack(root).errors.some(error => error.includes('geppetto-build/SKILL.md:') && error.includes('Unresolved local link')));
 });
 
-test('instruction routing detects an oversized always-loaded template', t => {
+test('package validation accepts longer skills and instruction templates with valid structure', t => {
   const root = fixture(t);
-  const path = resolve(root, 'skills/geppetto-adopt/assets/templates/AGENTS.md');
-  writeFileSync(path, `${readFileSync(path, 'utf8')}\n${'extra\n'.repeat(120)}`);
-  assert.ok(checkPack(root).errors.some(error => error.includes('Router template must fit')));
+  for (const file of ['geppetto-adopt/assets/templates/AGENTS.md', 'geppetto-build/SKILL.md']) {
+    const path = resolve(root, 'skills', file);
+    writeFileSync(path, readFileSync(path, 'utf8') + '\n' + 'Additional guidance.\n'.repeat(900));
+  }
+  assert.deepEqual(checkPack(root).errors, []);
 });
 
 test('fenced Markdown examples do not create false missing-file errors', t => {
