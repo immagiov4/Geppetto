@@ -136,6 +136,53 @@ test('a review assertion with no review evidence cannot clear a blocked Stop', a
   assert.equal((await send('Stop', { stop_hook_active: true })).decision, 'block');
 });
 
+test('valid standard and ultra lens evidence clears Stop with or without findings', async t => {
+  for (const profile of ['standard', 'ultra']) {
+    for (const outcome of ['passed', 'findings']) {
+      const { cwd, send, nativeHome } = project(t);
+      await send('UserPromptSubmit');
+      put(cwd, 'app.mjs', lines(80, 'updated'));
+      const evidence = reviewFixture(t, cwd, outcome, 'HEAD', nativeHome, { strategy: 'lenses', profile });
+      const recorded = invokeReview(t, cwd, outcome, 'gate', 'one', nativeHome, evidence);
+      assert.equal(recorded.status, 0, profile + ' ' + outcome + ': ' + recorded.stderr);
+      assert.deepEqual(await send('Stop'), {});
+    }
+  }
+});
+
+test('lens review recording rejects invalid stage sequences, reports and material seals', async t => {
+  const { cwd, send, nativeHome } = project(t);
+  await send('UserPromptSubmit');
+  put(cwd, 'app.mjs', lines(80, 'updated'));
+  const lenses = ['lens-adversarial', 'lens-contracts', 'lens-rules-tests'];
+  const cases = [
+    { label: 'missing lens', stages: lenses.slice(0, 2) },
+    { label: 'missing gap', profile: 'ultra', stages: lenses },
+    { label: 'wrong profile', profile: 'other' },
+    { label: 'extra stage', stages: [...lenses, 'gap-logic'] },
+    { label: 'unneeded verify', stages: [...lenses, 'verify'] },
+    { label: 'missing verify', outcome: 'findings', stages: lenses },
+    { label: 'late verify', outcome: 'findings', stages: [...lenses, 'gap-logic', 'verify'] },
+    { label: 'mismatched report', outcome: 'findings', file: 'findings.json', mutate: report => {
+      report.findings[0].id = 'changed';
+    } },
+    { label: 'tampered seal', file: 'metrics.json', mutate: metrics => {
+      metrics.case_fingerprint['contract.md'] = '0'.repeat(64);
+    } },
+  ];
+  for (const { label, outcome = 'passed', file, mutate, ...options } of cases) {
+    const evidence = reviewFixture(t, cwd, outcome, 'HEAD', nativeHome, { strategy: 'lenses', ...options });
+    if (file) {
+      const document = JSON.parse(get(evidence, file));
+      mutate(document);
+      put(evidence, file, document);
+    }
+    const recorded = invokeReview(t, cwd, outcome, 'gate', 'one', nativeHome, evidence);
+    assert.equal(recorded.status, 2, label + ': ' + recorded.stderr);
+  }
+  assert.equal((await send('Stop')).decision, 'block');
+});
+
 test('disabling the review gate does not disable the requirements decision before an edit', async t => {
   const { cwd } = project(t);
   put(cwd, '.geppetto/config.json', { ...config(), hooks: { reviewGate: { enabled: false } } });

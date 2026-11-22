@@ -75,7 +75,7 @@ export function parallel(script, args, { cwd, home = cwd }) {
 export function git(dir, args, options = {}) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true, ...options }); }
 
 /** Fake runner artifacts for hook tests; these fixtures do not invoke a model. */
-export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome) {
+export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome, { strategy = 'questions', profile = 'standard', stages } = {}) {
   const directory = fixture(t);
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const patch = git(root, ['diff', '--binary', '--no-ext-diff', base, '--'], { maxBuffer: 8 * 1024 * 1024 }).stdout;
@@ -89,13 +89,17 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
   const findings = outcome === 'findings' ? [{ id: 'fixture' }] : [];
-  const stages = ['questions', 'investigate', ...(findings.length ? ['verify'] : [])];
+  const discovery = strategy === 'lenses'
+    ? ['lens-adversarial', 'lens-contracts', 'lens-rules-tests', ...(profile === 'ultra' ? ['gap-logic', 'gap-contracts-docs'] : [])]
+    : strategy === 'generic' ? ['search-1', 'search-2'] : ['questions', 'investigate'];
+  stages ??= [...discovery, ...(findings.length ? ['verify'] : [])];
   const threads = stages.map(() => randomUUID());
   const started = Date.now();
   const day = new Date(started).toISOString().slice(0, 10).replaceAll('-', '/');
   const calls = stages.map((stage, index) => {
     const response = JSON.stringify(stage === 'verify' ? { accepted_findings: findings }
-      : stage === 'investigate' ? { report: { findings } } : { questions: [] });
+      : stage === 'investigate' ? { report: { findings } }
+        : stage === 'questions' ? { questions: [] } : { findings: index === 0 ? findings : [] });
     put(directory, stage + '.json', response);
     const events = [
       { type: 'thread.started', thread_id: threads[index] },
@@ -111,7 +115,7 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     return { stage, status: 'completed', started_at: started / 1000, exit_code: 0, response_sha256: sha(response) };
   });
   put(directory, 'findings.json', { findings });
-  put(directory, 'metrics.json', { status: 'complete', strategy: 'questions', changed_paths: [...paths],
+  put(directory, 'metrics.json', { status: 'complete', strategy, ...(strategy === 'lenses' ? { profile } : {}), changed_paths: [...paths],
     case_fingerprint: hashes, calls, thread_ids: threads });
   return directory;
 }

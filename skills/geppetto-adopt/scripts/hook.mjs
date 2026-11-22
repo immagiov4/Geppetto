@@ -350,18 +350,25 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
   const fail = () => { throw new UsageError('Supply a completed independent review output that matches the current diff and outcome.'); };
   if (metrics?.status !== 'complete' || !Array.isArray(report?.findings) ||
       (outcome === 'findings') !== Boolean(report.findings.length)) fail();
-  const required = metrics.strategy === 'questions' ? ['questions', 'investigate']
-    : metrics.strategy === 'generic' ? ['search-1', 'search-2'] : [];
+  const { strategy, profile } = metrics;
+  const required = strategy === 'questions' ? ['questions', 'investigate']
+    : strategy === 'generic' ? ['search-1', 'search-2'] : [];
+  if (strategy === 'lenses') {
+    if (!['standard', 'ultra'].includes(profile)) fail();
+    required.push('lens-adversarial', 'lens-contracts', 'lens-rules-tests');
+    if (profile === 'ultra') required.push('gap-logic', 'gap-contracts-docs');
+  }
   const { calls, thread_ids: threads, case_fingerprint: fingerprint, changed_paths: paths } = metrics;
   if (!required.length || !Array.isArray(calls) || !Array.isArray(threads) ||
-      calls.length < required.length || calls.length !== threads.length ||
+      calls.length < required.length || calls.length > required.length + 1 || calls.length !== threads.length ||
       threads.includes(session) || new Set(threads).size !== threads.length ||
       !required.every((stage, index) => calls[index]?.stage === stage) ||
+      (calls.length > required.length && calls[required.length]?.stage !== 'verify') ||
       new Set(calls.map(call => call.stage)).size !== calls.length || !Array.isArray(paths) || !fingerprint) fail();
   const responses = {};
   const seal = reviewMaterialSeal(fingerprint);
   for (const [index, call] of calls.entries()) {
-    if (!/^(questions|investigate|search-[12]|verify)$/.test(call.stage) || call.status !== 'completed' ||
+    if (!/^(questions|investigate|search-[12]|lens-(?:adversarial|contracts|rules-tests)|gap-(?:logic|contracts-docs)|verify)$/.test(call.stage) || call.status !== 'completed' ||
         call.exit_code !== 0 || typeof threads[index] !== 'string' || !threads[index]) fail();
     const response = await readFile(resolve(directory, call.stage + '.json'), 'utf8');
     if (digest(response) !== call.response_sha256 ||
@@ -372,9 +379,12 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
         !events.some(event => event.type === 'turn.completed' && event.usage && Number(event.usage.output_tokens) > 0) ||
         events.some(event => ['turn.failed', 'error'].includes(event.type))) fail();
   }
-  const candidates = metrics.strategy === 'questions' ? responses.investigate?.report?.findings
-    : [...(responses['search-1']?.findings ?? []), ...(responses['search-2']?.findings ?? [])];
-  if (!Array.isArray(candidates) || Boolean(candidates.length) !== Boolean(responses.verify)) fail();
+  const findingsByStage = strategy === 'questions' ? [responses.investigate?.report?.findings]
+    : required.map(stage => responses[stage]?.findings);
+  if (!findingsByStage.every(Array.isArray)) fail();
+  const candidates = findingsByStage.flat();
+  if (calls.length !== required.length + Number(candidates.length > 0) ||
+      Boolean(candidates.length) !== Boolean(responses.verify)) fail();
   const accepted = responses.verify?.accepted_findings ?? [];
   const byId = (left, right) => left.id.localeCompare(right.id, 'en');
   if (!Array.isArray(accepted) || !isDeepStrictEqual(accepted.toSorted(byId), report.findings.toSorted(byId))) fail();

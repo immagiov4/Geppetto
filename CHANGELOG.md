@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.25.0
+
+- Make `--strategy lenses` the default `code-review` procedure: three parallel orthogonal discovery lenses (`lens-adversarial`, `lens-contracts`, `lens-rules-tests`) backed by a pre-packed line-annotated diff packet (`--max-diff-bytes`, lockfile exclusion), followed by a skeptical `high`-effort verifier with aligned `before/` and `after/` candidate excerpts and a constrained dynamic candidate-ID verification schema (`additional_observations` side channel).
+- Add `--profile ultra` (two parallel Stage-2 gap-hunter lenses: `gap-logic`, `gap-contracts-docs`), `--effort {low,medium,high,xhigh}`, `--verify-effort`, `--gap-effort`, `--serial-discovery`, and `wall_seconds` / inline-diff observability in `metrics.json`. Retain `--strategy questions` and `--strategy generic` for explicit requests and comparisons.
+- Extend the Stop review gate (`hook.mjs`) to verify sealed native-archive evidence for `lenses` (`standard` and `ultra`) runs alongside `questions` and `generic`.
+- Migration: update both plugins and reapprove Codex hooks (`hook.mjs` changed to accept `lenses` review evidence).
+
 ## 0.24.0
 
 - Remove fixed size budgets from skill entrypoints and the router check. `gate-agents.mjs` enforces `--max-lines` or `--max-bytes` only when a deployment supplies them.
