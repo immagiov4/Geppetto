@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Review completed full-path specifications in a fresh session with the design inputs. Resolve consequential open decisions before handing the specification to build.
+
 ## 0.22.0
 
 - Run semantic screening as part of substantial requirements maps and retain a disposition for each attempt. Select the newest compatible Perplexity Decider through the OpenRouter Decisions catalog, with a daily cache and an explicit model override.

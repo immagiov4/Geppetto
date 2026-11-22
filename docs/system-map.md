@@ -2,6 +2,8 @@
 
 Source procedures live in `skills/`; root manifests expose the plugin. `install.mjs` reuses plugin skills or generates copies for targets without a plugin, pins package CI gates in the project workflow and protects ownership. `machine.mjs` reconciles shared resources. [Development](development.md) owns refresh and verification commands.
 
+[Specify](../skills/geppetto-spec/SKILL.md) owns the handoff from design to build. On the full path, a fresh session reviews the finished specification and its design inputs for open decisions. The spec author answers or explicitly decides each flag before handing off to build.
+
 | Concern | Source owner under `skills/geppetto-adopt/scripts/` |
 |---|---|
 | Project installation and ownership | `install.mjs` |
