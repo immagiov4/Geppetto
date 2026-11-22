@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const fixtureHome = mkdtempSync(join(tmpdir(), 'geppetto-test-home-'));
-process.once('exit', () => rmSync(fixtureHome, { recursive: true, force: true }));
+const removeHome = () => rmSync(fixtureHome, { recursive: true, force: true });
+process.once('exit', removeHome);
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { removeHome(); process.kill(process.pid, signal); });
 
 Object.assign(process.env, {
   HOME: fixtureHome,
