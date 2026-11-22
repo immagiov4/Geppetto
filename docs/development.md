@@ -15,7 +15,9 @@ Change a behaviour in the source file that already owns it. The owner table is t
 
 For installed-version drift, use the [update diagnosis](../skills/geppetto-adopt/references/installation.md#update). Use the [metrics audit](../skills/geppetto-adopt/assets/templates/hooks/README.md#duration-metrics) to inspect runtime evidence for decisions, timing and pull requests.
 
-Tests use synthetic repositories and injected providers. Paid provider comparisons are separate from installation; preserve their measurements as evidence.
+Tests use synthetic repositories and injected providers. The test setup gives each process a temporary home and removes inherited provider credentials before fixtures load. Paid provider comparisons run separately.
+
+Package checks validate skill metadata, inventory and links. Review explains growth in code and instructions. For a deployment with a specific instruction limit, supply it to the router check: `--max-bytes` counts the UTF-8 bytes of the router plus every file it loads (imports and a sibling `CLAUDE.md`), and `--max-lines` counts the lines of the router file alone. Codex truncates project instructions at its own configurable `project_doc_max_bytes`.
 Shell behaviour fixtures also require Git, Python and ripgrep; CI installs ripgrep explicitly and uses the runners' Git and Python.
 
 Every change to shipped files in `skills/`, `.claude-plugin/`, `.codex-plugin/` or `.agents/plugins/` reaching main carries a version bump.

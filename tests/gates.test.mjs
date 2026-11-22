@@ -64,16 +64,18 @@ test('heading examples and hostile Markdown remain inert data', t => {
 });
 
 test('agent gate resolves Markdown and import pointers and counts imported UTF-8 bytes', t => {
-  const cwd = fixture(t); put(cwd, 'AGENTS.md', '# Router\n[Rules](rules.md)\n'); put(cwd, 'rules.md', 'Rules'); put(cwd, 'CLAUDE.md', '@AGENTS.md\n@more.md\n'); put(cwd, 'more.md', 'é'.repeat(40));
+  const cwd = fixture(t); put(cwd, 'AGENTS.md', '# Router\n[Rules](rules.md)\n'); put(cwd, 'rules.md', 'Rules'); put(cwd, 'CLAUDE.md', '@AGENTS.md\n@more.md\n'); put(cwd, 'more.md', 'é'.repeat(9000));
   let r = invoke('gate-agents.mjs', [], { cwd }); assert.equal(r.status, 0, r.stderr);
+  r = invoke('gate-agents.mjs', ['--max-bytes', '20000'], { cwd }); assert.equal(r.status, 0, r.stderr);
   r = invoke('gate-agents.mjs', ['--max-bytes', '60'], { cwd }); assert.equal(r.status, 1); assert.match(r.stderr, /byte budget/);
   put(cwd, 'rules.md', 'Rules'); put(cwd, 'AGENTS.md', '# Router\n[Rules](missing.md)\n');
   r = invoke('gate-agents.mjs', [], { cwd }); assert.equal(r.status, 1); assert.match(r.stderr, /AGENTS.md:2:.*missing.md/);
 });
 
 test('agent gate fails on missing imports, cycles and excess lines, ignores remote links and fenced examples', t => {
-  const cwd = fixture(t); put(cwd, 'AGENTS.md', '# Router\n[Remote](https://example.com/a)\n```\n[Example](absent.md)\n```\n');
+  const cwd = fixture(t); put(cwd, 'AGENTS.md', '# Router\n[Remote](https://example.com/a)\n```\n[Example](absent.md)\n```\n' + 'Additional guidance.\n'.repeat(300));
   assert.equal(invoke('gate-agents.mjs', [], { cwd }).status, 0);
+  assert.equal(invoke('gate-agents.mjs', ['--max-lines', '400'], { cwd }).status, 0);
   assert.equal(invoke('gate-agents.mjs', ['--max-lines', '2'], { cwd }).status, 1);
   put(cwd, 'CLAUDE.md', '@missing.md'); assert.match(invoke('gate-agents.mjs', [], { cwd }).stderr, /CLAUDE.md:1:.*missing.md/);
   put(cwd, 'CLAUDE.md', '@cycle.md'); put(cwd, 'cycle.md', '@CLAUDE.md'); assert.match(invoke('gate-agents.mjs', [], { cwd }).stderr, /Import cycle/);

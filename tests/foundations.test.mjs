@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fixture, put, invoke, repo, config, git } from './helpers.mjs';
+import { fixture, put, invoke, config, git } from './helpers.mjs';
 import { defaultConfig, validateConfig } from '../skills/geppetto-adopt/scripts/common.mjs';
 
 test('config accepts foundation choices independently of principle packs', () => {

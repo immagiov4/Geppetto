@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.0
+
+- Remove fixed size budgets from skill entrypoints and the router check. `gate-agents.mjs` enforces `--max-lines` or `--max-bytes` only when a deployment supplies them.
+- Tests run with a temporary home and without inherited provider credentials, so a user's own Geppetto config or keys no longer fail `npm run check`.
+- Migration: update both plugins. Hook scripts are unchanged; reapprove Codex hooks only when `install.mjs --check-update` reports them untrusted.
+
 ## 0.23.0
 
 - Review completed full-path specifications in a fresh session with the design inputs, or self-review with `spec review pending` when none is available. Resolve consequential open decisions before handing the specification to build; the user decides product scope.

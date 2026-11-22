@@ -20,10 +20,10 @@ test('audit inventories an empty project without claiming active harness capabil
   assert.equal(invoke('audit.mjs', ['--nope'], { cwd }).status, 2);
 });
 
-test('post-install audit executes installed green/red gate fixtures and validates project config and instruction budget', t => {
+test('post-install audit executes installed green/red gate fixtures and validates project config and instruction pointers', t => {
   const cwd = fixture(t), packageRoot = fixture(t); cpSync(scripts, packageRoot, { recursive: true });
   const audit = (...args) => invoke(resolve(packageRoot, 'audit.mjs'), args, { cwd }); put(cwd, 'AGENTS.md', '# Router\n'); put(cwd, '.geppetto/config.json', config());
-  let r = audit('--verify', '--json'); assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout).verification.map(c => [c.name, c.pass]), [['config', true], ['sections-valid-fixture', true], ['sections-invalid-fixture', true], ['agents-valid-fixture', true], ['agents-invalid-fixture', true], ['project-agents-budget', true]]);
+  let r = audit('--verify', '--json'); assert.equal(r.status, 0, r.stderr); assert.deepEqual(JSON.parse(r.stdout).verification.map(c => [c.name, c.pass]), [['config', true], ['sections-valid-fixture', true], ['sections-invalid-fixture', true], ['agents-valid-fixture', true], ['agents-invalid-fixture', true], ['project-agents-pointers', true]]);
   put(packageRoot, 'gate-sections.mjs', 'process.exit(0)'); r = audit('--verify', '--json'); assert.equal(r.status, 1); assert.equal(JSON.parse(r.stdout).verification.find(c => c.name === 'sections-invalid-fixture').pass, false);
   put(cwd, '.geppetto/config.json', { version: 1 }); r = audit('--verify', '--json'); assert.equal(r.status, 1); assert.equal(JSON.parse(r.stdout).verification[0].pass, false);
 });

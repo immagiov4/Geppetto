@@ -84,7 +84,7 @@
     }
   ],
   "foundations": {
-    "documentation": "Use docs/system-map.md as the router and keep procedures and feature observability with their existing skill/document owners. Preserve the author\u2019s project layout and package document budgets.",
+    "documentation": "Use docs/system-map.md as the router and keep procedures and feature observability with their existing skill/document owners. Preserve the author\u2019s project layout.",
     "observability": "Use the maintainer-specified local redacted JSONL evidence, hook events and read-path telemetry, with audit and weekly outcome reports; hooks make no model calls."
   },
   "screen": {
