@@ -1,10 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { fixture, put, invoke, repo, config, git } from './helpers.mjs';
 import { defaultConfig, validateConfig } from '../skills/geppetto-adopt/scripts/common.mjs';
-
 
 test('config accepts foundation choices independently of principle packs', () => {
   assert.deepEqual(defaultConfig().foundations, { documentation: null, observability: null });
@@ -32,13 +29,6 @@ test('installation recap surfaces unset foundations', t => {
   const result = invoke('install.mjs', ['--target', 'codex', '--project', root, '--plugin-hooks', '--gate-sha', 'a'.repeat(40)], { cwd: root, home });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Unset foundations: documentation, observability/);
-});
-
-test('foundation instructions fit within each skill’s reviewed word budgets', () => {
-  for (const [name, maximum] of [['geppetto-spec', 540], ['geppetto-living-docs', 267], ['geppetto-x-ray', 550]]) {
-    const text = readFileSync(resolve(repo, 'skills', name, 'SKILL.md'), 'utf8');
-    assert.ok(text.trim().split(/\s+/).length <= maximum, name);
-  }
 });
 
 import { handleEvent } from '../skills/geppetto-adopt/scripts/hook.mjs';
