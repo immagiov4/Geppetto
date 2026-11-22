@@ -106,10 +106,11 @@ def save(path, value):
 
 
 def fingerprint(case):
+    root = case.resolve()
     result = {}
     for path in sorted(case.rglob("*")):
         require(not path.is_symlink(), f"Symlink in case: {path.name}")
-        require(path.resolve().is_relative_to(case), "Path outside case")
+        require(path.resolve().is_relative_to(root), "Path outside case")
         if path.is_file():
             result[path.relative_to(case).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
@@ -749,7 +750,7 @@ def question_source(case, relative):
             "Invalid question source path")
     side = "after" if (case / "after" / path).exists() else "before"
     source = case / side / path
-    require(source.resolve().is_relative_to(case / side) and source.is_file(), "Missing question source")
+    require(source.resolve().is_relative_to((case / side).resolve()) and source.is_file(), "Missing question source")
     return source
 
 
