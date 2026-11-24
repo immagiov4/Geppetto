@@ -25,6 +25,15 @@ test('version checks cover commits and pushes to main', () => {
   assert.notEqual(check('push', input(git('rev-parse', 'HEAD'))).status, 0);
   assert.equal(run(process.execPath, [join(source, 'bump-version.mjs'), '1.0.1']).status, 0);
   git('add', '.'); git('commit', '-m', 'bump'); assert.equal(check('push', input(git('rev-parse', 'HEAD'))).status, 0);
+  // First push introducing a new manifest (e.g. plugin.json absent on remote main) must succeed when bumped.
+  const prePlugin = git('rev-parse', 'HEAD');
+  git('rm', '-q', 'plugin.json'); git('commit', '-m', 'without-plugin-manifest');
+  const withoutPlugin = git('rev-parse', 'HEAD');
+  git('checkout', prePlugin, '--', 'plugin.json');
+  assert.equal(run(process.execPath, [join(source, 'bump-version.mjs'), '1.0.2']).status, 0);
+  git('add', '.'); git('commit', '-m', 'add-plugin-manifest');
+  git('update-ref', 'refs/heads/main', withoutPlugin);
+  assert.equal(check('push', `refs/heads/main ${git('rev-parse', 'HEAD')} refs/heads/main ${withoutPlugin}\n`).status, 0);
  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

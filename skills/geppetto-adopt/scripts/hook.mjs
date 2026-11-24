@@ -611,7 +611,7 @@ export const main = async args => {
       return await hookMain([], 'Hook', event => { rawEvent = event; return handleEvent(event, { harness: nativeHarness }); });
     } catch (error) {
       console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`);
-      const failOpen = (nativeHarness === 'antigravity' || rawEvent?.hookEventName) && (rawEvent?.hookEventName ?? rawEvent?.hook_event_name) === 'PreToolUse' ? { decision: 'allow' } : {};
+      const failOpen = isAntigravityEvent(rawEvent, nativeHarness) && (rawEvent?.hookEventName ?? rawEvent?.hook_event_name) === 'PreToolUse' ? { decision: 'allow' } : {};
       console.log(JSON.stringify(failOpen));
       return 0;
     }

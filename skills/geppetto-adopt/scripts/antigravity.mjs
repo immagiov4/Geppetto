@@ -86,10 +86,10 @@ async function shouldStartTurnOnPreInvocation(root, event) {
       const checkpoint = await messageCheckpoint(resolve(event.cwd ?? root, event.transcript_path), state.promptCursor);
       return Boolean(checkpoint.userMessage);
     } catch {
-      return event.invocation_num === 1;
+      return event.invocation_num === 0;
     }
   }
-  return event.invocation_num === 1;
+  return event.invocation_num === 0;
 }
 
 /** Translate Antigravity hook payloads and responses around Geppetto's core hook pipeline. */
@@ -104,7 +104,11 @@ export async function handleAntigravityEvent(normalized, options, runCore) {
     }
     const queued = await drainPendingContext(root, sessionId);
     if (queued && await exists(resolve(root, '.geppetto/config.json'))) {
-      await logHookEvent(root, { hook: 'antigravityContext', status: 'delivered', injectedBytes: Buffer.byteLength(queued), modelCalls: 0 }, normalized);
+      try {
+        await logHookEvent(root, { hook: 'antigravityContext', status: 'delivered', injectedBytes: Buffer.byteLength(queued), modelCalls: 0 }, normalized);
+      } catch (error) {
+        console.error(`Geppetto antigravity context log diagnostic: ${String(error?.message ?? error).replace(/[\r\n]+/g, ' ')}`);
+      }
     }
     return injectSystemMessage(queued);
   }

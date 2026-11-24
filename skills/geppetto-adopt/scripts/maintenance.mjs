@@ -152,7 +152,7 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
     if (available.error?.code === 'ENOENT') return null;
     if (available.status !== 0) throw new Error('Windows Task Scheduler is unavailable; inspect PowerShell ScheduledTasks support.');
     if (!command) {
-      if (host === 'antigravity') return null;
+      if (host === 'antigravity' && !previous?.id) return null;
       throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
     }
     const launcher = maintenanceWrapper(home);
@@ -196,7 +196,7 @@ WScript.Quit status
   if (listed.error?.code === 'ENOENT') return null;
   if (listed.status !== 0 && !/no crontab/i.test(listed.stderr ?? '')) throw new Error(`Cannot inspect crontab: ${listed.stderr?.trim()}`);
   if (!command) {
-    if (host === 'antigravity') return null;
+    if (host === 'antigravity' && !previous?.id) return null;
     throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
   }
   const marker = `# ${id}`; const existing = (listed.stdout ?? '').split('\n').find(line => line.endsWith(marker)); const invocation = cronInvocation(home, name); const expression = existing?.trim().split(/\s+/).slice(0, 5).join(' ') || cronCadence;

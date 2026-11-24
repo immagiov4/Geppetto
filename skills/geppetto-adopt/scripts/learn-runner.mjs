@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { redact } from './signal.mjs';
 export function learningCommand(name) {
+  if (!['claude', 'codex'].includes(name)) return null;
   for (const directory of (process.env.PATH ?? '').split(delimiter)) {
     const paths = [resolve(directory, process.platform === 'win32' ? `${name}.exe` : name), resolve(directory, name === 'codex' ? 'node_modules/@openai/codex/bin/codex.js' : 'node_modules/@anthropic-ai/claude-code/cli.js')];
     for (const path of paths) if (existsSync(path)) return path.endsWith('.js') ? { executable: process.execPath, prefix: [path] } : { executable: path, prefix: [] };

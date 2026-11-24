@@ -353,3 +353,8 @@ test('install.mjs supports --target antigravity in standalone and plugin-hooks m
   machine = JSON.parse(get(home, '.geppetto/machine.json'));
   assert.equal(machine.hooks.antigravity, undefined);
 });
+
+test('learningCommand returns null for antigravity instead of falling back to claude CLI', async () => {
+  const { learningCommand } = await import('../skills/geppetto-adopt/scripts/learn-runner.mjs');
+  assert.equal(learningCommand('antigravity'), null);
+});
