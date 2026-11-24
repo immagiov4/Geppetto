@@ -4,8 +4,10 @@ Edit the distributable files in `skills/`, including the scripts in `skills/gepp
 
 ```sh
 node skills/geppetto-adopt/scripts/install.mjs --target <claude|codex|agents|antigravity> --project . --dry-run
-node skills/geppetto-adopt/scripts/install.mjs --target <claude|codex|agents|antigravity> --project . --plugin-hooks
+node skills/geppetto-adopt/scripts/install.mjs --target <claude|codex|agents|antigravity> --project .
 ```
+
+Add `--plugin-hooks` to both commands when a native plugin is installed for that target.
 
 The install contract, targets and exit codes are in [installation](../skills/geppetto-adopt/references/installation.md). Keep third-party provenance in `THIRD_PARTY_NOTICES.md`.
 

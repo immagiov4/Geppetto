@@ -60,23 +60,22 @@ async function attachJobs(machine, path, registry, { home, harness, source, jobs
   }
 }
 function filterAntigravityHooks(settings, keep) {
-  for (const [name, spec] of Object.entries(settings ?? {})) {
-    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) continue;
-    let remaining = 0;
-    for (const event of ['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop']) {
-      if (!Array.isArray(spec[event])) continue;
-      spec[event] = spec[event].filter(keep);
-      if (!spec[event].length) delete spec[event];
-      else remaining += spec[event].length;
-    }
-    for (const event of ['PreToolUse', 'PostToolUse']) {
-      if (!Array.isArray(spec[event])) continue;
-      spec[event] = spec[event].map(group => ({ ...group, hooks: (group.hooks ?? []).filter(keep) })).filter(group => group.hooks.length);
-      if (!spec[event].length) delete spec[event];
-      else remaining += spec[event].length;
-    }
-    if (!remaining && name === 'geppetto') delete settings[name];
+  const spec = settings?.geppetto;
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return;
+  let remaining = 0;
+  for (const event of ['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop']) {
+    if (!Array.isArray(spec[event])) continue;
+    spec[event] = spec[event].filter(keep);
+    if (!spec[event].length) delete spec[event];
+    else remaining += spec[event].length;
   }
+  for (const event of ['PreToolUse', 'PostToolUse']) {
+    if (!Array.isArray(spec[event])) continue;
+    spec[event] = spec[event].map(group => ({ ...group, hooks: (group.hooks ?? []).filter(keep) })).filter(group => group.hooks.length);
+    if (!spec[event].length) delete spec[event];
+    else remaining += spec[event].length;
+  }
+  if (!remaining) delete settings.geppetto;
 }
 
 /** Reuse machine resources; hook commands point to the recorded package source. */
@@ -135,21 +134,23 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
         await atomicJson(hooksPath, settings);
       }
       machine.hooks[harness] = { source: 'plugin' };
+      await atomicJson(path, machine);
     }
     else if (machine.hooks[harness]?.source !== 'plugin') {
       const settings = await jsonFile(hooksPath, {});
       if (harness === 'antigravity') {
         const template = JSON.parse(await readFile(resolve(source.path, 'skills/geppetto-adopt/assets/templates/hooks/antigravity/hooks.json'), 'utf8'));
         const commands = [];
+        const rootPath = process.platform === 'win32' ? source.path.replaceAll('\\', '/') : source.path;
         const rewrite = hook => {
-          const command = hook.command.replaceAll('${PLUGIN_ROOT}', source.path.replaceAll('\\', '/'));
+          const command = hook.command.replaceAll('${PLUGIN_ROOT}', () => rootPath);
           commands.push(command);
           return { ...hook, command };
         };
         const existing = settings.geppetto && typeof settings.geppetto === 'object' && !Array.isArray(settings.geppetto)
           ? structuredClone(settings.geppetto) : {};
         filterAntigravityHooks({ geppetto: existing }, hook =>
-          !machine.hooks[harness]?.commands?.includes(hook.command) && !/geppetto[^"\n]*[/\\](?:scripts|bin)[/\\]/i.test(hook.command ?? ''));
+          !machine.hooks[harness]?.commands?.includes(hook.command) && !/[/\\]geppetto-adopt[/\\]scripts[/\\]hook\.mjs\b/i.test(hook.command ?? ''));
         for (const [event, entries] of Object.entries(template.geppetto)) {
           const installed = ['PreToolUse', 'PostToolUse'].includes(event)
             ? entries.map(group => ({ ...group, hooks: group.hooks.map(rewrite) }))
@@ -160,6 +161,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
         settings.geppetto = existing;
         await atomicJson(hooksPath, settings);
         machine.hooks[harness] = { source: hooksPath, commands };
+        await atomicJson(path, machine);
       } else {
         const template = JSON.parse(await readFile(resolve(source.path, 'hooks/hooks.json'), 'utf8'));
         settings.hooks ??= {};
@@ -167,7 +169,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
         for (const [event, groups] of Object.entries(template.hooks)) {
           const kept = (settings.hooks[event] ?? []).map(group => ({ ...group, hooks: group.hooks.filter(hook => !machine.hooks[harness]?.commands?.includes(hook.command) && !/geppetto[^"\n]*[/\\](?:scripts|bin)[/\\]/i.test(hook.command ?? '')) })).filter(group => group.hooks.length);
           const installed = groups.map(group => ({ ...group, hooks: group.hooks.map(hook => {
-            const command = hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/')) + ' --harness ' + harness;
+            const command = hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', () => source.path.replaceAll('\\', '/')) + ' --harness ' + harness;
             commands.push(command);
             return { ...hook, command };
           }) }));
@@ -175,6 +177,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
         }
         await atomicJson(hooksPath, settings);
         machine.hooks[harness] = { source: hooksPath, commands };
+        await atomicJson(path, machine);
       }
     }
     delete machine.jobs.learn;

@@ -77,19 +77,31 @@ async function drainPendingContext(root, sessionId) {
 
 const injectSystemMessage = text => text ? { injectSteps: [{ systemMessage: { systemMessage: text } }] } : {};
 
-async function shouldStartTurnOnPreInvocation(root, event) {
-  if (!event.session_id || !await exists(resolve(root, '.geppetto/config.json'))) return false;
-  const state = await readTurnState(root, event.session_id);
-  if (!state) return true;
-  if (event.transcript_path) {
-    try {
-      const checkpoint = await messageCheckpoint(resolve(event.cwd ?? root, event.transcript_path), state.promptCursor);
-      return Boolean(checkpoint.userMessage);
-    } catch {
-      return event.invocation_num === 0;
-    }
-  }
-  return event.invocation_num === 0;
+const sessionStatePath = (root, sessionId) =>
+  resolve(root, '.geppetto/hook-state', `ag-session-${digest(sessionId)}.json`);
+
+async function readSessionState(root, sessionId) {
+  if (!sessionId) return null;
+  const state = await jsonFile(sessionStatePath(root, sessionId), null);
+  return state && typeof state === 'object' && !Array.isArray(state) ? state : null;
+}
+
+async function writeSessionState(root, sessionId, update) {
+  if (!sessionId) return;
+  const path = sessionStatePath(root, sessionId);
+  await withTurnLock(`${turnStatePath(root, sessionId)}.lock`, async () => {
+    await ignoreLocalFiles(root, ['/hook-state/']);
+    await mkdir(dirname(path), { recursive: true });
+    const current = await jsonFile(path, {});
+    const base = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+    await atomicJson(path, { ...base, ...update }, { mode: 0o600 });
+  });
+}
+
+function fresherCursor(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return (b.offset ?? -1) > (a.offset ?? -1) ? b : a;
 }
 
 /** Translate Antigravity hook payloads and responses around Geppetto's core hook pipeline. */
@@ -97,14 +109,44 @@ export async function handleAntigravityEvent(normalized, options, runCore) {
   const phase = normalized.hook_event_name;
   const root = await projectRoot(normalized.cwd ?? '.');
   const sessionId = normalized.session_id;
+  const adopted = Boolean(sessionId && await exists(resolve(root, '.geppetto/config.json')));
 
   if (phase === 'PreInvocation') {
-    if (await shouldStartTurnOnPreInvocation(root, normalized)) {
-      await drainPendingContext(root, sessionId);
-      await runCore({ ...normalized, hook_event_name: 'UserPromptSubmit' }, options);
+    if (adopted) {
+      const agState = await readSessionState(root, sessionId);
+      const turnState = await readTurnState(root, sessionId);
+      const cursor = fresherCursor(agState?.promptCursor, turnState?.promptCursor);
+      let checkpoint = null;
+      if (normalized.transcript_path) {
+        try {
+          checkpoint = await messageCheckpoint(resolve(normalized.cwd ?? root, normalized.transcript_path), cursor);
+        } catch {
+          checkpoint = null;
+        }
+      }
+      const freshTurn = !agState || !agState.active || (!normalized.transcript_path && normalized.invocation_num === 0);
+      const steering = !freshTurn && Boolean(checkpoint?.userMessage);
+      if (freshTurn) {
+        await drainPendingContext(root, sessionId);
+        await runCore({ ...normalized, hook_event_name: 'UserPromptSubmit' }, options);
+        const nextTurn = await readTurnState(root, sessionId);
+        await writeSessionState(root, sessionId, {
+          active: true,
+          promptCursor: fresherCursor(checkpoint?.cursor ?? agState?.promptCursor, nextTurn?.promptCursor),
+        });
+      } else if (steering) {
+        await runCore({ ...normalized, hook_event_name: 'UserPromptSubmit', steering: true }, options);
+        const nextTurn = await readTurnState(root, sessionId);
+        await writeSessionState(root, sessionId, {
+          active: true,
+          promptCursor: fresherCursor(checkpoint.cursor, nextTurn?.promptCursor),
+        });
+      } else if (checkpoint?.cursor && JSON.stringify(checkpoint.cursor) !== JSON.stringify(agState?.promptCursor)) {
+        await writeSessionState(root, sessionId, { active: true, promptCursor: checkpoint.cursor });
+      }
     }
     const queued = await drainPendingContext(root, sessionId);
-    if (queued && await exists(resolve(root, '.geppetto/config.json'))) {
+    if (queued && adopted) {
       try {
         await logHookEvent(root, { hook: 'antigravityContext', status: 'delivered', injectedBytes: Buffer.byteLength(queued), modelCalls: 0 }, normalized);
       } catch (error) {
@@ -116,7 +158,8 @@ export async function handleAntigravityEvent(normalized, options, runCore) {
 
   if (phase === 'Stop' && normalized.termination_reason && normalized.termination_reason !== 'NO_TOOL_CALL') {
     await drainPendingContext(root, sessionId);
-    if (sessionId && await exists(resolve(root, '.geppetto/config.json'))) {
+    if (adopted) {
+      await writeSessionState(root, sessionId, { active: false });
       await logHookEvent(root, { hook: 'antigravityStop', status: 'skipped', reason: normalized.termination_reason, modelCalls: 0 }, normalized);
     }
     return {};
@@ -156,6 +199,7 @@ export async function handleAntigravityEvent(normalized, options, runCore) {
         reason: result.reason ?? 'Complete the pending Geppetto check before finishing.',
       };
     }
+    if (adopted) await writeSessionState(root, sessionId, { active: false });
     return {};
   }
 

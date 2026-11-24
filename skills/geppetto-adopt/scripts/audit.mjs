@@ -1,5 +1,6 @@
 import { screenChoiceReminder, screenSourceStatus } from './screen-config.mjs';
 import { boundedMetricsAudit, printMetrics } from './metrics-audit.mjs';
+import { readdirSync } from 'node:fs';
 import { mkdtemp, writeFile, rm, stat, realpath } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,10 +14,21 @@ import { readKind } from './hook-events.mjs';
 import { projectDataPath } from './project-records.mjs';
 const status = value => value ? 'present' : 'absent';
 const repositoryIdentity = value => /^https?:\/\//.test(value) ? value.replace(/\.git$/, '') : value;
+function antigravityPluginSkillRoots(home) {
+  const dir = resolve(home, '.gemini/config/plugins');
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => resolve(dir, entry.name, 'skills'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
 /** Counts and observed reads only; missing observations are never inferred as usage. */
 export async function learningAudit(project, { home = userHome(), since, now = Date.now() } = {}) {
   const policy = learningPolicy(await jsonFile(resolve(project, '.geppetto/config.json'), {})), memory = await memorySettings(project, home); if (since !== undefined && !Number.isFinite(Date.parse(since))) throw new UsageError('--since must be an ISO date.'); const start = since ?? (policy.outcomeWeeks ? new Date(now - policy.outcomeWeeks * 7 * 24 * 60 * 60 * 1000).toISOString() : ''), startTime = start ? Date.parse(start) : -Infinity; const reads = await localRecords(project, 'reads'), signals = (await localRecords(project, 'signals')), archive = (await signalArchive(project)); const seen = (path, after) => reads.some(row => resolve(row.worktree && contained(row.worktree, row.path) ? resolve(project, relative(row.worktree, row.path)) : row.path) === resolve(path) && Date.parse(row.ts) >= after);
-  const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {}); const roots = [resolve(project, '.agents/skills'), resolve(project, '.claude/skills'), resolve(home, '.claude/skills'), resolve(home, '.agents/skills'), resolve(home, '.codex/skills'), resolve(home, '.gemini/config/skills'), resolve(home, '.gemini/config/plugins'), ...Object.values(machine.projects?.[project] ?? {}).map(source => resolve(source, 'skills'))];
+  const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {}); const roots = [resolve(project, '.agents/skills'), resolve(project, '.claude/skills'), resolve(home, '.claude/skills'), resolve(home, '.agents/skills'), resolve(home, '.codex/skills'), resolve(home, '.gemini/config/skills'), ...antigravityPluginSkillRoots(home), ...Object.values(machine.projects?.[project] ?? {}).map(source => resolve(source, 'skills'))];
   if (memory?.localPath) roots.push(resolve(memory.localPath, 'buckets'));
   const pages = [...new Set(roots.flatMap(root => {
     try { return filesUnder(root, { skipLinks: true, excludeDirs: ['.git', 'node_modules'] }); } catch (error) { if (error.code === 'ENOENT') return []; throw error; }

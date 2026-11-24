@@ -283,7 +283,7 @@ async function editingEvent(root, state, statePath, event, policy) {
       }
       state.worktree = worktree; await atomicJson(statePath, state);
     }
-    if (policy.checks.some(check => check.id === 'feedback') && !(event.tool_error || event.tool_response?.isError || event.tool_response?.is_error) && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
+    if (policy.checks.some(check => check.id === 'feedback') && !(event.tool_error || event.tool_response?.isError || event.tool_response?.is_error || event.tool_input?.run_in_background || event.tool_input?.IsDaemon) && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
       if (state.epoch === state.userEpoch && staged?.epoch !== state.epoch) return {};
       const epoch = randomUUID(); await atomicJson(statePath, { ...state, epoch, ...(state.shellPending === state.epoch ? { shellPending: epoch } : {}) }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event);
     } return {};
@@ -295,7 +295,7 @@ async function editingEvent(root, state, statePath, event, policy) {
     await logHookEvent(root, { hook: 'turnGate', status: 'block', disposition: 'denied', checks: ['requirements'] }, event);
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Resolve the foundation with the user through $geppetto-spec. Use the Turn record reference to supply the complete ADR, then record it with ${recordCommand(event.session_id, state.turn)}.` } };
   }
-  const strict = event.harness === 'codex';
+  const strict = event.harness === 'codex' || event.harness === 'antigravity';
   const override = strict && overrideFor(state, 'edit');
   const needsDecision = policy.checks.length && staged?.epoch !== state.epoch;
   const first = needsDecision && !override && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString());
@@ -447,7 +447,7 @@ async function completionEvent(event, reviewArchive) {
     try { checkpoint = await messageCheckpoint(event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state.transcript_path, state.promptCursor); }
     catch (error) { checkpointError = error; }
   }
-  if (!state || (event.turn_id ? state.turn !== event.turn_id : kind === 'UserPromptSubmit' && (!checkpoint || checkpoint.userMessage))) {
+  if (!state || (event.turn_id ? state.turn !== event.turn_id : kind === 'UserPromptSubmit' && !event.steering && (!checkpoint || checkpoint.userMessage))) {
     await ignoreLocalFiles(root, ['/turns.jsonl', '/reviews.jsonl', '/hook-state/', '/hook-events.jsonl']);
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
     const prior = event.turn_id ? currentDecision(await jsonFile(decisionPath(root, event.session_id, event.turn_id), null)) : null;

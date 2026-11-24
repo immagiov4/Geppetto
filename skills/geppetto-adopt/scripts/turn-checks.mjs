@@ -1,7 +1,18 @@
 import { UsageError } from './common.mjs';
 import { readFileSync } from 'node:fs';
 export const defaultTurnChecks = JSON.parse(readFileSync(new URL('./turn-checks.json', import.meta.url), 'utf8'));
-export const turnPolicy = ({ turnChecks }) => ({ ...defaultTurnChecks, ...(Array.isArray(turnChecks) ? { checks: turnChecks } : turnChecks) });
+const legacyRearmTools = new Map([
+  ['^(Bash|exec_command|shell_command|shell)$', '^(Bash|exec_command|shell_command|shell|run_command)$'],
+  ['^(wait_agent|Task|Agent|task_result)$', '^(wait_agent|Task|Agent|task_result|invoke_subagent)$'],
+]);
+const upgradeRearm = rules => Array.isArray(rules)
+  ? rules.map(rule => rule && typeof rule.tool === 'string' && legacyRearmTools.has(rule.tool)
+    ? { ...rule, tool: legacyRearmTools.get(rule.tool) } : rule)
+  : rules;
+export const turnPolicy = ({ turnChecks }) => {
+  const policy = { ...defaultTurnChecks, ...(Array.isArray(turnChecks) ? { checks: turnChecks } : turnChecks) };
+  return { ...policy, rearmOn: upgradeRearm(policy.rearmOn) };
+};
 export function validateTurnPolicy(config) {
   const supplied = config.turnChecks, policy = turnPolicy(config);
   const valid = text => typeof text === 'string' && text.trim() && !/[\r\n]/.test(text);
