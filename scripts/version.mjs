@@ -1,9 +1,22 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-export const manifests = ['package.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.agents/plugins/marketplace.json'];
+export const manifests = ['package.json', 'plugin.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.agents/plugins/marketplace.json'];
 const versionOf = (doc, file) => file.includes('marketplace.json') ? doc.plugins.find(p => p.name === 'geppetto').version : doc.version;
-export function versions(revision) {
-  return manifests.map(file => [file, versionOf(JSON.parse(revision !== undefined ? execFileSync('git', ['show', `${revision}:${file}`], { encoding: 'utf8', windowsHide: true }) : readFileSync(file, 'utf8')), file)]);
+export function versions(revision, { tolerateMissing = false } = {}) {
+  const result = [];
+  for (const file of manifests) {
+    let raw;
+    try {
+      raw = revision !== undefined
+        ? execFileSync('git', ['show', `${revision}:${file}`], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+        : readFileSync(file, 'utf8');
+    } catch (error) {
+      if (tolerateMissing && revision !== undefined) continue;
+      throw error;
+    }
+    result.push([file, versionOf(JSON.parse(raw), file)]);
+  }
+  return result;
 }
 export function bump(version) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Expected version x.y.z');

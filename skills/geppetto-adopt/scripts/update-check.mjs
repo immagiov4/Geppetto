@@ -1,9 +1,10 @@
+import { readdirSync } from 'node:fs';
 import { mkdir, readFile, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { atomicJson, claimFile, exists, jsonFile, run, userHome } from './common.mjs';
+import { atomicJson, claimFile, contained, exists, jsonFile, run, userHome } from './common.mjs';
 import { connectCodex, hookTrust, samePath } from './codex-hook-trust.mjs';
 import { maintenanceJobs, maintenanceLauncherText, maintenanceRegistrationStatus } from './maintenance.mjs';
 import { memoryConfiguration } from './memory-config.mjs';
@@ -16,10 +17,64 @@ const pluginId = 'geppetto@geppetto';
 const pluginRepair = {
   claude: ['claude plugin marketplace update geppetto', 'claude plugin update geppetto@geppetto'],
   codex: ['codex plugin marketplace upgrade geppetto', 'codex plugin add geppetto@geppetto'],
+  antigravity: ['git -C ~/.gemini/config/plugins/geppetto pull --ff-only', 'Reinstall or update ~/.gemini/config/plugins/geppetto from the published release'],
 };
 const installer = fileURLToPath(new URL('./install.mjs', import.meta.url));
 
-function installedPlugin(target, root) {
+async function antigravityPluginDir(home, sourcePath) {
+  const pluginsRoot = resolve(home, '.gemini/config/plugins');
+  const candidates = [];
+  if (typeof sourcePath === 'string' && sourcePath.trim()) {
+    const resolved = resolve(sourcePath);
+    if (contained(pluginsRoot, resolved) && resolved !== pluginsRoot) candidates.push(resolved);
+  }
+  const defaultDir = resolve(pluginsRoot, 'geppetto');
+  if (!candidates.includes(defaultDir)) candidates.push(defaultDir);
+  try {
+    for (const entry of readdirSync(pluginsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const dir = resolve(pluginsRoot, entry.name);
+      if (!candidates.includes(dir)) candidates.push(dir);
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  for (const dir of candidates) {
+    const manifest = await jsonFile(resolve(dir, 'plugin.json'), null);
+    if (manifest && manifest.name === 'geppetto') return { dir, manifest };
+  }
+  return null;
+}
+
+async function antigravityStandaloneHooksHealthy(home, machine) {
+  const registration = machine?.hooks?.antigravity;
+  if (!registration || registration.source === 'plugin' || !Array.isArray(registration.commands) || !registration.commands.length) return false;
+  const settings = await jsonFile(registration.source, null);
+  const spec = settings?.geppetto;
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) return false;
+  const present = new Set();
+  for (const event of ['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop']) {
+    for (const hook of Array.isArray(spec[event]) ? spec[event] : []) if (typeof hook?.command === 'string') present.add(hook.command);
+  }
+  for (const event of ['PreToolUse', 'PostToolUse']) {
+    for (const group of Array.isArray(spec[event]) ? spec[event] : []) {
+      for (const hook of Array.isArray(group?.hooks) ? group.hooks : []) if (typeof hook?.command === 'string') present.add(hook.command);
+    }
+  }
+  return registration.commands.every(cmd => present.has(cmd));
+}
+
+async function installedPlugin(target, root, home = userHome(), sourcePath) {
+  if (target === 'antigravity') {
+    const found = await antigravityPluginDir(home, sourcePath);
+    if (!found) return undefined;
+    const { dir, manifest } = found;
+    if (manifest.disabled === true) return undefined;
+    const config = await jsonFile(resolve(home, '.gemini/config/config.json'), {});
+    if (config.plugins?.[basename(dir)]?.enabled === false || config.plugins?.[manifest.name]?.enabled === false) return undefined;
+    const hooksPresent = await exists(resolve(dir, 'hooks.json'));
+    return { ...manifest, pluginDir: dir, hooksPresent };
+  }
   const args = target === 'codex' ? ['plugin', 'list', '--marketplace', 'geppetto', '--json'] : ['plugin', 'list', '--json'];
   const command = learningCommand(target);
   if (!command) throw new Error(`Unable to find the ${target} CLI`);
@@ -106,7 +161,7 @@ function olderVersion(installed, published) {
 }
 
 async function readUpdateNotice(root, { home = userHome(), now = Date.now, harness, checkTrust = codexTrustStatus } = {}) {
-  const targets = harness === 'claude' ? ['claude'] : harness === 'codex' ? ['codex', 'agents'] : ['claude', 'codex', 'agents'];
+  const targets = harness === 'claude' ? ['claude'] : harness === 'antigravity' ? ['antigravity'] : harness === 'codex' ? ['codex', 'agents'] : ['claude', 'codex', 'agents', 'antigravity'];
   const local = await jsonFile(resolve(root, '.geppetto/install.json'), {});
   const user = root === home || !targets.some(name => local.installations?.[name]);
   const manifest = user ? await jsonFile(resolve(home, '.geppetto/install.json'), {}) : local;
@@ -143,10 +198,13 @@ async function readUpdateNotice(root, { home = userHome(), now = Date.now, harne
   const pinDrift = !user && !olderVersion(status.version, packageVersion) && await checkPin(root, status.sha, () => {});
   const maintenanceDrift = await machineDrift(user ? home : root, manifest.source, home, { log: () => {}, scheduler: status.scheduler ?? {} });
   const plugin = manifest.installations[target]?.plugin === true;
+  const agStandaloneDrift = !plugin && target === 'antigravity'
+    && !await antigravityStandaloneHooksHealthy(home, await jsonFile(resolve(home, '.geppetto/machine.json'), {}));
   const trust = !upgradeAvailable && (target === 'codex' || target === 'agents')
     ? await startupTrust(root, home, epoch, packageVersion, plugin, checkTrust) : 'trusted';
   const reasons = [olderVersion(manifest.source?.version, packageVersion) && 'adoption behind',
     pinDrift && 'project CI pin', maintenanceDrift && 'maintenance registration',
+    agStandaloneDrift && 'Antigravity standalone hooks',
     !['trusted', 'checking'].includes(trust) && ('Codex hook trust: ' + trust)].filter(Boolean);
   if (!upgradeAvailable && !reasons.length) return '';
   const summary = upgradeAvailable ? 'Geppetto ' + status.version + ' is published.' : 'Geppetto installation needs repair (' + reasons.join(', ') + ').';
@@ -208,8 +266,10 @@ async function machineDrift(root, source, home = userHome(), { log = console.log
     const schedulerMissing = ['missing', 'disabled', 'action differs', 'cadence differs'].includes(schedule[name]);
     const scheduled = ['scheduled', 'scheduled-elsewhere'].includes(job?.status) && registered && !schedulerMissing;
     if (schedulerMissing) log(`${name}: native registration ${schedule[name]}`);
-    const disabled = !job || job.status === 'disabled' || job.status === 'scheduled-elsewhere';
-    const healthy = local.maintenance?.enabled === false ? disabled : scheduled;
+    const antigravityOnly = Object.keys(machine.hooks ?? {}).length > 0 && Object.keys(machine.hooks).every(name => name === 'antigravity');
+    const expectedUnscheduled = antigravityOnly && job?.status === 'needs-scheduler' && !job.scheduler;
+    const disabled = !job || job.status === 'disabled' || job.status === 'scheduled-elsewhere' || expectedUnscheduled;
+    const healthy = local.maintenance?.enabled === false ? disabled : (scheduled || expectedUnscheduled);
     log(`${name}: ${job?.status ?? 'missing'}${registered ? '' : ' (registry entry missing or different)'}`);
     drift ||= !healthy;
   }
@@ -233,12 +293,18 @@ export async function checkUpdate({ root, target, user, manifest, plugin, shellQ
   let installPlugin = false;
   let repairPlugin = false;
   let repairTrust = false;
+  let repairStandaloneHooks = false;
+  let installed;
   const harness = target === 'agents' ? 'codex' : target;
   if (plugin) {
-    const installed = installedPlugin(harness, root);
+    installed = await installedPlugin(harness, root, home, manifest.source?.path);
     console.log(`Plugin (${target}): ${installed?.version ?? 'missing or disabled'}`);
     installPlugin = !installed;
     repairPlugin = installed?.version !== version;
+    if (harness === 'antigravity' && installed && !installed.hooksPresent) {
+      console.log(`Plugin hooks (${target}): missing hooks.json in ${installed.pluginDir}`);
+      repairPlugin = true;
+    }
     if (harness === 'codex' && installed) {
       repairTrust = !await codexTrustStatus(root);
       console.log(`Codex hook trust: ${repairTrust ? 'approval required' : 'trusted'}`);
@@ -250,12 +316,19 @@ export async function checkUpdate({ root, target, user, manifest, plugin, shellQ
     repairTrust = !registration || !await codexTrustStatus(root, registration.source === 'plugin' ? undefined : registration);
     console.log(`Codex hook trust: ${repairTrust ? 'approval required' : 'trusted'}`);
   }
+  if (!plugin && harness === 'antigravity' && installedVersion) {
+    const machine = await jsonFile(resolve(home, '.geppetto/machine.json'), {});
+    repairStandaloneHooks = !await antigravityStandaloneHooksHealthy(home, machine);
+    console.log(`Antigravity standalone hooks: ${repairStandaloneHooks ? 'missing or outdated' : 'current'}`);
+  }
   if (repairPlugin) {
-    const [refresh, update] = pluginRepair[target === 'agents' ? 'codex' : target];
+    const [refresh, update] = harness === 'antigravity' && installed?.pluginDir
+      ? [`git -C ${shellQuote(installed.pluginDir)} pull --ff-only`, `Reinstall or update ${installed.pluginDir} from the published release`]
+      : pluginRepair[harness];
     console.log(refresh);
     console.log(target === 'claude' && installPlugin ? 'claude plugin install geppetto@geppetto' : update);
   }
-  if (drift || repairPlugin || repairTrust) {
+  if (drift || repairPlugin || repairTrust || repairStandaloneHooks) {
     const checkout = `geppetto-${version}`;
     const installPath = shellQuote(bundled.version === version ? installer : `${checkout}/skills/geppetto-adopt/scripts/install.mjs`);
     if (bundled.version !== version) console.log(`git clone --branch ${tag} https://github.com/immagiov4/Geppetto.git ${checkout}`);

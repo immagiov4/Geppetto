@@ -13,8 +13,8 @@ function writtenPaths(event) {
     const patch = typeof input === 'string' ? input : input?.input ?? input?.patch ?? '';
     return typeof patch === 'string' ? [...patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$/gm)].map(match => match[1].trim()) : [];
   }
-  if (!['write', 'edit', 'multiedit'].includes(tool)) return [];
-  return [input?.file_path ?? input?.path, ...(input?.edits ?? []).map(edit => edit.file_path ?? edit.path)].filter(path => typeof path === 'string');
+  if (!['write', 'edit', 'multiedit', 'write_file', 'edit_file'].includes(tool)) return [];
+  return [input?.file_path ?? input?.path ?? input?.Path, ...(input?.edits ?? []).map(edit => edit.file_path ?? edit.path ?? edit.Path)].filter(path => typeof path === 'string');
 }
 /** Reuse PostToolUse dispatch; native writes need no provider or learning threshold. */
 export async function nativeMemoryEvent(event, { home = userHome() } = {}) {

@@ -19,6 +19,7 @@ import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
 import { placeholderReason } from './gate-sections.mjs';
 import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, commandArgs, commandSegments, userTurnDecision } from './turn-checks.mjs';
+import { isAntigravityEvent, normalizeAntigravityEvent, handleAntigravityEvent } from './antigravity.mjs';
 function sectionFeedback(body, cwd, runCommand) {
   const result = runCommand(process.execPath, [fileURLToPath(new URL('./gate-sections.mjs', import.meta.url)), '--pr', '-'], { cwd, input: body });
   if (result.status === 0) return 'Geppetto: PR sections pass.';
@@ -227,7 +228,7 @@ function validFoundationRecord(text, subject) {
 
 function withinPendingScope(root, event, scope) {
   const input = event.tool_input;
-  const path = input?.file_path ?? input?.path;
+  const path = input?.file_path ?? input?.path ?? input?.Path;
   const patch = typeof input === 'string' ? input : input?.patch;
   const move = [input?.source, input?.destination].filter(value => typeof value === 'string');
   const targets = move.length === 2 ? move : typeof path === 'string' ? [path] : typeof patch === 'string'
@@ -282,7 +283,7 @@ async function editingEvent(root, state, statePath, event, policy) {
       }
       state.worktree = worktree; await atomicJson(statePath, state);
     }
-    if (policy.checks.some(check => check.id === 'feedback') && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
+    if (policy.checks.some(check => check.id === 'feedback') && !(event.tool_error || event.tool_response?.isError || event.tool_response?.is_error || event.tool_input?.run_in_background || event.tool_input?.IsDaemon) && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
       if (state.epoch === state.userEpoch && staged?.epoch !== state.epoch) return {};
       const epoch = randomUUID(); await atomicJson(statePath, { ...state, epoch, ...(state.shellPending === state.epoch ? { shellPending: epoch } : {}) }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event);
     } return {};
@@ -294,7 +295,7 @@ async function editingEvent(root, state, statePath, event, policy) {
     await logHookEvent(root, { hook: 'turnGate', status: 'block', disposition: 'denied', checks: ['requirements'] }, event);
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `Resolve the foundation with the user through $geppetto-spec. Use the Turn record reference to supply the complete ADR, then record it with ${recordCommand(event.session_id, state.turn)}.` } };
   }
-  const strict = event.harness === 'codex';
+  const strict = event.harness === 'codex' || event.harness === 'antigravity';
   const override = strict && overrideFor(state, 'edit');
   const needsDecision = policy.checks.length && staged?.epoch !== state.epoch;
   const first = needsDecision && !override && await claimFile(`${path}.${state.epoch}.requested`, new Date().toISOString());
@@ -446,7 +447,7 @@ async function completionEvent(event, reviewArchive) {
     try { checkpoint = await messageCheckpoint(event.transcript_path ? resolve(event.cwd ?? root, event.transcript_path) : state.transcript_path, state.promptCursor); }
     catch (error) { checkpointError = error; }
   }
-  if (!state || (event.turn_id ? state.turn !== event.turn_id : kind === 'UserPromptSubmit' && (!checkpoint || checkpoint.userMessage))) {
+  if (!state || (event.turn_id ? state.turn !== event.turn_id : kind === 'UserPromptSubmit' && !event.steering && (!checkpoint || checkpoint.userMessage))) {
     await ignoreLocalFiles(root, ['/turns.jsonl', '/reviews.jsonl', '/hook-state/', '/hook-events.jsonl']);
     const base = gitOutput(root, ['rev-parse', 'HEAD']);
     const prior = event.turn_id ? currentDecision(await jsonFile(decisionPath(root, event.session_id, event.turn_id), null)) : null;
@@ -461,7 +462,7 @@ async function completionEvent(event, reviewArchive) {
     await atomicJson(statePath, state);
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
-  const turnConfig = await jsonFile(resolve(root, '.geppetto/config.json'), {}); if (turnPolicy(turnConfig).checks.length || (state.transcript_path && turnConfig.hooks?.learnNudge?.enabled !== false)) {
+  const turnConfig = await jsonFile(resolve(root, '.geppetto/config.json'), {}); if (turnPolicy(turnConfig).checks.length || (state.transcript_path && (event.harness === 'antigravity' || turnConfig.hooks?.learnNudge?.enabled !== false))) {
     try { if (checkpointError) throw checkpointError; checkpoint ??= await messageCheckpoint(state.transcript_path, state.promptCursor); }
     catch (error) {
       if (!state.messageError) { state.messageError = error.code ?? 'invalid-transcript'; await atomicJson(statePath, state); await logHookEvent(root, { hook: 'turnGate', status: 'transcript-unavailable', reason: state.messageError, modelCalls: 0 }, event); }
@@ -558,6 +559,11 @@ async function dispatch(event, { runCommand = run, now = Date.now, home, codexHo
     return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };   }
   return {}; }
 export async function handleEvent(event, options) {
+  if (isAntigravityEvent(event, options?.harness)) {
+    const normalized = normalizeAntigravityEvent(event);
+    const context = { harness: 'antigravity', sessionId: normalized?.session_id ?? null, turnId: null, epoch: null, ...(normalized?.hook_event_name === 'Stop' && { stopAttemptId: randomUUID() }) };
+    return recordContext.run(context, () => handleAntigravityEvent(normalized, { ...options, harness: 'antigravity' }, handleWithEvidence));
+  }
   const harness = options?.harness ?? (event?.turn_id || process.env.PLUGIN_ROOT ? 'codex'
     : process.env.CLAUDE_PLUGIN_ROOT || (event?.session_id && event.hook_event_name !== 'SessionStart') ? 'claude' : null);
   const context = { harness, sessionId: event?.session_id ?? null, turnId: event?.turn_id ?? null, epoch: null, ...(event?.hook_event_name === 'Stop' && { stopAttemptId: randomUUID() }) };
@@ -598,8 +604,18 @@ async function handleWithEvidence(event, options) {
   }
 }
 export const main = async args => {
-  const nativeHarness = args.length === 2 && args[0] === '--harness' && ['codex', 'claude'].includes(args[1]) ? args[1] : undefined;
-  if (!args.length || nativeHarness) try { return await hookMain([], 'Hook', event => handleEvent(event, { harness: nativeHarness })); } catch (error) { console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); console.log('{}'); return 0; }
+  const nativeHarness = args.length === 2 && args[0] === '--harness' && ['codex', 'claude', 'antigravity'].includes(args[1]) ? args[1] : undefined;
+  if (!args.length || nativeHarness) {
+    let rawEvent;
+    try {
+      return await hookMain([], 'Hook', event => { rawEvent = event; return handleEvent(event, { harness: nativeHarness }); });
+    } catch (error) {
+      console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`);
+      const failOpen = isAntigravityEvent(rawEvent, nativeHarness) && (rawEvent?.hookEventName ?? rawEvent?.hook_event_name) === 'PreToolUse' ? { decision: 'allow' } : {};
+      console.log(JSON.stringify(failOpen));
+      return 0;
+    }
+  }
   const opts = parseArgs(args, { flags: ['--current-turn', '--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn', '--evidence'] });
   if (opts['--current-turn'] && opts['--session'] && Object.keys(opts).every(key => ['_', '--current-turn', '--session'].includes(key)) && !opts._.length) {
     const state = currentState(await readTurnState(await projectRoot('.'), opts['--session']));

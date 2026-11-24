@@ -12,7 +12,7 @@ test('version checks cover commits and pushes to main', () => {
  const check = (mode, input) => run(process.execPath, [join(source, 'check-version.mjs'), mode, dir], input);
  try {
   git('init', '-b', 'main'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test');
-  for (const file of ['package.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.agents/plugins/marketplace.json']) {
+  for (const file of ['package.json', 'plugin.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.agents/plugins/marketplace.json']) {
    mkdirSync(join(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), JSON.stringify(file.includes('marketplace') ? { plugins: [{ name: 'geppetto', version: '1.0.0' }] } : { version: '1.0.0' }));
   }
   git('add', '.'); git('commit', '-m', 'base'); const base = git('rev-parse', 'HEAD'); git('switch', '-c', 'work');
@@ -25,6 +25,15 @@ test('version checks cover commits and pushes to main', () => {
   assert.notEqual(check('push', input(git('rev-parse', 'HEAD'))).status, 0);
   assert.equal(run(process.execPath, [join(source, 'bump-version.mjs'), '1.0.1']).status, 0);
   git('add', '.'); git('commit', '-m', 'bump'); assert.equal(check('push', input(git('rev-parse', 'HEAD'))).status, 0);
+  // First push introducing a new manifest (e.g. plugin.json absent on remote main) must succeed when bumped.
+  const prePlugin = git('rev-parse', 'HEAD');
+  git('rm', '-q', 'plugin.json'); git('commit', '-m', 'without-plugin-manifest');
+  const withoutPlugin = git('rev-parse', 'HEAD');
+  git('checkout', prePlugin, '--', 'plugin.json');
+  assert.equal(run(process.execPath, [join(source, 'bump-version.mjs'), '1.0.2']).status, 0);
+  git('add', '.'); git('commit', '-m', 'add-plugin-manifest');
+  git('update-ref', 'refs/heads/main', withoutPlugin);
+  assert.equal(check('push', `refs/heads/main ${git('rev-parse', 'HEAD')} refs/heads/main ${withoutPlugin}\n`).status, 0);
  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

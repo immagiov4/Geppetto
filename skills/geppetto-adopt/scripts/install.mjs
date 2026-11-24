@@ -18,18 +18,19 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const payloadHash = bytes => hash(isUtf8(bytes) && !bytes.includes(0) ? bytes.toString('utf8').replaceAll('\r\n', '\n') : bytes);
 const shellQuote = value => `'${value.replaceAll("'", process.platform === 'win32' ? "''" : "'\\''")}'`;
 const portable = path => path.split(sep).join('/');
-const generatedPaths = new Set(['AGENTS.md', 'CLAUDE.md', '.geppetto/config.json', '.geppetto/authorizations', '.claude/settings.json', '.codex/hooks.json', '.github/workflows/pr-gate.yml']);
+const generatedPaths = new Set(['AGENTS.md', 'CLAUDE.md', '.geppetto/config.json', '.geppetto/authorizations', '.claude/settings.json', '.codex/hooks.json', '.agents/hooks.json', '.github/workflows/pr-gate.yml']);
+const skillDirectory = (target, user) => target === 'claude' ? '.claude/skills' : target === 'antigravity' && user ? '.gemini/config/skills' : '.agents/skills';
 // A copied skill must not turn an installation path into a write outside its root.
 async function safePath(root, path) {
   if (!contained(root, path) || resolve(root) === resolve(path)) throw new Error(`${path}:1: Install path escapes its root`);
   await rejectSymlinks(path);
 }
-function validateManifest(manifest, root, statePath) {
+function validateManifest(manifest, root, statePath, user = false) {
   if (manifest.version !== 1 || !manifest.installations || typeof manifest.installations !== 'object' || Array.isArray(manifest.installations)) throw new Error(`${statePath}:1: Invalid install manifest`);
-  for (const path of manifest.removed ?? []) if (typeof path !== 'string' || (!/^(?:\.agents\/skills\/|\.claude\/skills\/|\.geppetto\/bin\/)/.test(path) && !generatedPaths.has(path)) || !contained(root, resolve(root, path)) || portable(relative(root, resolve(root, path))) !== path) throw new Error(`${statePath}:1: Invalid retired path`);
+  for (const path of manifest.removed ?? []) if (typeof path !== 'string' || (!/^(?:\.agents\/skills\/|\.claude\/skills\/|\.gemini\/config\/skills\/|\.geppetto\/bin\/)/.test(path) && !generatedPaths.has(path)) || !contained(root, resolve(root, path)) || portable(relative(root, resolve(root, path))) !== path) throw new Error(`${statePath}:1: Invalid retired path`);
   for (const [owner, entry] of Object.entries(manifest.installations)) {
-    if (!['claude', 'codex', 'agents'].includes(owner) || !entry || !entry.files || typeof entry.files !== 'object' || Array.isArray(entry.files)) throw new Error(`${statePath}:1: Invalid install owner`);
-    const prefix = owner === 'claude' ? '.claude/skills/' : '.agents/skills/';
+    if (!['claude', 'codex', 'agents', 'antigravity'].includes(owner) || !entry || !entry.files || typeof entry.files !== 'object' || Array.isArray(entry.files)) throw new Error(`${statePath}:1: Invalid install owner`);
+    const prefix = `${skillDirectory(owner, user)}/`;
     for (const [path, ownedHash] of Object.entries(entry.files)) {
       if ((!path.startsWith(prefix) && !path.startsWith('.geppetto/bin/') && !generatedPaths.has(path)) || !contained(root, resolve(root, path)) || portable(relative(root, resolve(root, path))) !== path) throw new Error(`${statePath}:1: Owned path escapes its root or target: ${path}`);
       if (!/^[a-f\d]{64}$/.test(ownedHash)) throw new Error(`${statePath}:1: Invalid owned hash for ${path}`);
@@ -40,15 +41,15 @@ function validateManifest(manifest, root, statePath) {
 async function packageSource(manifest, statePath) {
   const scriptDir = dirname(fileURLToPath(import.meta.url)), candidate = resolve(scriptDir, '../../..');
   // Only the original package layout may discover itself; copies use recorded provenance.
-  const original = resolve(candidate, 'skills/geppetto-adopt/scripts') === scriptDir && await exists(resolve(candidate, 'package.json')); const provenance = original ? null : manifest.source ?? (await jsonFile(resolve(scriptDir, '../../../../.geppetto/install.json'), {})).source; const sourceRoot = original ? candidate : provenance?.path;
+  const original = resolve(candidate, 'skills/geppetto-adopt/scripts') === scriptDir && await exists(resolve(candidate, 'package.json')); const provenance = original ? null : manifest.source ?? (await jsonFile(resolve(scriptDir, '../../../../.geppetto/install.json'), {})).source ?? (await jsonFile(resolve(scriptDir, '../../../../../.geppetto/install.json'), {})).source; const sourceRoot = original ? candidate : provenance?.path;
   if (!sourceRoot || typeof sourceRoot !== 'string') throw new Error(`${statePath}:1: No recorded package source; run the installer from the Geppetto source checkout`);
   const metadata = await jsonFile(resolve(sourceRoot, 'package.json'));
   if (metadata.name !== 'geppetto' || typeof metadata.version !== 'string' || !await exists(resolve(sourceRoot, 'skills/geppetto-adopt/scripts/install.mjs'))) throw new Error(`${statePath}:1: Recorded package source is not a Geppetto package`);
   return { path: resolve(sourceRoot), version: metadata.version }; }
-async function desiredFiles({ target, uninstall, root, source, previous, installations, generated, plugin, gateSha }) {
+async function desiredFiles({ target, uninstall, root, source, previous, installations, generated, plugin, gateSha, user = false }) {
   const desired = new Map();
   if (uninstall) return desired;
-  const sourceRoot = source.path, skillsRoot = resolve(sourceRoot, 'skills'), skillDir = target === 'claude' ? '.claude/skills' : '.agents/skills';
+  const sourceRoot = source.path, skillsRoot = resolve(sourceRoot, 'skills'), skillDir = skillDirectory(target, user);
   const prPath = `${skillDir}/write-pr/SKILL.md`;
   const keepProjectPR = await exists(resolve(root, prPath)) && !Object.values(installations).some(entry => entry.files?.[prPath]);
   if (!plugin) for (const source of await filesUnder(skillsRoot)) {
@@ -179,10 +180,11 @@ export async function approveCodexHooks(project, source, installed, connect = co
 }
 export async function main(args) {
   const opts = parseArgs(args, { values: ['--target', '--project', '--scheduler-jobs', '--memory', '--gate-sha'], repeat: ['--record-generated', '--add-job'], flags: ['--user', '--dry-run', '--uninstall', '--plugin-hooks', '--begin', '--commit', '--check-update'] }); const target = opts['--target'];
-  if (opts._.length || !['claude', 'codex', 'agents'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents> (--project <dir> | --user) [--dry-run | --uninstall | --check-update]');
+  if (opts._.length || !['claude', 'codex', 'agents', 'antigravity'].includes(target) || Boolean(opts['--project']) === Boolean(opts['--user'])) throw new UsageError('Usage: install.mjs --target <claude|codex|agents|antigravity> (--project <dir> | --user) [--dry-run | --uninstall | --check-update]');
   const root = resolve(opts['--user'] ? userHome() : opts['--project']), statePath = resolve(root, '.geppetto/install.json');
   await safePath(root, statePath);
-  const manifest = await jsonFile(statePath, { version: 1, installations: {} }); validateManifest(manifest, root, statePath);
+  const user = Boolean(opts['--user']);
+  const manifest = await jsonFile(statePath, { version: 1, installations: {} }); validateManifest(manifest, root, statePath, user);
   if (opts['--check-update']) {
     if (opts['--begin'] || opts['--commit'] || opts['--uninstall'] || opts['--dry-run']) throw new UsageError('--check-update is a read-only operation');
     const plugin = opts['--plugin-hooks'] || manifest.installations[target]?.plugin;
@@ -215,7 +217,7 @@ export async function main(args) {
   const plans = [];
   // Preflight every installed consumer before retiring their shared scripts.
   for (const owner of new Set([target, ...(!opts['--uninstall'] ? Object.keys(manifest.installations) : [])])) {
-    const entry = manifest.installations[owner] ?? {}, ownerGenerated = owner === target ? generated : entry.generated ?? [], ownerPlugin = owner === target ? plugin : Boolean(entry.plugin); const desired = await desiredFiles({ target: owner, uninstall: opts['--uninstall'], root, source, previous: entry, installations: manifest.installations, generated: owner === target ? recorded : [], plugin: ownerPlugin, gateSha }); const plan = await planInstallation({ root, manifest, target: owner, desired, acceptedGenerated: recorded, retireShared: !opts['--uninstall'] });
+    const entry = manifest.installations[owner] ?? {}, ownerGenerated = owner === target ? generated : entry.generated ?? [], ownerPlugin = owner === target ? plugin : Boolean(entry.plugin); const desired = await desiredFiles({ target: owner, uninstall: opts['--uninstall'], root, source, previous: entry, installations: manifest.installations, generated: owner === target ? recorded : [], plugin: ownerPlugin, gateSha, user }); const plan = await planInstallation({ root, manifest, target: owner, desired, acceptedGenerated: recorded, retireShared: !opts['--uninstall'] });
     plans.push({ target: owner, generated: ownerGenerated, plugin: ownerPlugin, plan });
   }
   const changes = [...new Map(plans.flatMap(({ plan }) => plan.changes.map(change => [change.path, change]))).values()];
@@ -225,7 +227,7 @@ export async function main(args) {
     const choice = opts['--memory']; const preview = choice && choice !== memory?.choice ? { choice, localPath: resolve(userHome(), 'geppetto-memory'), repo: choice === 'github' ? 'private GitHub repository' : resolve(userHome(), 'geppetto-memory') } : memory;
     console.log(`Memory: ${memoryDescription(preview)}; change with --memory <local|github|native|none>.`);
   }
-  if (opts['--dry-run']) { if (!opts['--uninstall'] && plans.some(owner => owner.target !== 'claude')) console.log('Codex hooks: would approve the installed plugin identity or owned command keys after final writes.'); return 0; }
+  if (opts['--dry-run']) { if (!opts['--uninstall'] && plans.some(owner => ['codex', 'agents'].includes(owner.target))) console.log('Codex hooks: would approve the installed plugin identity or owned command keys after final writes.'); return 0; }
   if (!opts['--uninstall']) {
     const directory = resolve(userHome(), '.geppetto');
     for (const name of await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) if (name === 'learn.lock' || /^integrations\.md\..+\.tmp$/.test(name)) await unlink(resolve(directory, name));
@@ -255,7 +257,7 @@ export async function main(args) {
   console.log(`Choices (.geppetto/config.json): hooks=${JSON.stringify(choices.hooks ?? {})}; screen.shareSource=${screen.shareSource ?? 'unset'} (${screen.scope}); signals=${JSON.stringify(choices.hooks?.signalLearning ?? {})}; review=${JSON.stringify(choices.review ?? {})}; maintenance.enabled=${choices.maintenance?.enabled !== false}; jobs=${JSON.stringify(machine.jobs)}; ci.enabled=${choices.ci?.enabled !== false}. Source sharing: python <screen>/scripts/screen.py --user --share-source yes|no; key: OPENROUTER_API_KEY in the launching environment.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'scheduled-elsewhere') console.log(`${name}: already scheduled on ${job.machine}; --add-job ${name} attaches another here.`);
   for (const [name, job] of Object.entries(machine.jobs)) if (job.status === 'pending-elsewhere') console.log(`${name}: registration pending on ${job.machine}; finish or remove that installation before attaching another.`);
-  if (!opts['--uninstall'] && plans.some(owner => owner.target !== 'claude')) {
+  if (!opts['--uninstall'] && plans.some(owner => ['codex', 'agents'].includes(owner.target))) {
     const retry = `node ${[fileURLToPath(import.meta.url), ...args].map(shellQuote).join(' ')}`;
     return approveCodexHooks(root, source, machine.hooks.codex, connectCodex, retry);
   }

@@ -25,6 +25,14 @@ export async function messageCheckpoint(path, cursor) {
       pending = pending.subarray(end + 1); offset += end + 1;
       if (!line.trim()) continue;
       let record; try { record = JSON.parse(line); } catch { throw new Error('Invalid transcript JSONL record.'); }
+      if (record.type === 'USER_INPUT') {
+        if (record.source !== 'USER_EXPLICIT') continue;
+        if (typeof record.content === 'string' && record.content.trim()) {
+          userMessages++;
+          userMessage = createHash('sha256').update(`${path}:${identity}:${position}:${line}`).digest('hex');
+        }
+        continue;
+      }
       const message = record.type === 'response_item' ? record.payload : record.message;
       if (!message || (message.role ?? record.type) !== 'user') continue;
       const metadata = message.internal_chat_message_metadata_passthrough?.content_item_metadata;

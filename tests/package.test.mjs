@@ -6,9 +6,11 @@ import { repo, fixture, invoke } from './helpers.mjs';
 
 const read = path => JSON.parse(readFileSync(resolve(repo, path), 'utf8'));
 test('both catalogs locate the same plugin and Codex component paths resolve from the package root', () => {
-  const claude = read('.claude-plugin/plugin.json'); const codex = read('.codex-plugin/plugin.json');
+  const claude = read('.claude-plugin/plugin.json'); const codex = read('.codex-plugin/plugin.json'); const antigravity = read('plugin.json');
   const ccatalog = read('.claude-plugin/marketplace.json'); const catalog = read('.agents/plugins/marketplace.json');
   assert.equal(claude.name, codex.name); assert.equal(claude.version, codex.version); assert.equal(read('package.json').version, claude.version);
+  assert.equal(antigravity.name, claude.name); assert.equal(antigravity.version, claude.version);
+  assert.equal(existsSync(resolve(repo, 'hooks.json')), true);
   assert.equal(ccatalog.plugins[0].name, claude.name); assert.equal(resolve(repo, ccatalog.plugins[0].source), repo);
   assert.equal(catalog.plugins[0].name, codex.name); assert.equal(catalog.plugins[0].source.source, 'local'); assert.equal(resolve(repo, catalog.plugins[0].source.path), repo);
   assert.equal(ccatalog.plugins[0].version, claude.version); assert.equal(catalog.plugins[0].version, codex.version);

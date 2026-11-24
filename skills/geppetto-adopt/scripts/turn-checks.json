@@ -18,29 +18,29 @@
   ],
   "rearmOn": [
     {
-      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "tool": "^(Bash|exec_command|shell_command|shell|run_command)$",
       "gh": "api",
       "path": "^/?repos/[^/]+/[^/]+/pulls/\\d+/(comments|reviews)(?:\\?.*)?$"
     },
     {
-      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "tool": "^(Bash|exec_command|shell_command|shell|run_command)$",
       "gh": "pr view",
       "flags": ["--comments"]
     },
     {
-      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "tool": "^(Bash|exec_command|shell_command|shell|run_command)$",
       "script": "(?:^|[/\\\\])code-review[/\\\\]scripts[/\\\\]run_review\\.py$"
     },
     {
-      "tool": "^(wait_agent|Task|Agent|task_result)$"
+      "tool": "^(wait_agent|Task|Agent|task_result|invoke_subagent)$"
     },
     {
-      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "tool": "^(Bash|exec_command|shell_command|shell|run_command)$",
       "gh": "run view",
       "flags": ["--log-failed"]
     },
     {
-      "tool": "^(Bash|exec_command|shell_command|shell)$",
+      "tool": "^(Bash|exec_command|shell_command|shell|run_command)$",
       "gh": "pr checks"
     }
   ]

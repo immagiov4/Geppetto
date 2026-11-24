@@ -14,6 +14,7 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Weekly analysis and experiment proposals | `weekly-report.mjs`, `maintenance.mjs` |
 | OS maintenance attachment and subscription CLI execution | `maintenance.mjs` |
 | PR feedback, pre-edit decisions and completion review | `hook.mjs`, `turn-checks.mjs` |
+| Antigravity hook contract adapter and context delivery | `antigravity.mjs` |
 | Learning activity and in-turn reminders | `learn-nudge.mjs` |
 | Weekly subscription CLI execution | `learn-runner.mjs` |
 | Bounded learner file tools | `learner-tools.mjs` |

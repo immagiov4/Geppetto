@@ -2,6 +2,7 @@ import { boundedMetricsAudit } from './metrics-audit.mjs';
 import { newWeeklyDraft, disposeWeeklyDraft, publishWeeklyReport, weeklyWindowMs } from './weekly-report.mjs';
 
 import { randomUUID } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { readFile, writeFile, open, mkdir, readdir, access, rename } from 'node:fs/promises';
 import { resolve, basename, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +51,7 @@ export function maintenanceRegistrationStatus(name, job, { home = userHome(), ex
   if (job.scheduler === 'cron') {
     const list = execute('crontab', ['-l'], { timeout: 2000 });
     const owned = list.status === 0 ? list.stdout.split(/\r?\n/).filter(line =>
-      !line.trimStart().startsWith('#') && line.endsWith('# ' + id)) : [];
+      !line.trimStart().startsWith('#') && line.trimEnd().endsWith('# ' + id)) : [];
     if (!owned.length) return 'missing';
     const invocation = owned[0].trim().replace(/^(?:\S+\s+){5}/, '');
     return owned.length === 1 && invocation === cronInvocation(home, name) + ' # ' + id ? 'scheduled' : 'action differs';
@@ -62,10 +63,21 @@ const cronCadence = '0 9 * * 1';
 const psQuote = text => `'${text.replaceAll("'", "''")}'`;
 const shQuote = text => `'${text.replaceAll("'", "'\\''")}'`;
 export const integrationFiles = (root, options) => filesUnder(root, options).filter(path => path.endsWith('.md'));
+function antigravityPluginSkillRoots(home) {
+  const dir = resolve(home, '.gemini/config/plugins');
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => resolve(dir, entry.name, 'skills'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
 /** Refresh file-only companion context; CLI inventory never starts a model session. */
 export async function compileIntegrations(project, { home = userHome(), catalog, roots = [], execute = run } = {}) {
   catalog ??= fileURLToPath(new URL(await exists(new URL('../../../integrations', import.meta.url)) ? '../../../integrations' : '../integrations', import.meta.url));
-  const skillRoots = [resolve(project, '.claude/skills'), resolve(project, '.agents/skills'), resolve(home, '.claude/skills'), resolve(home, '.agents/skills'), resolve(process.env.CODEX_HOME || resolve(home, '.codex'), 'skills'), ...roots]; const caches = [resolve(home, '.claude/plugins/cache'), resolve(home, '.codex/plugins/cache'), ...(home === userHome() && process.env.CODEX_HOME ? [resolve(process.env.CODEX_HOME, 'plugins/cache')] : [])]; const installed = new Set(), gaps = [], sections = new Map(), suggestions = [], selected = [];
+  const skillRoots = [resolve(project, '.claude/skills'), resolve(project, '.agents/skills'), resolve(home, '.claude/skills'), resolve(home, '.agents/skills'), resolve(home, '.gemini/config/skills'), ...antigravityPluginSkillRoots(home), resolve(process.env.CODEX_HOME || resolve(home, '.codex'), 'skills'), ...roots]; const caches = [resolve(home, '.claude/plugins/cache'), resolve(home, '.codex/plugins/cache'), ...(home === userHome() && process.env.CODEX_HOME ? [resolve(process.env.CODEX_HOME, 'plugins/cache')] : [])]; const installed = new Set(), gaps = [], sections = new Map(), suggestions = [], selected = [];
   for (const root of skillRoots) if (await exists(root)) for (const path of filesUnder(root, { skipLinks: true, excludeDirs: ['.git', 'node_modules'] })) if (basename(path) === 'SKILL.md') installed.add(basename(dirname(path)).toLowerCase());
   const collect = value => {
     if (Array.isArray(value)) { for (const row of value) collect(row); return; }
@@ -151,7 +163,17 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
     const available = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Command Register-ScheduledTask -ErrorAction Stop | Out-Null']);
     if (available.error?.code === 'ENOENT') return null;
     if (available.status !== 0) throw new Error('Windows Task Scheduler is unavailable; inspect PowerShell ScheduledTasks support.');
-    if (!command) throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+    if (!command) {
+      if (previous?.id) throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+      const query = execute('schtasks.exe', ['/Query', '/TN', id, '/XML'], { timeout: 2000 });
+      const detail = `${query.stderr ?? ''} ${query.stdout ?? ''}`;
+      const absent = !query.error && query.status !== 0 && /cannot find|does not exist|not found|no tasks|impossibile trovare/i.test(detail);
+      if (host === 'antigravity' && absent) return null;
+      if (query.error || (query.status !== 0 && !absent)) {
+        throw new Error(`Cannot inspect Windows maintenance task ${id}: ${query.stderr?.trim() || query.error?.message || `exit ${query.status}`}`);
+      }
+      throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+    }
     const launcher = maintenanceWrapper(home);
     await mkdir(resolve(home, '.geppetto'), { recursive: true });
     const action = `"${process.execPath}" "${script}" --run `;
@@ -192,11 +214,15 @@ WScript.Quit status
   const listed = execute('crontab', ['-l']);
   if (listed.error?.code === 'ENOENT') return null;
   if (listed.status !== 0 && !/no crontab/i.test(listed.stderr ?? '')) throw new Error(`Cannot inspect crontab: ${listed.stderr?.trim()}`);
-  if (!command) throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
-  const marker = `# ${id}`; const existing = (listed.stdout ?? '').split('\n').find(line => line.endsWith(marker)); const invocation = cronInvocation(home, name); const expression = existing?.trim().split(/\s+/).slice(0, 5).join(' ') || cronCadence;
-  const nextRun = nextWeeklyRun(expression); const entry = `${expression} ${invocation} ${marker}`; const lines = (listed.stdout ?? '').split('\n'); const owned = lines.filter(line => line.endsWith(marker));
-  if (owned.length !== 1 || existing !== entry) {
-    const kept = lines.filter(line => !line.endsWith(marker)).join('\n'); const result = execute('crontab', ['-'], { input: `${kept}${kept.endsWith('\n') ? '' : '\n'}${entry}\n` });
+  if (!command) {
+    const existingCron = previous?.id || (listed.stdout ?? '').split(/\r?\n/).some(line => !line.trimStart().startsWith('#') && line.trimEnd().endsWith(`# ${id}`));
+    if (host === 'antigravity' && !existingCron) return null;
+    throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+  }
+  const marker = `# ${id}`; const existing = (listed.stdout ?? '').split('\n').find(line => line.trimEnd().endsWith(marker)); const invocation = cronInvocation(home, name); const expression = existing?.trim().split(/\s+/).slice(0, 5).join(' ') || cronCadence;
+  const nextRun = nextWeeklyRun(expression); const entry = `${expression} ${invocation} ${marker}`; const lines = (listed.stdout ?? '').split('\n'); const owned = lines.filter(line => line.trimEnd().endsWith(marker));
+  if (owned.length !== 1 || existing?.trimEnd() !== entry) {
+    const kept = lines.filter(line => !line.trimEnd().endsWith(marker)).join('\n'); const result = execute('crontab', ['-'], { input: `${kept}${kept.endsWith('\n') ? '' : '\n'}${entry}\n` });
     if (result.status !== 0) throw new Error(`Maintenance crontab registration failed: ${result.stderr?.trim()}`);
   }
   return { scheduler: 'cron', id, cadence: expression, nextRun, disable: `crontab -e (remove ${marker})`, status: 'scheduled', host }; }
@@ -211,7 +237,7 @@ export async function disableMaintenance(name, job, { execute = run } = {}) {
   if (job.scheduler === 'cron') {
     const listed = execute('crontab', ['-l']);
     if (listed.status !== 0 && !/no crontab/i.test(listed.stderr ?? '')) throw new Error('Cannot inspect maintenance crontab for removal.');
-    const text = listed.stdout ?? ''; const kept = text.split('\n').filter(line => !line.endsWith(`# Geppetto-${name}`)).join('\n');
+    const text = listed.stdout ?? ''; const kept = text.split('\n').filter(line => !line.trimEnd().endsWith(`# Geppetto-${name}`)).join('\n');
     if (kept !== text && execute('crontab', ['-'], { input: kept }).status !== 0) throw new Error('Cannot remove maintenance crontab entry.');
     return true;   }
   return false; }
