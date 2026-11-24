@@ -59,6 +59,26 @@ async function attachJobs(machine, path, registry, { home, harness, source, jobs
     });
   }
 }
+function filterAntigravityHooks(settings, keep) {
+  for (const [name, spec] of Object.entries(settings ?? {})) {
+    if (!spec || typeof spec !== 'object' || Array.isArray(spec)) continue;
+    let remaining = 0;
+    for (const event of ['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop']) {
+      if (!Array.isArray(spec[event])) continue;
+      spec[event] = spec[event].filter(keep);
+      if (!spec[event].length) delete spec[event];
+      else remaining += spec[event].length;
+    }
+    for (const event of ['PreToolUse', 'PostToolUse']) {
+      if (!Array.isArray(spec[event])) continue;
+      spec[event] = spec[event].map(group => ({ ...group, hooks: (group.hooks ?? []).filter(keep) })).filter(group => group.hooks.length);
+      if (!spec[event].length) delete spec[event];
+      else remaining += spec[event].length;
+    }
+    if (!remaining && name === 'geppetto') delete settings[name];
+  }
+}
+
 /** Reuse machine resources; hook commands point to the recorded package source. */
 export async function reconcileMachine(project, target, source, { pluginHooks = false, uninstall = false, home = userHome(), jobs = {}, scheduler = scheduleMaintenance, unscheduler = disableMaintenance, memoryChoice, addJobs = [], machineName = hostname(), execute = run, uninstallMemory } = {}) {
   const git = run('git', ['-C', project, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir']);
@@ -72,7 +92,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
   const lockPath = resolve(directory, 'machine.lock'); const lock = await open(lockPath, 'wx', 0o600);
   try {
     const path = resolve(directory, 'machine.json'); const machine = await jsonFile(path, { projects: {}, hooks: {}, jobs: {} });
-    const harness = target === 'claude' ? 'claude' : 'codex';
+    const harness = target === 'claude' ? 'claude' : target === 'antigravity' ? 'antigravity' : 'codex';
     if (uninstall) {
       if (!machine.projects[project]?.[target]) return machine;
       const remaining = Object.entries(machine.projects).some(([root, targets]) => root !== project || Object.keys(targets).some(name => name !== target));
@@ -85,11 +105,12 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
       }
       delete machine.projects[project][target];
       if (!Object.keys(machine.projects[project]).length) { delete machine.projects[project]; await bridgeNativeMemory(project, machine, null); }
-      if (!Object.values(machine.projects).some(project => harness === 'claude' ? project.claude : project.codex || project.agents)) {
+      if (!Object.values(machine.projects).some(project => harness === 'claude' ? project.claude : harness === 'antigravity' ? project.antigravity : project.codex || project.agents)) {
         const installed = machine.hooks[harness];
         if (installed?.commands) {
           const settings = await jsonFile(installed.source, {});
-          filterHooks(settings, hook => !installed.commands.includes(hook.command));
+          if (harness === 'antigravity') filterAntigravityHooks(settings, hook => !installed.commands.includes(hook.command));
+          else filterHooks(settings, hook => !installed.commands.includes(hook.command));
           await atomicJson(installed.source, settings);
         }
         delete machine.hooks[harness];
@@ -104,32 +125,52 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
     await bridgeNativeMemory(project, machine, memory);
     await atomicJson(path, machine);
     const registry = await memoryJobs(memory, execute);
-    const hooksPath = resolve(home, harness === 'claude' ? '.claude/settings.json' : '.codex/hooks.json');
+    const hooksPath = resolve(home, harness === 'claude' ? '.claude/settings.json' : harness === 'antigravity' ? '.gemini/config/hooks.json' : '.codex/hooks.json');
     if (pluginHooks) {
       const installed = machine.hooks[harness];
       if (installed?.commands) {
         const settings = await jsonFile(hooksPath, {});
-        filterHooks(settings, hook => !installed.commands.includes(hook.command));
+        if (harness === 'antigravity') filterAntigravityHooks(settings, hook => !installed.commands.includes(hook.command));
+        else filterHooks(settings, hook => !installed.commands.includes(hook.command));
         await atomicJson(hooksPath, settings);
       }
       machine.hooks[harness] = { source: 'plugin' };
     }
     else if (machine.hooks[harness]?.source !== 'plugin') {
       const settings = await jsonFile(hooksPath, {});
-      const template = JSON.parse(await readFile(resolve(source.path, 'hooks/hooks.json'), 'utf8'));
-      settings.hooks ??= {};
-      const commands = [];
-      for (const [event, groups] of Object.entries(template.hooks)) {
-        const kept = (settings.hooks[event] ?? []).map(group => ({ ...group, hooks: group.hooks.filter(hook => !machine.hooks[harness]?.commands?.includes(hook.command) && !/geppetto[^"\n]*[/\\](?:scripts|bin)[/\\]/i.test(hook.command ?? '')) })).filter(group => group.hooks.length);
-        const installed = groups.map(group => ({ ...group, hooks: group.hooks.map(hook => {
-          const command = hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/')) + ' --harness ' + harness;
+      if (harness === 'antigravity') {
+        const template = JSON.parse(await readFile(resolve(source.path, 'skills/geppetto-adopt/assets/templates/hooks/antigravity/hooks.json'), 'utf8'));
+        const commands = [];
+        const rewrite = hook => {
+          const command = hook.command.replaceAll('${PLUGIN_ROOT}', source.path.replaceAll('\\', '/'));
           commands.push(command);
           return { ...hook, command };
-        }) }));
-        settings.hooks[event] = [...kept, ...installed];
+        };
+        const spec = {};
+        for (const [event, entries] of Object.entries(template.geppetto)) {
+          spec[event] = ['PreToolUse', 'PostToolUse'].includes(event)
+            ? entries.map(group => ({ ...group, hooks: group.hooks.map(rewrite) }))
+            : entries.map(rewrite);
+        }
+        settings.geppetto = spec;
+        await atomicJson(hooksPath, settings);
+        machine.hooks[harness] = { source: hooksPath, commands };
+      } else {
+        const template = JSON.parse(await readFile(resolve(source.path, 'hooks/hooks.json'), 'utf8'));
+        settings.hooks ??= {};
+        const commands = [];
+        for (const [event, groups] of Object.entries(template.hooks)) {
+          const kept = (settings.hooks[event] ?? []).map(group => ({ ...group, hooks: group.hooks.filter(hook => !machine.hooks[harness]?.commands?.includes(hook.command) && !/geppetto[^"\n]*[/\\](?:scripts|bin)[/\\]/i.test(hook.command ?? '')) })).filter(group => group.hooks.length);
+          const installed = groups.map(group => ({ ...group, hooks: group.hooks.map(hook => {
+            const command = hook.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', source.path.replaceAll('\\', '/')) + ' --harness ' + harness;
+            commands.push(command);
+            return { ...hook, command };
+          }) }));
+          settings.hooks[event] = [...kept, ...installed];
+        }
+        await atomicJson(hooksPath, settings);
+        machine.hooks[harness] = { source: hooksPath, commands };
       }
-      await atomicJson(hooksPath, settings);
-      machine.hooks[harness] = { source: hooksPath, commands };
     }
     delete machine.jobs.learn;
     await refreshMaintenanceLauncher(home, source);

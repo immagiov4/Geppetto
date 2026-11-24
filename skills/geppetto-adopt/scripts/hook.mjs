@@ -19,6 +19,7 @@ import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
 import { placeholderReason } from './gate-sections.mjs';
 import { turnPolicy, decisionFields, toolCommand, modifyingTool, reviewResult, commandArgs, commandSegments, userTurnDecision } from './turn-checks.mjs';
+import { isAntigravityEvent, normalizeAntigravityEvent, handleAntigravityEvent } from './antigravity.mjs';
 function sectionFeedback(body, cwd, runCommand) {
   const result = runCommand(process.execPath, [fileURLToPath(new URL('./gate-sections.mjs', import.meta.url)), '--pr', '-'], { cwd, input: body });
   if (result.status === 0) return 'Geppetto: PR sections pass.';
@@ -227,7 +228,7 @@ function validFoundationRecord(text, subject) {
 
 function withinPendingScope(root, event, scope) {
   const input = event.tool_input;
-  const path = input?.file_path ?? input?.path;
+  const path = input?.file_path ?? input?.path ?? input?.Path;
   const patch = typeof input === 'string' ? input : input?.patch;
   const move = [input?.source, input?.destination].filter(value => typeof value === 'string');
   const targets = move.length === 2 ? move : typeof path === 'string' ? [path] : typeof patch === 'string'
@@ -558,6 +559,11 @@ async function dispatch(event, { runCommand = run, now = Date.now, home, codexHo
     return { hookSpecificOutput: { hookEventName: eventName, additionalContext: feedback } };   }
   return {}; }
 export async function handleEvent(event, options) {
+  if (isAntigravityEvent(event, options?.harness)) {
+    const normalized = normalizeAntigravityEvent(event);
+    const context = { harness: 'antigravity', sessionId: normalized?.session_id ?? null, turnId: null, epoch: null, ...(normalized?.hook_event_name === 'Stop' && { stopAttemptId: randomUUID() }) };
+    return recordContext.run(context, () => handleAntigravityEvent(normalized, { ...options, harness: 'antigravity' }, handleWithEvidence));
+  }
   const harness = options?.harness ?? (event?.turn_id || process.env.PLUGIN_ROOT ? 'codex'
     : process.env.CLAUDE_PLUGIN_ROOT || (event?.session_id && event.hook_event_name !== 'SessionStart') ? 'claude' : null);
   const context = { harness, sessionId: event?.session_id ?? null, turnId: event?.turn_id ?? null, epoch: null, ...(event?.hook_event_name === 'Stop' && { stopAttemptId: randomUUID() }) };
@@ -598,8 +604,18 @@ async function handleWithEvidence(event, options) {
   }
 }
 export const main = async args => {
-  const nativeHarness = args.length === 2 && args[0] === '--harness' && ['codex', 'claude'].includes(args[1]) ? args[1] : undefined;
-  if (!args.length || nativeHarness) try { return await hookMain([], 'Hook', event => handleEvent(event, { harness: nativeHarness })); } catch (error) { console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`); console.log('{}'); return 0; }
+  const nativeHarness = args.length === 2 && args[0] === '--harness' && ['codex', 'claude', 'antigravity'].includes(args[1]) ? args[1] : undefined;
+  if (!args.length || nativeHarness) {
+    let rawEvent;
+    try {
+      return await hookMain([], 'Hook', event => { rawEvent = event; return handleEvent(event, { harness: nativeHarness }); });
+    } catch (error) {
+      console.error(`Geppetto hook diagnostic: ${redact(error.message).replace(/[\r\n]+/g, ' ')}`);
+      const failOpen = (nativeHarness === 'antigravity' || rawEvent?.hookEventName) && (rawEvent?.hookEventName ?? rawEvent?.hook_event_name) === 'PreToolUse' ? { decision: 'allow' } : {};
+      console.log(JSON.stringify(failOpen));
+      return 0;
+    }
+  }
   const opts = parseArgs(args, { flags: ['--current-turn', '--record-review'], values: ['--base', '--outcome', '--record-turn', '--session', '--turn', '--evidence'] });
   if (opts['--current-turn'] && opts['--session'] && Object.keys(opts).every(key => ['_', '--current-turn', '--session'].includes(key)) && !opts._.length) {
     const state = currentState(await readTurnState(await projectRoot('.'), opts['--session']));

@@ -16,10 +16,18 @@ const pluginId = 'geppetto@geppetto';
 const pluginRepair = {
   claude: ['claude plugin marketplace update geppetto', 'claude plugin update geppetto@geppetto'],
   codex: ['codex plugin marketplace upgrade geppetto', 'codex plugin add geppetto@geppetto'],
+  antigravity: ['git -C ~/.gemini/config/plugins/geppetto pull --ff-only', 'Reinstall or update ~/.gemini/config/plugins/geppetto from the published release'],
 };
 const installer = fileURLToPath(new URL('./install.mjs', import.meta.url));
 
-function installedPlugin(target, root) {
+async function installedPlugin(target, root, home = userHome()) {
+  if (target === 'antigravity') {
+    const manifest = await jsonFile(resolve(home, '.gemini/config/plugins/geppetto/plugin.json'), null);
+    if (!manifest || manifest.disabled === true) return undefined;
+    const config = await jsonFile(resolve(home, '.gemini/config/config.json'), {});
+    if (config.plugins?.geppetto?.enabled === false) return undefined;
+    return manifest;
+  }
   const args = target === 'codex' ? ['plugin', 'list', '--marketplace', 'geppetto', '--json'] : ['plugin', 'list', '--json'];
   const command = learningCommand(target);
   if (!command) throw new Error(`Unable to find the ${target} CLI`);
@@ -106,7 +114,7 @@ function olderVersion(installed, published) {
 }
 
 async function readUpdateNotice(root, { home = userHome(), now = Date.now, harness, checkTrust = codexTrustStatus } = {}) {
-  const targets = harness === 'claude' ? ['claude'] : harness === 'codex' ? ['codex', 'agents'] : ['claude', 'codex', 'agents'];
+  const targets = harness === 'claude' ? ['claude'] : harness === 'antigravity' ? ['antigravity'] : harness === 'codex' ? ['codex', 'agents'] : ['claude', 'codex', 'agents', 'antigravity'];
   const local = await jsonFile(resolve(root, '.geppetto/install.json'), {});
   const user = root === home || !targets.some(name => local.installations?.[name]);
   const manifest = user ? await jsonFile(resolve(home, '.geppetto/install.json'), {}) : local;
@@ -235,7 +243,7 @@ export async function checkUpdate({ root, target, user, manifest, plugin, shellQ
   let repairTrust = false;
   const harness = target === 'agents' ? 'codex' : target;
   if (plugin) {
-    const installed = installedPlugin(harness, root);
+    const installed = await installedPlugin(harness, root, home);
     console.log(`Plugin (${target}): ${installed?.version ?? 'missing or disabled'}`);
     installPlugin = !installed;
     repairPlugin = installed?.version !== version;

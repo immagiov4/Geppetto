@@ -20,8 +20,8 @@ export function metricOperation(event, config) {
   const tool = toolName(event);
   const prAction = structuredPrAction(event);
   if (prAction) return { kind: 'command', key: 'github pr ' + prAction, always: true };
-  if (/^(?:Agent|Task|spawn_agent|delegate_task|wait_agent|task_result|t3_thread_wait)$/i.test(tool)) return { kind: 'delegate', key: tool.toLowerCase() };
-  if (!/^(?:Bash|PowerShell|shell|exec_command)$/i.test(tool) || event.tool_input?.run_in_background) return;
+  if (/^(?:Agent|Task|spawn_agent|delegate_task|wait_agent|task_result|t3_thread_wait|invoke_subagent)$/i.test(tool)) return { kind: 'delegate', key: tool.toLowerCase() };
+  if (!/^(?:Bash|PowerShell|shell|exec_command|run_command)$/i.test(tool) || event.tool_input?.run_in_background || event.tool_input?.IsDaemon) return;
   const command = toolCommand(event);
   if (typeof command !== 'string' || !command.trim()) return;
   const operators = command.trimStart().replace(/^&\s+/, '').replace(/"[^"\r\n]*"|'[^'\r\n]*'/g, '');

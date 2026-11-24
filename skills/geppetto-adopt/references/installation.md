@@ -8,7 +8,7 @@ node <adopt>/scripts/install.mjs --target <target> --project <project> --plugin-
 node <adopt>/scripts/install.mjs --target <target> --project <project> --plugin-hooks
 ```
 
-Targets are `claude`, `codex` and `agents`. With a plugin installed for that target, always pass `--plugin-hooks`: the project holds configuration, the router/import and a workflow that runs a pinned Geppetto package, plus ignored runtime ownership state. Plugin mode persists on updates and reconciles owned duplicate skill copies. Only targets without the plugin receive project skill copies and shared user hooks. `--user` selects user-level installation instead of project adoption. Existing user memory defaults stay authoritative; project configuration holds bucket links.
+Targets are `claude`, `codex`, `agents` and `antigravity`. With a plugin installed for that target, always pass `--plugin-hooks`: the project holds configuration, the router/import and a workflow that runs a pinned Geppetto package, plus ignored runtime ownership state. Plugin mode persists on updates and reconciles owned duplicate skill copies. Only targets without the plugin receive project skill copies and shared user hooks. `--user` selects user-level installation instead of project adoption. Existing user memory defaults stay authoritative; project configuration holds bucket links.
 
 An update reconciles every installed target before retiring shared scripts. The local hash manifest is ignored and untracked, protects edits and foreign files; reruns reconcile ownership and `--uninstall` removes owned files. CI runs the package gate; local commands resolve `<adopt>/scripts/` from the installed plugin or skill. Dry runs are read-only. Exit codes: 0 success, 1 conflict/check/blocker, 2 invalid arguments. If machine registration is permission-blocked, put the installer's single retry command in the recap for execution outside the sandbox.
 
@@ -63,6 +63,6 @@ Run `<adopt>/scripts/audit.mjs --project <project> --verify`, a synthetic prompt
 
 ## Update
 
-Run `node <adopt>/scripts/install.mjs --check-update --target <claude|codex|agents> --project <project>` for each adopted target, or use `--user` for user-level adoption. The checker reads the current published release and compares it with the installation. Read the intervening CHANGELOG entries for migration steps.
+Run `node <adopt>/scripts/install.mjs --check-update --target <claude|codex|agents|antigravity> --project <project>` for each adopted target, or use `--user` for user-level adoption. The checker reads the current published release and compares it with the installation. Read the intervening CHANGELOG entries for migration steps.
 
 If a plugin is behind, refresh its marketplace and update through that harness before running the matching release's installer. For generated skills, get the published package and run its installer. Use the reconciliation command printed by the check and keep the current project choices. For Codex, the installer verifies and reapproves the updated definitions. Open a fresh session and check a matching hook execution. Rerun the diagnosis and report the version before and after, including any layer still awaiting action.

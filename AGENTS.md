@@ -46,7 +46,7 @@ Load a row when its condition applies. Skill names resolve through the harness's
 
 ## Project context
 
-Geppetto is a portable skills pack for Claude Code and Codex. Source skills live in `skills/`; installed copies are generated. Preserve existing memory-privacy and ownership boundaries. Use synthetic fixtures for repository tests.
+Geppetto is a portable skills pack for Claude Code, Codex and Antigravity. Source skills live in `skills/`; installed copies are generated. Preserve existing memory-privacy and ownership boundaries. Use synthetic fixtures for repository tests.
 
 Keep project context to durable orientation and pointers. Resolve unfamiliar facts from their owners before changing code.
 

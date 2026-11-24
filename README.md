@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex-3f7877?style=flat-square" alt="Works with Claude Code and Codex">
+  <img src="https://img.shields.io/badge/works%20with-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Antigravity-3f7877?style=flat-square" alt="Works with Claude Code, Codex and Antigravity">
   <img src="https://img.shields.io/badge/skills-18-783b18?style=flat-square" alt="18 skills">
   <img src="https://img.shields.io/badge/node-%E2%89%A522-83624c?style=flat-square" alt="Node 22 or later">
   <img src="https://img.shields.io/badge/license-MIT-b56315?style=flat-square" alt="MIT license">
@@ -41,6 +41,14 @@ codex plugin marketplace add immagiov4/geppetto
 codex plugin add geppetto@geppetto
 ```
 
+**Antigravity**
+
+```bash
+git clone https://github.com/immagiov4/Geppetto ~/.gemini/config/plugins/geppetto
+```
+
+Or run the standalone installer with `--target antigravity` (or `--plugin-hooks` when installed as a plugin).
+
 **Any agent that reads `.agents/skills`** (OpenCode, Pi and others; untested)
 
 ```bash
@@ -59,7 +67,7 @@ An installation request, including this repository link, authorizes adoption. Af
 ## Limits
 
 - **Semantic screening costs.** Source screening uses the OpenRouter key from the environment and reports provider usage. Put a hard spending limit on the key; a local maximum cannot bound a request whose final charge is unknown.
-- **Two harnesses tested.** Claude Code and Codex. Pi and OpenCode can load the skills; nobody has trialled them there yet.
+- **Three harnesses supported.** Claude Code, Codex and Antigravity. Pi and OpenCode can load the skills; nobody has trialled them there yet.
 - **Harness loading and hook trust.** Installation checks files and native hook hashes; verify actual hook and skill loading in a fresh session. Codex project layers also require project trust.
 - **Maintenance scheduling.** Periodic jobs need an available harness or OS scheduler; the recap names missing prerequisites. Subscription learning uses the installed CLI account and its available tools.
 - **First CI run** on the PR that introduces Geppetto needs an owner-pinned Geppetto commit. [CI bootstrap](skills/geppetto-adopt/assets/templates/ci/README.md).

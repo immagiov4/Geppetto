@@ -64,7 +64,17 @@ export async function learningEvent(event, now, { runCommand } = {}) {
     await metricDiagnostic(root, event, error);
   }
   if (!learn || !records) return metricOnly();
-  const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit' && (!messageTurn || record.turn === messageTurn)); const calls = records.slice(lastPrompt + 1).filter(record => record.kind === 'PreToolUse' && (!messageTurn || record.turn === messageTurn)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
+  if (event.harness === 'antigravity') {
+    const id = event.tool_use_id ?? randomUUID();
+    if (!records.some(record => record.kind === 'PreToolUse' && record.id === id)) {
+      const entry = { kind: 'PostToolUse', at: now(), id, turn: messageTurn ?? null };
+      await mkdir(state, { recursive: true });
+      await ignoreLocalFiles(root, ['/hook-state/', '/hook-events.jsonl']);
+      await appendFile(activity, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+      records.push(entry);
+    }
+  }
+  const lastPrompt = records.findLastIndex(record => record.kind === 'UserPromptSubmit' && (!messageTurn || record.turn === messageTurn)); const calls = records.slice(lastPrompt + 1).filter(record => (record.kind === 'PreToolUse' || (event.harness === 'antigravity' && record.kind === 'PostToolUse')) && (!messageTurn || record.turn === messageTurn)); const unique = [...new Map(calls.map(call => [call.id, call])).values()];
   const elapsedMs = unique.length ? now() - Math.min(...unique.map(call => call.at)) : 0; const qualified = config.enabled && (unique.length >= config.minToolCalls || elapsedMs >= config.minDurationMs); const signals = projectConfig.hooks?.signalLearning?.enabled !== false && (await eligibleSignals(root)).length > 0;
   const assessed = kind === 'PostToolUse' && config.enabled && !active.messageError && decision?.epoch === active.epoch && decision?.userEpoch === active.userEpoch && (decision?.userDecisionIndex ?? 0) === (active.userDecisionIndex ?? 0) && (decision?.value.feedback?.applies === true || decision?.value.frustration?.applies === true);
   if (!qualified && !signals && !assessed) return metricOnly(); const turn = messageTurn || unique[0]?.turn || records[lastPrompt]?.id || unique[0]?.id || 'signals'; const keys = (await eligibleSignals(root)).map(row => row.key); const turnHash = createHash('sha256').update(turn + JSON.stringify(keys)).digest('hex'); const fired = resolve(state, `fired-${turnHash}`);

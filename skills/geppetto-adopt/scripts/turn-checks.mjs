@@ -16,7 +16,7 @@ export function validateTurnPolicy(config) {
 export const decisionFields = id => ({ requirements: ['changes', 'what'], feedback: ['applies', 'on', 'action'], frustration: ['applies', 'cause', 'prevention'] })[id] ?? ['applies', 'reason'];
 export const userTurnDecision = row => row?.decisions?.[0]?.decision ?? row;
 export const toolName = event => typeof event.tool_name === 'string' ? event.tool_name.split(/[.:/]/).at(-1) : '';
-export const toolCommand = event => typeof event.tool_input === 'string' ? event.tool_input : event.tool_input?.command ?? event.tool_input?.cmd ?? '';
+export const toolCommand = event => typeof event.tool_input === 'string' ? event.tool_input : event.tool_input?.command ?? event.tool_input?.cmd ?? event.tool_input?.CommandLine ?? '';
 export const modifyingTool = event => /^(write|edit|multiedit|apply_patch|(?:mcp__\w+__)?(?:write_file|write_text_file|append_file|edit_file|patch_file|create_file|delete_file|move_file))$/i.test(toolName(event));
 const words = command => (command.match(/(?:[^\s"']+|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? []).map(word => word.replace(/"((?:\\.|[^"\\])*)"|'([^']*)'/g, (_, double, single) => double === undefined ? single : double.replace(/\\(["\\])/g, '$1')));
 const valueFlags = new Set(['-C', '--git-dir', '--work-tree', '--prefix', '--cwd', '--registry', '--dir', '--repo', '-R', '--hostname', '--header', '-H', '--method', '-X', '--jq', '-q', '--template', '-t', '--field', '-F', '--raw-field', '-f', '--input', '--cache', '--preview', '-p', '--json', '--limit', '-L', '--branch', '-b', '--commit', '-c', '--job', '-j', '--body-file', '--body', '--record-turn', '--session', '--turn', '--match-head-commit', '--subject', '--author-email']);

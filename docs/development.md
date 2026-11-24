@@ -3,8 +3,8 @@
 Edit the distributable files in `skills/`, including the scripts in `skills/geppetto-adopt/scripts/`. Targets without a plugin receive generated skill copies. After a source change, refresh them with the source installer. Review a dry-run first:
 
 ```sh
-node skills/geppetto-adopt/scripts/install.mjs --target <claude|codex|agents> --project . --dry-run
-node skills/geppetto-adopt/scripts/install.mjs --target <claude|codex|agents> --project . --plugin-hooks
+node skills/geppetto-adopt/scripts/install.mjs --target <claude|codex|agents|antigravity> --project . --dry-run
+node skills/geppetto-adopt/scripts/install.mjs --target <claude|codex|agents|antigravity> --project . --plugin-hooks
 ```
 
 The install contract, targets and exit codes are in [installation](../skills/geppetto-adopt/references/installation.md). Keep third-party provenance in `THIRD_PARTY_NOTICES.md`.
@@ -20,8 +20,8 @@ Tests use synthetic repositories and injected providers. The test setup gives ea
 Package checks validate skill metadata, inventory and links. Review explains growth in code and instructions. For a deployment with a specific instruction limit, supply it to the router check: `--max-bytes` counts the UTF-8 bytes of the router plus every file it loads (imports and a sibling `CLAUDE.md`), and `--max-lines` counts the lines of the router file alone. Codex truncates project instructions at its own configurable `project_doc_max_bytes`.
 Shell behaviour fixtures also require Git, Python and ripgrep; CI installs ripgrep explicitly and uses the runners' Git and Python.
 
-Every change to shipped files in `skills/`, `.claude-plugin/`, `.codex-plugin/` or `.agents/plugins/` reaching main carries a version bump.
-Keep the same version in `package.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json` and `.agents/plugins/marketplace.json`.
+Every change to shipped files in `skills/`, `plugin.json`, `hooks.json`, `hooks/`, `.claude-plugin/`, `.codex-plugin/` or `.agents/plugins/` reaching main carries a version bump.
+Keep the same version in `package.json`, `plugin.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.codex-plugin/plugin.json` and `.agents/plugins/marketplace.json`.
 Use a patch for fixes and a minor version for new or removed behaviour; run `node scripts/bump-version.mjs <x.y.z>`.
 
 ## Observability

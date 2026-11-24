@@ -32,7 +32,7 @@ test('a missing bundled entrypoint prevents a complete-pack claim', t => {
   assert.ok(checkPack(root).errors.some(error => error.includes('retro/SKILL.md:1: Required file missing')));
 });
 
-for (const template of ['hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json', 'ci/pr-gate.yml']) {
+for (const template of ['hooks/claude/settings.json', 'hooks/codex/.codex/hooks.json', 'hooks/antigravity/hooks.json', 'ci/pr-gate.yml']) {
   test(`adoption stays incomplete when its shipped ${template} is missing`, t => {
     const root = fixture(t);
     const path = `skills/geppetto-adopt/assets/templates/${template}`;

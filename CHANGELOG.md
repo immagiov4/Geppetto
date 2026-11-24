@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.26.0
+
+- Add native Antigravity harness support: root `plugin.json` and `hooks.json` manifests, a standalone template (`skills/geppetto-adopt/assets/templates/hooks/antigravity/hooks.json`), and an Antigravity hook contract adapter (`antigravity.mjs`) handling `SessionStart`, `PreInvocation`, `PreToolUse`, `PostToolUse` and `Stop`.
+- Support Antigravity tool names and argument keys (`run_command`/`CommandLine`/`IsDaemon`, `edit_file`/`write_file`/`read_file`/`Path`, `invoke_subagent`) and Antigravity `USER_INPUT` (`USER_EXPLICIT`) transcript records.
+- Deliver advisory `PostToolUse` context through `PreInvocation` `injectSteps`, scope Antigravity `PreToolUse` to `edit_file|write_file` with explicit `{ decision: "allow" | "deny" }` outputs (so shell permission prompts are never bypassed and omitted decisions never fail closed), and guard `Stop` against non-normal `terminationReason` values while honoring `continuationActive`.
+- Add `--target antigravity` to `install.mjs`, `machine.mjs`, `update-check.mjs`, `maintenance.mjs` and `audit.mjs`.
+- Migration: update existing Claude Code and Codex plugins and reapprove Codex hooks (`hook.mjs` and supporting scripts changed). For Antigravity, install or refresh `~/.gemini/config/plugins/geppetto` so `plugin.json` and `hooks.json` load in a fresh session.
+
 ## 0.25.0
 
 - Make `--strategy lenses` the default `code-review` procedure: three parallel orthogonal discovery lenses (`lens-adversarial`, `lens-contracts`, `lens-rules-tests`) backed by a pre-packed line-annotated diff packet (`--max-diff-bytes`, lockfile exclusion), followed by a skeptical `high`-effort verifier with aligned `before/` and `after/` candidate excerpts and a constrained dynamic candidate-ID verification schema (`additional_observations` side channel).

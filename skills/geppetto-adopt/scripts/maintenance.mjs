@@ -65,7 +65,7 @@ export const integrationFiles = (root, options) => filesUnder(root, options).fil
 /** Refresh file-only companion context; CLI inventory never starts a model session. */
 export async function compileIntegrations(project, { home = userHome(), catalog, roots = [], execute = run } = {}) {
   catalog ??= fileURLToPath(new URL(await exists(new URL('../../../integrations', import.meta.url)) ? '../../../integrations' : '../integrations', import.meta.url));
-  const skillRoots = [resolve(project, '.claude/skills'), resolve(project, '.agents/skills'), resolve(home, '.claude/skills'), resolve(home, '.agents/skills'), resolve(process.env.CODEX_HOME || resolve(home, '.codex'), 'skills'), ...roots]; const caches = [resolve(home, '.claude/plugins/cache'), resolve(home, '.codex/plugins/cache'), ...(home === userHome() && process.env.CODEX_HOME ? [resolve(process.env.CODEX_HOME, 'plugins/cache')] : [])]; const installed = new Set(), gaps = [], sections = new Map(), suggestions = [], selected = [];
+  const skillRoots = [resolve(project, '.claude/skills'), resolve(project, '.agents/skills'), resolve(home, '.claude/skills'), resolve(home, '.agents/skills'), resolve(home, '.gemini/config/skills'), resolve(home, '.gemini/config/plugins'), resolve(process.env.CODEX_HOME || resolve(home, '.codex'), 'skills'), ...roots]; const caches = [resolve(home, '.claude/plugins/cache'), resolve(home, '.codex/plugins/cache'), ...(home === userHome() && process.env.CODEX_HOME ? [resolve(process.env.CODEX_HOME, 'plugins/cache')] : [])]; const installed = new Set(), gaps = [], sections = new Map(), suggestions = [], selected = [];
   for (const root of skillRoots) if (await exists(root)) for (const path of filesUnder(root, { skipLinks: true, excludeDirs: ['.git', 'node_modules'] })) if (basename(path) === 'SKILL.md') installed.add(basename(dirname(path)).toLowerCase());
   const collect = value => {
     if (Array.isArray(value)) { for (const row of value) collect(row); return; }
@@ -151,7 +151,10 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
     const available = execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Command Register-ScheduledTask -ErrorAction Stop | Out-Null']);
     if (available.error?.code === 'ENOENT') return null;
     if (available.status !== 0) throw new Error('Windows Task Scheduler is unavailable; inspect PowerShell ScheduledTasks support.');
-    if (!command) throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+    if (!command) {
+      if (host === 'antigravity') return null;
+      throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+    }
     const launcher = maintenanceWrapper(home);
     await mkdir(resolve(home, '.geppetto'), { recursive: true });
     const action = `"${process.execPath}" "${script}" --run `;
@@ -192,7 +195,10 @@ WScript.Quit status
   const listed = execute('crontab', ['-l']);
   if (listed.error?.code === 'ENOENT') return null;
   if (listed.status !== 0 && !/no crontab/i.test(listed.stderr ?? '')) throw new Error(`Cannot inspect crontab: ${listed.stderr?.trim()}`);
-  if (!command) throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+  if (!command) {
+    if (host === 'antigravity') return null;
+    throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
+  }
   const marker = `# ${id}`; const existing = (listed.stdout ?? '').split('\n').find(line => line.endsWith(marker)); const invocation = cronInvocation(home, name); const expression = existing?.trim().split(/\s+/).slice(0, 5).join(' ') || cronCadence;
   const nextRun = nextWeeklyRun(expression); const entry = `${expression} ${invocation} ${marker}`; const lines = (listed.stdout ?? '').split('\n'); const owned = lines.filter(line => line.endsWith(marker));
   if (owned.length !== 1 || existing !== entry) {

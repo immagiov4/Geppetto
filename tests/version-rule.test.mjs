@@ -12,7 +12,7 @@ test('version checks cover commits and pushes to main', () => {
  const check = (mode, input) => run(process.execPath, [join(source, 'check-version.mjs'), mode, dir], input);
  try {
   git('init', '-b', 'main'); git('config', 'user.email', 'test@example.com'); git('config', 'user.name', 'Test');
-  for (const file of ['package.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.agents/plugins/marketplace.json']) {
+  for (const file of ['package.json', 'plugin.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.codex-plugin/plugin.json', '.agents/plugins/marketplace.json']) {
    mkdirSync(join(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), JSON.stringify(file.includes('marketplace') ? { plugins: [{ name: 'geppetto', version: '1.0.0' }] } : { version: '1.0.0' }));
   }
   git('add', '.'); git('commit', '-m', 'base'); const base = git('rev-parse', 'HEAD'); git('switch', '-c', 'work');
