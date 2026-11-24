@@ -68,7 +68,7 @@ An installation request, including this repository link, authorizes adoption. Af
 
 - **Semantic screening costs.** Source screening uses the OpenRouter key from the environment and reports provider usage. Put a hard spending limit on the key; a local maximum cannot bound a request whose final charge is unknown.
 - **Three harnesses supported.** Claude Code, Codex and Antigravity. Pi and OpenCode can load the skills; nobody has trialled them there yet.
-- **Harness loading and hook trust.** Installation checks files and native hook hashes; verify actual hook and skill loading in a fresh session. Codex project layers also require project trust.
+- **Harness loading and hook trust.** Installation checks files (and native hook hashes on Codex); verify actual hook and skill loading in a fresh session. Codex project layers also require project trust.
 - **Maintenance scheduling.** Periodic jobs need an available harness or OS scheduler; the recap names missing prerequisites. Subscription learning uses the installed CLI account and its available tools.
 - **First CI run** on the PR that introduces Geppetto needs an owner-pinned Geppetto commit. [CI bootstrap](skills/geppetto-adopt/assets/templates/ci/README.md).
 

@@ -146,13 +146,18 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
           commands.push(command);
           return { ...hook, command };
         };
-        const spec = {};
+        const existing = settings.geppetto && typeof settings.geppetto === 'object' && !Array.isArray(settings.geppetto)
+          ? structuredClone(settings.geppetto) : {};
+        filterAntigravityHooks({ geppetto: existing }, hook =>
+          !machine.hooks[harness]?.commands?.includes(hook.command) && !/geppetto[^"\n]*[/\\](?:scripts|bin)[/\\]/i.test(hook.command ?? ''));
         for (const [event, entries] of Object.entries(template.geppetto)) {
-          spec[event] = ['PreToolUse', 'PostToolUse'].includes(event)
+          const installed = ['PreToolUse', 'PostToolUse'].includes(event)
             ? entries.map(group => ({ ...group, hooks: group.hooks.map(rewrite) }))
             : entries.map(rewrite);
+          const kept = Array.isArray(existing[event]) ? existing[event] : [];
+          existing[event] = [...kept, ...installed];
         }
-        settings.geppetto = spec;
+        settings.geppetto = existing;
         await atomicJson(hooksPath, settings);
         machine.hooks[harness] = { source: hooksPath, commands };
       } else {

@@ -100,6 +100,7 @@ export async function handleAntigravityEvent(normalized, options, runCore) {
 
   if (phase === 'PreInvocation') {
     if (await shouldStartTurnOnPreInvocation(root, normalized)) {
+      await drainPendingContext(root, sessionId);
       await runCore({ ...normalized, hook_event_name: 'UserPromptSubmit' }, options);
     }
     const queued = await drainPendingContext(root, sessionId);
@@ -114,6 +115,7 @@ export async function handleAntigravityEvent(normalized, options, runCore) {
   }
 
   if (phase === 'Stop' && normalized.termination_reason && normalized.termination_reason !== 'NO_TOOL_CALL') {
+    await drainPendingContext(root, sessionId);
     if (sessionId && await exists(resolve(root, '.geppetto/config.json'))) {
       await logHookEvent(root, { hook: 'antigravityStop', status: 'skipped', reason: normalized.termination_reason, modelCalls: 0 }, normalized);
     }

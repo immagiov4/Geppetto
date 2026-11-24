@@ -217,7 +217,9 @@ async function machineDrift(root, source, home = userHome(), { log = console.log
     const scheduled = ['scheduled', 'scheduled-elsewhere'].includes(job?.status) && registered && !schedulerMissing;
     if (schedulerMissing) log(`${name}: native registration ${schedule[name]}`);
     const disabled = !job || job.status === 'disabled' || job.status === 'scheduled-elsewhere';
-    const healthy = local.maintenance?.enabled === false ? disabled : scheduled;
+    const antigravityOnly = Object.keys(machine.hooks ?? {}).length > 0 && Object.keys(machine.hooks).every(name => name === 'antigravity');
+    const expectedUnscheduled = antigravityOnly && job?.status === 'needs-scheduler' && !job.scheduler;
+    const healthy = local.maintenance?.enabled === false ? disabled : (scheduled || expectedUnscheduled);
     log(`${name}: ${job?.status ?? 'missing'}${registered ? '' : ' (registry entry missing or different)'}`);
     drift ||= !healthy;
   }

@@ -283,7 +283,7 @@ async function editingEvent(root, state, statePath, event, policy) {
       }
       state.worktree = worktree; await atomicJson(statePath, state);
     }
-    if (policy.checks.some(check => check.id === 'feedback') && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
+    if (policy.checks.some(check => check.id === 'feedback') && !(event.tool_error || event.tool_response?.isError || event.tool_response?.is_error) && reviewResult(event, policy) && (!event.tool_use_id || await claimFile(`${path}.${digest(event.tool_use_id)}.received`))) {
       if (state.epoch === state.userEpoch && staged?.epoch !== state.epoch) return {};
       const epoch = randomUUID(); await atomicJson(statePath, { ...state, epoch, ...(state.shellPending === state.epoch ? { shellPending: epoch } : {}) }); await logHookEvent(root, { hook: 'turnGate', status: 'rearmed' }, event);
     } return {};
@@ -462,7 +462,7 @@ async function completionEvent(event, reviewArchive) {
     await atomicJson(statePath, state);
   }
   if (event.transcript_path && state.transcript_path !== event.transcript_path) { state.transcript_path = resolve(event.cwd ?? root, event.transcript_path); await atomicJson(statePath, state); }
-  const turnConfig = await jsonFile(resolve(root, '.geppetto/config.json'), {}); if (turnPolicy(turnConfig).checks.length || (state.transcript_path && turnConfig.hooks?.learnNudge?.enabled !== false)) {
+  const turnConfig = await jsonFile(resolve(root, '.geppetto/config.json'), {}); if (turnPolicy(turnConfig).checks.length || (state.transcript_path && (event.harness === 'antigravity' || turnConfig.hooks?.learnNudge?.enabled !== false))) {
     try { if (checkpointError) throw checkpointError; checkpoint ??= await messageCheckpoint(state.transcript_path, state.promptCursor); }
     catch (error) {
       if (!state.messageError) { state.messageError = error.code ?? 'invalid-transcript'; await atomicJson(statePath, state); await logHookEvent(root, { hook: 'turnGate', status: 'transcript-unavailable', reason: state.messageError, modelCalls: 0 }, event); }

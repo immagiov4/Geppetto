@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, appendFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { repo, fixture, put, get, git, invoke, config } from './helpers.mjs';
+import { delimiter, resolve } from 'node:path';
+import { repo, fixture, put, get, git, invoke, config, restoreEnv } from './helpers.mjs';
 
 const readJson = path => JSON.parse(readFileSync(resolve(repo, path), 'utf8'));
 
@@ -41,12 +41,16 @@ test('Antigravity root manifests and template follow native plugin and hook cont
   }
   assert.equal(Array.isArray(hooks.geppetto.PreToolUse), true, 'PreToolUse is a grouped matcher array');
   assert.equal(hooks.geppetto.PreToolUse[0].matcher, 'edit_file|write_file');
+  assert.equal(new RegExp(hooks.geppetto.PreToolUse[0].matcher).test('edit_file'), true);
+  assert.equal(new RegExp(hooks.geppetto.PreToolUse[0].matcher).test('run_command'), false);
   assert.equal(hooks.geppetto.PreToolUse[0].hooks.length, 1);
   assert.equal(Array.isArray(hooks.geppetto.PostToolUse), true, 'PostToolUse is a grouped matcher array');
-  assert.equal(hooks.geppetto.PostToolUse[0].matcher, '*');
+  assert.equal(hooks.geppetto.PostToolUse[0].matcher, '.*');
+  assert.equal(new RegExp(hooks.geppetto.PostToolUse[0].matcher).test('run_command'), true);
   assert.equal(hooks.geppetto.PostToolUse[0].hooks.length, 1);
   assert.ok(template.geppetto, 'Template hooks.json defines named geppetto hook');
   assert.equal(template.geppetto.PreToolUse[0].matcher, 'edit_file|write_file');
+  assert.equal(template.geppetto.PostToolUse[0].matcher, '.*');
 
   const cmd = hooks.geppetto.PreToolUse[0].hooks[0].command;
   assert.match(cmd, /^node \.\/skills\/geppetto-adopt\/scripts\/hook\.mjs --harness antigravity$/);
@@ -229,10 +233,21 @@ test('Antigravity PostToolUse returns {}, logs reads and metrics, re-arms on rev
   const metrics = get(cwd, '.git/geppetto/metrics.jsonl').trim().split('\n').map(JSON.parse);
   assert.ok(metrics.some(m => m.kind === 'suite' && m.key === 'npm test' && m.harness === 'antigravity'));
 
-  // Verify re-arm on gh pr view --comments via run_command.
+  // Verify failed feedback lookup (error set) does NOT re-arm feedback, while successful lookup DOES.
   invoke('hook.mjs', ['--record-turn', JSON.stringify({
     requirements: { changes: false }, feedback: { applies: false }, frustration: { applies: false },
   }), '--session', sid], { cwd, home });
+  agHook(cwd, {
+    hookEventName: 'PostToolUse', conversationId: sid, transcriptPath: transcript,
+    toolCall: { id: 'gh-fail', name: 'run_command', args: { CommandLine: 'gh pr view --comments' } },
+    error: 'exit status 1',
+  }, { home });
+  res = agHook(cwd, {
+    hookEventName: 'PreToolUse', conversationId: sid, transcriptPath: transcript,
+    toolCall: { id: 'e-after-fail', name: 'edit_file', args: { Path: 'src/app.js' } },
+  }, { home });
+  assert.deepEqual(JSON.parse(res.stdout), { decision: 'allow' });
+
   agHook(cwd, {
     hookEventName: 'PostToolUse', conversationId: sid, transcriptPath: transcript,
     toolCall: { id: 'gh1', name: 'run_command', args: { CommandLine: 'gh pr view --comments' } },
@@ -308,42 +323,110 @@ test('Antigravity Stop translates block to continue, respects continuationActive
   assert.equal(blocked.decision, 'continue');
   assert.match(blocked.reason, /\$geppetto-verify/);
 
-  // Retry with continuationActive: true lets the turn close.
+  // Fresh turn with NO prior Stop block marker proves continuationActive: true itself suppresses blocking.
+  const freshSid = 'ag-stop-continuation';
+  agHook(cwd, { hookEventName: 'PreInvocation', conversationId: freshSid, invocationNum: 0 });
+  put(cwd, 'src/app.js', Array.from({ length: 24 }, (_, i) => `export const f${i} = ${i};`).join('\n') + '\n');
   res = agHook(cwd, {
-    hookEventName: 'Stop', conversationId: sid, terminationReason: 'NO_TOOL_CALL', continuationActive: true,
+    hookEventName: 'Stop', conversationId: freshSid, terminationReason: 'NO_TOOL_CALL', continuationActive: true,
   });
   assert.equal(res.status, 0, res.stderr);
   assert.deepEqual(JSON.parse(res.stdout), {});
 });
 
-test('install.mjs supports --target antigravity in standalone and plugin-hooks modes without touching Codex trust', t => {
+test('Antigravity repeated PreInvocation keeps review baseline when turnChecks and learnNudge are disabled, and cancellation clears queued reminders', t => {
+  const cwd = fixture(t);
+  initRepo(cwd, { 'src/app.js': 'export const x = 0;\n' });
+  put(cwd, '.geppetto/config.json', {
+    ...config(),
+    turnChecks: [],
+    hooks: {
+      reviewGate: { enabled: true, benchmark: null, threshold: 5 },
+      learnNudge: { enabled: false, benchmark: null },
+      signalLearning: { enabled: false, benchmark: null },
+    },
+  });
+  const transcript = resolve(cwd, 'transcript.jsonl');
+  put(cwd, 'transcript.jsonl', JSON.stringify({
+    step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', content: 'Big edit',
+  }) + '\n');
+
+  const sid = 'ag-review-baseline';
+  agHook(cwd, { hookEventName: 'PreInvocation', conversationId: sid, transcriptPath: transcript, invocationNum: 0 });
+  put(cwd, 'src/app.js', Array.from({ length: 12 }, (_, i) => `export const b${i} = ${i};`).join('\n') + '\n');
+  // Second PreInvocation on same transcript must NOT advance snapshot to the already-edited tree.
+  agHook(cwd, { hookEventName: 'PreInvocation', conversationId: sid, transcriptPath: transcript, invocationNum: 1 });
+  const stopRes = agHook(cwd, {
+    hookEventName: 'Stop', conversationId: sid, transcriptPath: transcript, terminationReason: 'NO_TOOL_CALL', continuationActive: false,
+  });
+  assert.equal(stopRes.status, 0, stopRes.stderr);
+  assert.equal(JSON.parse(stopRes.stdout).decision, 'continue');
+
+  // Cancellation clears any queued reminder so the next turn never receives stale advice.
+  const cwd2 = fixture(t);
+  initRepo(cwd2, { 'src/app.js': 'export const y = 0;\n' });
+  put(cwd2, '.geppetto/config.json', {
+    ...config(),
+    hooks: {
+      reviewGate: { enabled: true, benchmark: null, threshold: 30 },
+      learnNudge: { enabled: true, benchmark: null, minToolCalls: 1, minDurationMs: 300000 },
+      signalLearning: { enabled: true, benchmark: null, minSessions: 2, maxOpenKeys: 5 },
+    },
+  });
+  const t2 = resolve(cwd2, 'transcript.jsonl');
+  put(cwd2, 'transcript.jsonl', JSON.stringify({
+    step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', content: 'Canceled task',
+  }) + '\n');
+  const cancelSid = 'ag-cancel-queue';
+  agHook(cwd2, { hookEventName: 'PreInvocation', conversationId: cancelSid, transcriptPath: t2, invocationNum: 0 });
+  agHook(cwd2, {
+    hookEventName: 'PostToolUse', conversationId: cancelSid, transcriptPath: t2,
+    toolCall: { id: 'c1', name: 'read_file', args: { Path: 'README.md' } },
+  });
+  agHook(cwd2, { hookEventName: 'Stop', conversationId: cancelSid, transcriptPath: t2, terminationReason: 'USER_CANCELED' });
+  appendFileSync(t2, JSON.stringify({
+    step_index: 1, source: 'USER_EXPLICIT', type: 'USER_INPUT', status: 'DONE', content: 'New task',
+  }) + '\n');
+  const nextRes = agHook(cwd2, { hookEventName: 'PreInvocation', conversationId: cancelSid, transcriptPath: t2, invocationNum: 0 });
+  assert.equal(nextRes.status, 0, nextRes.stderr);
+  assert.deepEqual(JSON.parse(nextRes.stdout), {});
+});
+
+test('install.mjs supports --target antigravity in project, user and plugin-hooks modes while preserving user handlers inside geppetto map', t => {
   const home = fixture(t);
   const project = fixture(t);
   initRepo(project);
   put(home, '.gemini/config/hooks.json', {
     'user-custom-hook': { Stop: [{ type: 'command', command: 'echo keep-me' }] },
+    geppetto: {
+      PostInvocation: [{ type: 'command', command: 'echo keep-user-post-invocation' }],
+      Stop: [{ type: 'command', command: 'echo keep-user-stop' }],
+    },
   });
 
-  // Standalone install writes skills under .agents/skills and merges geppetto hook into ~/.gemini/config/hooks.json.
+  // Standalone project install writes skills under .agents/skills and merges geppetto hook into ~/.gemini/config/hooks.json.
   let res = invoke('install.mjs', ['--target', 'antigravity', '--project', project], { cwd: project, home });
   assert.equal(res.status, 0, res.stderr);
   assert.equal(existsSync(resolve(project, '.agents/skills/geppetto-adopt/SKILL.md')), true);
   let agHooks = JSON.parse(get(home, '.gemini/config/hooks.json'));
-  assert.ok(agHooks['user-custom-hook'], 'Preserves foreign hooks');
+  assert.ok(agHooks['user-custom-hook'], 'Preserves foreign top-level hooks');
   assert.ok(agHooks.geppetto, 'Installs geppetto hook');
+  assert.equal(agHooks.geppetto.PostInvocation?.[0]?.command, 'echo keep-user-post-invocation', 'Preserves foreign handler inside geppetto map');
+  assert.ok(agHooks.geppetto.Stop.some(h => h.command === 'echo keep-user-stop'), 'Preserves foreign Stop handler inside geppetto map');
   assert.match(agHooks.geppetto.SessionStart[0].command, /--harness antigravity$/);
 
   let machine = JSON.parse(get(home, '.geppetto/machine.json'));
   assert.equal(machine.hooks.antigravity.source, resolve(home, '.gemini/config/hooks.json'));
   assert.equal(machine.hooks.codex, undefined);
 
-  // Switching to --plugin-hooks removes duplicate .agents/skills copies and clears user-level hooks.json entry.
+  // Switching to --plugin-hooks removes duplicate .agents/skills copies and removes only owned commands from geppetto map.
   res = invoke('install.mjs', ['--target', 'antigravity', '--project', project, '--plugin-hooks'], { cwd: project, home });
   assert.equal(res.status, 0, res.stderr);
   assert.equal(existsSync(resolve(project, '.agents/skills/geppetto-adopt/SKILL.md')), false);
   agHooks = JSON.parse(get(home, '.gemini/config/hooks.json'));
-  assert.ok(agHooks['user-custom-hook'], 'Still preserves foreign hooks');
-  assert.equal(agHooks.geppetto, undefined, 'Removes user hook when switching to plugin hooks');
+  assert.ok(agHooks['user-custom-hook'], 'Still preserves foreign top-level hooks');
+  assert.equal(agHooks.geppetto.PostInvocation?.[0]?.command, 'echo keep-user-post-invocation', 'Still preserves foreign handler inside geppetto map');
+  assert.equal(agHooks.geppetto.SessionStart, undefined, 'Removes owned geppetto handlers when switching to plugin hooks');
   machine = JSON.parse(get(home, '.geppetto/machine.json'));
   assert.equal(machine.hooks.antigravity.source, 'plugin');
 
@@ -352,9 +435,81 @@ test('install.mjs supports --target antigravity in standalone and plugin-hooks m
   assert.equal(res.status, 0, res.stderr);
   machine = JSON.parse(get(home, '.geppetto/machine.json'));
   assert.equal(machine.hooks.antigravity, undefined);
+
+  // User-level standalone install places skills in Antigravity's native ~/.gemini/config/skills directory.
+  const userHomeDir = fixture(t);
+  res = invoke('install.mjs', ['--target', 'antigravity', '--user'], { cwd: userHomeDir, home: userHomeDir });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(existsSync(resolve(userHomeDir, '.gemini/config/skills/geppetto-adopt/SKILL.md')), true);
+  assert.equal(existsSync(resolve(userHomeDir, '.agents/skills/geppetto-adopt/SKILL.md')), false);
+  res = invoke('install.mjs', ['--target', 'antigravity', '--user', '--uninstall'], { cwd: userHomeDir, home: userHomeDir });
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(existsSync(resolve(userHomeDir, '.gemini/config/skills/geppetto-adopt/SKILL.md')), false);
 });
 
-test('learningCommand returns null for antigravity instead of falling back to claude CLI', async () => {
+test('Antigravity maintenance avoids Claude fallback, preserves orphan OS jobs, and avoids persistent update-notice drift', async t => {
   const { learningCommand } = await import('../skills/geppetto-adopt/scripts/learn-runner.mjs');
-  assert.equal(learningCommand('antigravity'), null);
+  const { scheduleMaintenance, maintenanceLauncherText } = await import('../skills/geppetto-adopt/scripts/maintenance.mjs');
+  const { updateNotice } = await import('../skills/geppetto-adopt/scripts/update-check.mjs');
+
+  // 1. Supply a synthetic Claude CLI on PATH to prove learningCommand('antigravity') does not fall back to it.
+  const fakeBin = fixture(t);
+  put(fakeBin, 'node_modules/@anthropic-ai/claude-code/cli.js', 'console.log("claude");\n');
+  const envSnapshot = { ...process.env };
+  try {
+    process.env.PATH = `${fakeBin}${delimiter}${process.env.PATH ?? ''}`;
+    assert.ok(learningCommand('claude'), 'Synthetic Claude CLI is discoverable on PATH');
+    assert.equal(learningCommand('antigravity'), null, 'Antigravity never falls back to Claude CLI');
+  } finally {
+    restoreEnv(envSnapshot);
+  }
+
+  // 2. Existing orphan cron / Windows OS jobs are preserved (throw rather than returning null) when previous.id is missing.
+  const home = fixture(t);
+  const source = { path: repo };
+  const cronWithOrphan = (cmd, args) => cmd === 'crontab' && args[0] === '-l'
+    ? { status: 0, stdout: '0 9 * * 1 /usr/bin/node /tmp/launcher.mjs --run curate-skills # Geppetto-curate-skills\n' }
+    : { status: 0, stdout: '' };
+  await assert.rejects(
+    scheduleMaintenance('curate-skills', { home, host: 'antigravity', source, platform: 'linux', execute: cronWithOrphan, command: null }),
+    /Install antigravity CLI/,
+  );
+  const cronEmpty = (cmd, args) => cmd === 'crontab' && args[0] === '-l'
+    ? { status: 1, stderr: 'no crontab for user' }
+    : { status: 0, stdout: '' };
+  assert.equal(
+    await scheduleMaintenance('curate-skills', { home, host: 'antigravity', source, platform: 'linux', execute: cronEmpty, command: null }),
+    null,
+  );
+  const winWithOrphan = (cmd, args) => {
+    if (cmd === 'powershell.exe') return { status: 0, stdout: '' };
+    if (cmd === 'schtasks.exe') return { status: 0, stdout: '<Task><Settings><Enabled>true</Enabled></Settings><Actions><Exec><Command>wscript.exe</Command><Arguments>old</Arguments></Exec></Actions></Task>' };
+    return { status: 0, stdout: '' };
+  };
+  await assert.rejects(
+    scheduleMaintenance('curate-skills', { home, host: 'antigravity', source, platform: 'win32', execute: winWithOrphan, command: null }),
+    /Install antigravity CLI/,
+  );
+
+  // 3. Antigravity-only installation with expected needs-scheduler produces no false repair notice on startup.
+  const agHome = fixture(t);
+  const project = fixture(t);
+  initRepo(project);
+  const pkg = readJson('package.json');
+  const now = () => Date.parse('2026-11-24T12:00:00Z');
+  const epoch = Math.floor(now() / 86_400_000);
+  put(project, '.geppetto/config.json', { ...config(), ci: { enabled: false }, maintenance: { enabled: true } });
+  put(project, '.geppetto/install.json', { version: 1, source: { path: repo, version: pkg.version }, installations: { antigravity: { files: {}, generated: [], plugin: true } } });
+  put(agHome, '.geppetto/bin/maintenance-launcher.mjs', maintenanceLauncherText(agHome, { path: repo }));
+  put(agHome, '.geppetto/machine.json', {
+    projects: { [project]: { antigravity: repo } },
+    hooks: { antigravity: { source: 'plugin' } },
+    jobs: {
+      'curate-skills': { status: 'needs-scheduler', source: 'skills/geppetto-adopt/assets/templates/jobs/curate-skills.md' },
+      'maintain-memory': { status: 'needs-scheduler', source: 'skills/geppetto-adopt/assets/templates/jobs/maintain-memory.md' },
+    },
+  });
+  put(agHome, '.geppetto/update-status.json', { epoch, version: pkg.version, tag: `v${pkg.version}`, sha: 'a'.repeat(40), scheduler: {} });
+  const notice = await updateNotice(project, { home: agHome, now, harness: 'antigravity' });
+  assert.equal(notice, '');
 });
