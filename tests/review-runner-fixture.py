@@ -436,6 +436,7 @@ class ReviewStrategyTests(unittest.TestCase):
             ({'profile': 'ultra', 'gap_effort': 'xhigh'}, 'xhigh'),
             ({'tool_budget': 0}, 'tool budget'),
             ({'max_diff_bytes': -1}, 'diff byte'),
+            ({'max_shards': 0}, 'shard count'),
         ]
         for options, error in cases:
             with self.subTest(options=options), self.assertRaisesRegex(ValueError, error):

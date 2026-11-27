@@ -184,6 +184,62 @@ test('lens review recording rejects invalid stage sequences, reports and materia
   assert.equal((await send('Stop')).decision, 'block');
 });
 
+test('sharded standard and ultra review evidence satisfies Stop for both outcomes', async t => {
+  const { cwd, send, nativeHome } = project(t);
+  await send('UserPromptSubmit');
+  for (const [profile, shardCount] of [['standard', 2], ['ultra', 3]]) {
+    for (const outcome of ['passed', 'findings']) {
+      put(cwd, 'app.mjs', lines(80, profile + outcome));
+      const options = { strategy: 'lenses', profile, shardCount };
+      if (outcome === 'findings' || profile === 'ultra') {
+        options.candidates = Array.from({ length: 20 }, (_, i) => ({ id: 'SH1-' + (i + 1) }));
+        options.verifyStages = ['verify-1', 'verify-2'];
+        if (outcome === 'findings') options.findings = [options.candidates.at(-1), options.candidates[0]];
+      }
+      const evidence = reviewFixture(t, cwd, outcome, 'HEAD', nativeHome, options);
+      const recorded = invokeReview(t, cwd, outcome, 'gate', 'one', nativeHome, evidence);
+      assert.equal(recorded.status, 0, profile + ' ' + outcome + ': ' + recorded.stderr);
+      assert.deepEqual(await send('Stop'), {});
+    }
+  }
+});
+
+test('sharded review recording rejects invalid shard and verification evidence', async t => {
+  const { cwd, send, nativeHome } = project(t);
+  await send('UserPromptSubmit');
+  put(cwd, 'app.mjs', lines(80, 'updated'));
+  const discovery = ['shard-1', 'shard-2', 'lens-contracts', 'lens-rules-tests'];
+  const cases = [
+    { label: 'mismatched shard metadata', count: 3 },
+    ...[0, -1, 1.5, '2'].map(count => ({ label: 'invalid shard count ' + count, count })),
+    { label: 'missing shard stage', stages: [...discovery.slice(1), 'verify-1', 'verify-2'] },
+    { label: 'wrong archived shard stage', archivedStages: { 'shard-2': 'shard-1' } },
+    { label: 'extra verify-3', verifyStages: ['verify-1', 'verify-2', 'verify-3'] },
+    { label: 'missing verify-2', verifyStages: ['verify-1'] },
+    { label: 'missing candidate decision', verifyResponses: { 'verify-2': { accepted_findings: [], decisions: [] } } },
+    { label: 'missing decisions array', verifyResponses: { 'verify-2': { accepted_findings: [] } } },
+    { label: 'duplicate candidate decision', verifyResponses: {
+      'verify-2': { accepted_findings: [], decisions: [{ id: 'fixture' }, { id: 'SH2-1' }] },
+    } },
+    { label: 'different combined findings', verifyResponses: {
+      'verify-1': { accepted_findings: [{ id: 'fixture', title: 'Altered' }], decisions: [{ id: 'fixture' }] },
+    } },
+  ];
+  for (const { label, count, ...options } of cases) {
+    const evidence = reviewFixture(t, cwd, 'findings', 'HEAD', nativeHome, {
+      strategy: 'lenses', shardCount: 2, candidates: [{ id: 'fixture' }, { id: 'SH2-1' }],
+      verifyStages: ['verify-1', 'verify-2'], ...options,
+    });
+    if (count !== undefined) {
+      const metrics = JSON.parse(get(evidence, 'metrics.json'));
+      put(evidence, 'metrics.json', { ...metrics, shard_count: count });
+    }
+    const recorded = invokeReview(t, cwd, 'findings', 'gate', 'one', nativeHome, evidence);
+    assert.equal(recorded.status, 2, label + ': ' + recorded.stderr);
+  }
+  assert.equal((await send('Stop')).decision, 'block');
+});
+
 test('disabling the review gate does not disable the requirements decision before an edit', async t => {
   const { cwd } = project(t);
   put(cwd, '.geppetto/config.json', { ...config(), hooks: { reviewGate: { enabled: false } } });

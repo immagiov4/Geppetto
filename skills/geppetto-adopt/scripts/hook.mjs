@@ -356,20 +356,27 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
     : strategy === 'generic' ? ['search-1', 'search-2'] : [];
   if (strategy === 'lenses') {
     if (!['standard', 'ultra'].includes(profile)) fail();
-    required.push('lens-adversarial', 'lens-contracts', 'lens-rules-tests');
+    const shardCount = metrics.shard_count ?? 1;
+    if (shardCount === 1) {
+      required.push('lens-adversarial');
+    } else {
+      if (!Number.isSafeInteger(shardCount) || shardCount < 2 ||
+          !Array.isArray(metrics.shards) || metrics.shards.length !== shardCount) fail();
+      for (let index = 1; index <= shardCount; index++) required.push('shard-' + index);
+    }
+    required.push('lens-contracts', 'lens-rules-tests');
     if (profile === 'ultra') required.push('gap-logic', 'gap-contracts-docs');
   }
   const { calls, thread_ids: threads, case_fingerprint: fingerprint, changed_paths: paths } = metrics;
   if (!required.length || !Array.isArray(calls) || !Array.isArray(threads) ||
-      calls.length < required.length || calls.length > required.length + 1 || calls.length !== threads.length ||
+      calls.length < required.length || calls.length > required.length + 2 || calls.length !== threads.length ||
       threads.includes(session) || new Set(threads).size !== threads.length ||
       !required.every((stage, index) => calls[index]?.stage === stage) ||
-      (calls.length > required.length && calls[required.length]?.stage !== 'verify') ||
-      new Set(calls.map(call => call.stage)).size !== calls.length || !Array.isArray(paths) || !fingerprint) fail();
+      !Array.isArray(paths) || !fingerprint) fail();
   const responses = {};
   const seal = reviewMaterialSeal(fingerprint);
   for (const [index, call] of calls.entries()) {
-    if (!/^(questions|investigate|search-[12]|lens-(?:adversarial|contracts|rules-tests)|gap-(?:logic|contracts-docs)|verify)$/.test(call.stage) || call.status !== 'completed' ||
+    if (!call || !/^(questions|investigate|search-[12]|shard-[1-9]\d*|lens-(?:adversarial|contracts|rules-tests)|gap-(?:logic|contracts-docs)|verify(?:-[12])?)$/.test(call.stage) || call.status !== 'completed' ||
         call.exit_code !== 0 || typeof threads[index] !== 'string' || !threads[index]) fail();
     const response = await readFile(resolve(directory, call.stage + '.json'), 'utf8');
     const expectedStage = strategy === 'lenses' ? call.stage : undefined;
@@ -385,11 +392,23 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
     : required.map(stage => responses[stage]?.findings);
   if (!findingsByStage.every(Array.isArray)) fail();
   const candidates = findingsByStage.flat();
-  if (calls.length !== required.length + Number(candidates.length > 0) ||
-      Boolean(candidates.length) !== Boolean(responses.verify)) fail();
-  const accepted = responses.verify?.accepted_findings ?? [];
+  const verifyCalls = calls.slice(required.length);
+  const verifyStages = verifyCalls.map(call => call.stage);
+  if (candidates.length === 0 ? verifyCalls.length !== 0 :
+      !isDeepStrictEqual(verifyStages, ['verify']) &&
+      !(strategy === 'lenses' && isDeepStrictEqual(verifyStages, ['verify-1', 'verify-2']))) fail();
+  const verification = verifyStages.map(stage => responses[stage]);
+  if (!verification.every(response => Array.isArray(response?.accepted_findings))) fail();
+  const accepted = verification.flatMap(response => response.accepted_findings);
   const byId = (left, right) => left.id.localeCompare(right.id, 'en');
-  if (!Array.isArray(accepted) || !isDeepStrictEqual(accepted.toSorted(byId), report.findings.toSorted(byId))) fail();
+  if (!isDeepStrictEqual(accepted.toSorted(byId), report.findings.toSorted(byId))) fail();
+  if (verification.length > 1) {
+    if (!verification.every(response => Array.isArray(response.decisions))) fail();
+    const expected = candidates.map(candidate => candidate?.id).sort();
+    const decided = verification.flatMap(response => response.decisions.map(decision => decision?.id)).sort();
+    if (!expected.every(id => typeof id === 'string' && id) || new Set(expected).size !== expected.length ||
+        !isDeepStrictEqual(decided, expected)) fail();
+  }
   if (fingerprint['diff.patch'] !== await diffDigest(root, ['diff', '--binary', '--no-ext-diff', base, '--'], '')) fail();
   const changed = gitOutput(root, ['diff', '--name-only', '--no-renames', '-z', base, '--'], { trim: false }).split('\0').filter(Boolean);
   const untracked = gitOutput(root, ['ls-files', '--others', '--exclude-standard', '-z'], { trim: false })
