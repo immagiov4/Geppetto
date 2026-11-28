@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.29.0
+
+- Run two complementary discovery waves in both review profiles. The second wave uses uncovered hunks across files and a static map of callers and state references to find defects missed in the first wave.
+- Fit up to 120,000 diff bytes per shard across five shards. Group nearby findings for verification and split eligible sets above 12 candidates into two parallel batches.
+- Allow read-only in-memory probes of runtime behaviour. Record preparation time, symbol scan limits and uncovered hunk counts in the review metrics.
+- Keep the symbol scan within its time budget and prioritize callers in source and build files, including CMake entry points. Launch ripgrep without opening a Windows console.
+- Keep uncovered source paths and essential review context visible when the complete hunk index exceeds the gap packet budget.
+- Bind parallel verification decisions to each batch's archived candidate assignments. Sharded standard uses its own gap stage to cover seams, rules and tests.
+- Migration. Update the plugin and reapprove the Codex hooks to accept the new discovery sequences.
+
 ## 0.28.0
 
 - Memory writers share one checkout safely. A new [shared checkout](skills/geppetto-memory/references/shared-checkout.md) reference defines path ownership, literal pathspecs, `git pull --ff-only <remote> <branch>` before editing when a remote is configured, verified index-snapshot commits (falling back to `--only` only for non-native paths when the index is busy) and guarded push recovery with `--autostash`, `rebase --abort` and conflict cleanup. Weekly maintenance with Git access commits native memory changes left uncommitted; file-tools-only scheduled runs keep edits local and report pending Git work.

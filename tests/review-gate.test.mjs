@@ -154,15 +154,18 @@ test('lens review recording rejects invalid stage sequences, reports and materia
   const { cwd, send, nativeHome } = project(t);
   await send('UserPromptSubmit');
   put(cwd, 'app.mjs', lines(80, 'updated'));
-  const lenses = ['lens-adversarial', 'lens-contracts', 'lens-rules-tests'];
+  const primary = ['lens-correctness', 'lens-rules-tests'];
+  const lenses = [...primary, 'gap-audit'];
   const cases = [
-    { label: 'missing lens', stages: lenses.slice(0, 2) },
-    { label: 'missing gap', profile: 'ultra', stages: lenses },
+    { label: 'missing lens', stages: lenses.slice(1) },
+    { label: 'missing standard gap', stages: primary },
+    { label: 'missing ultra gap', profile: 'ultra', stages: [...primary, 'gap-logic'] },
     { label: 'wrong profile', profile: 'other' },
     { label: 'extra stage', stages: [...lenses, 'gap-logic'] },
     { label: 'unneeded verify', stages: [...lenses, 'verify'] },
+    { label: 'missing single verifier decisions', outcome: 'findings', verifyResponses: { verify: { accepted_findings: [{ id: 'fixture' }] } } },
     { label: 'missing verify despite rejected report', candidates: [{ id: 'L1-1' }], stages: lenses },
-    { label: 'substituted archived stage', archivedStages: { 'lens-adversarial': 'lens-contracts' } },
+    { label: 'substituted archived stage', archivedStages: { 'lens-correctness': 'lens-rules-tests' } },
     { label: 'late verify', outcome: 'findings', stages: [...lenses, 'gap-logic', 'verify'] },
     { label: 'mismatched report', outcome: 'findings', file: 'findings.json', mutate: report => {
       report.findings[0].id = 'changed';
@@ -208,10 +211,10 @@ test('review recording binds the shard count in the native archives', async t =>
   const { cwd, send, nativeHome } = project(t);
   await send('UserPromptSubmit');
   put(cwd, 'app.mjs', lines(80, 'updated'));
-  const discovery = ['shard-1', 'shard-2', 'shard-3', 'lens-contracts', 'lens-rules-tests'];
+  const discovery = ['shard-1', 'shard-2', 'shard-3', 'gap-audit'];
   for (const [label, stages, count] of [
     ['omitted third shard', discovery.filter(stage => stage !== 'shard-3'), 2],
-    ['sharded archive presented as unsharded', ['lens-adversarial', ...discovery.slice(3)], 1],
+    ['sharded archive presented as unsharded', ['lens-correctness', 'lens-rules-tests', 'gap-audit'], 1],
   ]) {
     const evidence = reviewFixture(t, cwd, 'passed', 'HEAD', nativeHome, { strategy: 'lenses', shardCount: 3, stages });
     const metrics = JSON.parse(get(evidence, 'metrics.json'));
@@ -257,17 +260,36 @@ test('sharded review recording rejects invalid shard and verification evidence',
   const { cwd, send, nativeHome } = project(t);
   await send('UserPromptSubmit');
   put(cwd, 'app.mjs', lines(80, 'updated'));
-  const discovery = ['shard-1', 'shard-2', 'lens-contracts', 'lens-rules-tests'];
+  const discovery = ['shard-1', 'shard-2', 'gap-audit'];
   const cases = [
     { label: 'mismatched shard metadata', count: 3 },
     ...[0, -1, 1.5, '2'].map(count => ({ label: 'invalid shard count ' + count, count })),
     { label: 'missing shard stage', stages: [...discovery.slice(1), 'verify-1', 'verify-2'] },
+    { label: 'missing sharded standard gap', stages: [...discovery.slice(0, -1), 'verify-1', 'verify-2'] },
+    { label: 'missing sharded ultra gap', profile: 'ultra', stages: [...discovery.slice(0, -1), 'gap-seams', 'verify-1', 'verify-2'] },
+    { label: 'ultra seam archive submitted as standard gap', archivedStages: { 'gap-audit': 'gap-seams' } },
+    { label: 'wrong archived gap shard count', archivedShards: { 'gap-audit': 3 } },
     { label: 'wrong archived shard stage', archivedStages: { 'shard-2': 'shard-1' } },
     { label: 'wrong archived verifier shard count', archivedShards: { 'verify-2': 3 } },
     { label: 'extra verify-3', verifyStages: ['verify-1', 'verify-2', 'verify-3'] },
     { label: 'missing verify-2', verifyStages: ['verify-1'] },
     { label: 'missing candidate decision', verifyResponses: { 'verify-2': { accepted_findings: [], decisions: [] } } },
     { label: 'missing decisions array', verifyResponses: { 'verify-2': { accepted_findings: [] } } },
+    { label: 'all decisions returned by one verifier', verifyResponses: {
+      'verify-1': { accepted_findings: [{ id: 'fixture' }], decisions: [
+        { id: 'fixture', decision: 'accept', canonical_id: 'fixture' },
+        { id: 'SH2-1', decision: 'reject', canonical_id: '-' },
+      ] },
+      'verify-2': { accepted_findings: [], decisions: [] },
+    } },
+    { label: 'verifiers swapped candidate assignments', verifyResponses: {
+      'verify-1': { accepted_findings: [], decisions: [{ id: 'SH2-1', decision: 'reject', canonical_id: '-' }] },
+      'verify-2': { accepted_findings: [{ id: 'fixture' }], decisions: [{ id: 'fixture', decision: 'accept', canonical_id: 'fixture' }] },
+    } },
+    { label: 'finding borrows a self-accept from another verifier', verifyResponses: {
+      'verify-1': { accepted_findings: [], decisions: [{ id: 'fixture', decision: 'accept', canonical_id: 'fixture' }] },
+      'verify-2': { accepted_findings: [{ id: 'fixture' }], decisions: [{ id: 'SH2-1', decision: 'reject', canonical_id: '-' }] },
+    } },
     { label: 'duplicate candidate decision', verifyResponses: {
       'verify-2': { accepted_findings: [], decisions: [{ id: 'fixture', decision: 'reject', canonical_id: '-' }, { id: 'SH2-1', decision: 'reject', canonical_id: '-' }] },
     } },
