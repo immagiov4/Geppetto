@@ -12,7 +12,7 @@ export function reviewMaterialSeal(fingerprint) {
 }
 
 /** Match an exported result to Codex's own append-only archive, without retaining its contents. */
-export async function completedReviewSession(home, thread, call, response, materialSeal, expectedStage) {
+export async function completedReviewSession(home, thread, call, response, materialSeal, expectedStage, expectedShards) {
   if (!codexSessionId.test(thread) || !Number.isFinite(call.started_at)) return false;
   const start = call.started_at * 1000;
   const date = instant => new Date(instant).toISOString().slice(0, 10).replaceAll('-', '/');
@@ -30,9 +30,14 @@ export async function completedReviewSession(home, thread, call, response, mater
     if (!identified || starts.length !== 1 || finishes.length !== 1 ||
         !start.payload.turn_id || start.payload.turn_id !== finish.payload.turn_id) return false;
     const materialLine = 'Review material SHA-256: ' + materialSeal;
+    const shardLinePrefix = 'Review shards: ';
     const bound = records.slice(records.indexOf(start) + 1, records.indexOf(finish)).some(record => record.type === 'response_item' && record.payload?.role === 'user' &&
       record.payload.content?.some(part => part.type === 'input_text' && part.text?.split(/\r?\n/).some((line, index, lines) =>
-        line === materialLine && (expectedStage === undefined || lines[index + 1] === 'Review stage: ' + expectedStage))));
+        line === materialLine &&
+        (expectedStage === undefined || lines[index + 1] === 'Review stage: ' + expectedStage) &&
+        (expectedShards !== undefined
+          ? lines[index + 2] === shardLinePrefix + expectedShards
+          : expectedStage === undefined || !lines[index + 2]?.startsWith(shardLinePrefix)))));
     if (!bound || typeof finish.payload.last_agent_message !== 'string') return false;
     try { return isDeepStrictEqual(JSON.parse(finish.payload.last_agent_message), JSON.parse(response)); }
     catch { return false; }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.0
+
+- Shard large annotated diffs automatically by priority and directory, splitting oversized hunks along source lines. Dedicated lenses inspect cross-shard contracts, rules and tests. Metrics identify the inlined, excluded, omitted and truncated material.
+- Verify large candidate sets in two independent module-partitioned sessions when files can stay intact. Review prompts ask reviewers to falsify each claim against current source and consolidate verified manifestations of the same root cause.
+- Fingerprint immutable cases with `os.scandir` and streaming hashes, approximately 4× faster in the Review Lab measurement. Check integrity at wave boundaries.
+- Validate sharded discovery and parallel verification against sealed native session archives before accepting Stop review evidence.
+- Migration: update the plugins and reapprove the Codex hooks to record the new stage sequences.
+
 ## 0.26.0
 
 - Add native Antigravity harness support: root `plugin.json` and `hooks.json` manifests, a standalone template (`skills/geppetto-adopt/assets/templates/hooks/antigravity/hooks.json`), and an Antigravity hook contract adapter (`antigravity.mjs`) handling `SessionStart`, `PreInvocation`, `PreToolUse`, `PostToolUse` and `Stop`.

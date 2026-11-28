@@ -75,7 +75,7 @@ export function parallel(script, args, { cwd, home = cwd }) {
 export function git(dir, args, options = {}) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true, ...options }); }
 
 /** Fake runner artifacts for hook tests; these fixtures do not invoke a model. */
-export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome, { strategy = 'questions', profile = 'standard', stages, candidates, archivedStages = {} } = {}) {
+export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome, { strategy = 'questions', profile = 'standard', stages, candidates, findings, shardCount, verifyStages, verifyResponses = {}, archivedStages = {}, archivedShards = {} } = {}) {
   const directory = fixture(t);
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const patch = git(root, ['diff', '--binary', '--no-ext-diff', base, '--'], { maxBuffer: 8 * 1024 * 1024 }).stdout;
@@ -88,17 +88,28 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     try { hashes['after/' + path] = sha(readFileSync(resolve(root, path))); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
-  const findings = outcome === 'findings' ? [{ id: 'fixture' }] : [];
+  findings ??= outcome === 'findings' ? [{ id: 'fixture' }] : [];
+  const primary = shardCount >= 2 ? Array.from({ length: shardCount }, (_, i) => 'shard-' + (i + 1)) : ['lens-adversarial'];
   const discovery = strategy === 'lenses'
-    ? ['lens-adversarial', 'lens-contracts', 'lens-rules-tests', ...(profile === 'ultra' ? ['gap-logic', 'gap-contracts-docs'] : [])]
+    ? [...primary, 'lens-contracts', 'lens-rules-tests', ...(profile === 'ultra' ? ['gap-logic', 'gap-contracts-docs'] : [])]
     : strategy === 'generic' ? ['search-1', 'search-2'] : ['questions', 'investigate'];
   candidates ??= findings;
-  stages ??= [...discovery, ...(candidates.length ? ['verify'] : [])];
+  verifyStages ??= candidates.length ? ['verify'] : [];
+  stages ??= [...discovery, ...verifyStages];
+  const batchBoundary = Math.ceil(candidates.length / 2);
+  const verification = stage => {
+    if (stage === 'verify') return { accepted_findings: findings };
+    const batch = stage === 'verify-1' ? candidates.slice(0, batchBoundary) : candidates.slice(batchBoundary);
+    const accepted_findings = findings.filter(finding => batch.some(candidate => candidate.id === finding.id));
+    return { accepted_findings, decisions: batch.map(({ id }) => accepted_findings.some(finding => finding.id === id)
+      ? { id, decision: 'accept', canonical_id: id }
+      : { id, decision: 'reject', canonical_id: '-' }) };
+  };
   const threads = stages.map(() => randomUUID());
   const started = Date.now();
   const day = new Date(started).toISOString().slice(0, 10).replaceAll('-', '/');
   const calls = stages.map((stage, index) => {
-    const response = JSON.stringify(stage === 'verify' ? { accepted_findings: findings }
+    const response = JSON.stringify(stage.startsWith('verify') ? verifyResponses[stage] ?? verification(stage)
       : stage === 'investigate' ? { report: { findings: candidates } }
         : stage === 'questions' ? { questions: [] } : { findings: index === 0 ? candidates : [] });
     put(directory, stage + '.json', response);
@@ -109,6 +120,7 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     put(directory, stage + '.events.jsonl', events.map(JSON.stringify).join('\n'));
     const prompt = ['Review fixture begins', 'Review material SHA-256: ' + reviewMaterialSeal(hashes)];
     if (strategy === 'lenses') prompt.push('Review stage: ' + (archivedStages[stage] ?? stage));
+    if (strategy === 'lenses' && shardCount >= 2) prompt.push('Review shards: ' + (archivedShards[stage] ?? shardCount));
     prompt.push('Review fixture ends');
     put(nativeHome ?? resolve(directory, '.codex'), 'sessions/' + day + '/rollout-fixture-' + threads[index] + '.jsonl', [
       { type: 'session_meta', payload: { id: threads[index] } },
@@ -119,7 +131,9 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     return { stage, status: 'completed', started_at: started / 1000, exit_code: 0, response_sha256: sha(response) };
   });
   put(directory, 'findings.json', { findings });
-  put(directory, 'metrics.json', { status: 'complete', strategy, ...(strategy === 'lenses' ? { profile } : {}), changed_paths: [...paths],
+  const sharding = shardCount === undefined ? {} : { shard_count: shardCount,
+    shards: Array.from({ length: shardCount }, (_, i) => ({ index: i + 1 })) };
+  put(directory, 'metrics.json', { ...sharding, status: 'complete', strategy, ...(strategy === 'lenses' ? { profile } : {}), changed_paths: [...paths],
     case_fingerprint: hashes, calls, thread_ids: threads });
   return directory;
 }
