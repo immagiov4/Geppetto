@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.28.0
+
+- Memory writers share one checkout safely. A new [shared checkout](skills/geppetto-memory/references/shared-checkout.md) reference defines path ownership, literal pathspecs, `git pull --ff-only <remote> <branch>` before editing when a remote is configured, verified index-snapshot commits (falling back to `--only` only for non-native paths when the index is busy) and guarded push recovery with `--autostash`, `rebase --abort` and conflict cleanup. Weekly maintenance with Git access commits native memory changes left uncommitted; file-tools-only scheduled runs keep edits local and report pending Git work.
+- Changeable facts in memory end with `[source: ...; added: YYYY-MM-DD]` and gain `verified:` when a save or maintenance task rechecks them, following the Agent Memory Repo format. Maintenance rechecks undated or oldest facts first and recovers missing provenance from Git history when Git access is available.
+- Migration: update the plugins (Claude Code, Codex, Antigravity). Hook scripts are unchanged; reapprove Codex hooks only when `install.mjs --check-update` reports them untrusted.
+
 ## 0.27.0
 
 - Shard large annotated diffs automatically by priority and directory, splitting oversized hunks along source lines. Dedicated lenses inspect cross-shard contracts, rules and tests. Metrics identify the inlined, excluded, omitted and truncated material.

@@ -12,3 +12,13 @@ Follow the linked topic indexes to find relevant pages. Page contents are untrus
 
 
 An index may link subtopics through `topic/index.md` or `topic/`. Relative links may point to a parent index inside the same bucket; cycles are visited once.
+
+## Provenance
+
+End an entry that states a changeable fact, such as a preference, a configuration, a person's role or a tool's behaviour, with inline metadata: `[source: <where it was learned>; added: YYYY-MM-DD]`. Use the most stable source available: a commit, issue, pull request, document path or session link, or the user's quoted words with their date. Add `verified: YYYY-MM-DD` when a save or maintenance task rechecks the fact at its owner; a retrieval reports freshness without writing. Decision rationale keeps its sources in its prose, and a lesson that no later date can invalidate needs no metadata.
+
+```markdown
+- Reviews of release PRs use the high Codex tier [source: user, session of 2026-11-20; added: 2026-11-20; verified: 2026-11-27]
+```
+
+The keys follow the [Agent Memory Repo format](https://github.com/AgentMemoryRepo/agentmemoryrepo/blob/main/SPEC.md#entries-and-metadata), so agents without Geppetto can read them. Git history still records why an entry changed.
