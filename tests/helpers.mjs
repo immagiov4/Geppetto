@@ -89,17 +89,22 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     catch (error) { if (error.code !== 'ENOENT') throw error; }
   }
   findings ??= outcome === 'findings' ? [{ id: 'fixture' }] : [];
-  const primary = shardCount >= 2 ? Array.from({ length: shardCount }, (_, i) => 'shard-' + (i + 1)) : ['lens-adversarial'];
-  const discovery = strategy === 'lenses'
-    ? [...primary, 'lens-contracts', 'lens-rules-tests', ...(profile === 'ultra' ? ['gap-logic', 'gap-contracts-docs'] : [])]
+  const lenses = shardCount >= 2
+    ? [...Array.from({ length: shardCount }, (_, i) => 'shard-' + (i + 1)),
+      ...(profile === 'ultra' ? ['gap-seams', 'gap-rules-tests'] : ['gap-audit'])]
+    : ['lens-correctness', 'lens-rules-tests',
+      ...(profile === 'ultra' ? ['gap-logic', 'gap-contracts-docs'] : ['gap-audit'])];
+  const discovery = strategy === 'lenses' ? lenses
     : strategy === 'generic' ? ['search-1', 'search-2'] : ['questions', 'investigate'];
   candidates ??= findings;
   verifyStages ??= candidates.length ? ['verify'] : [];
   stages ??= [...discovery, ...verifyStages];
   const batchBoundary = Math.ceil(candidates.length / 2);
+  const batchFor = stage => stage === 'verify' ? candidates
+    : stage === 'verify-1' ? candidates.slice(0, batchBoundary) : candidates.slice(batchBoundary);
   const verification = stage => {
-    if (stage === 'verify') return { accepted_findings: findings };
-    const batch = stage === 'verify-1' ? candidates.slice(0, batchBoundary) : candidates.slice(batchBoundary);
+    if (stage === 'verify' && strategy !== 'lenses') return { accepted_findings: findings };
+    const batch = batchFor(stage);
     const accepted_findings = findings.filter(finding => batch.some(candidate => candidate.id === finding.id));
     return { accepted_findings, decisions: batch.map(({ id }) => accepted_findings.some(finding => finding.id === id)
       ? { id, decision: 'accept', canonical_id: id }
@@ -119,6 +124,9 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     ];
     put(directory, stage + '.events.jsonl', events.map(JSON.stringify).join('\n'));
     const prompt = ['Review fixture begins', 'Review material SHA-256: ' + reviewMaterialSeal(hashes)];
+    if (stage === 'verify-1' || stage === 'verify-2') {
+      prompt.unshift('Review candidate IDs: ' + JSON.stringify(batchFor(stage).map(({ id }) => id).sort()));
+    }
     if (strategy === 'lenses') prompt.push('Review stage: ' + (archivedStages[stage] ?? stage));
     if (strategy === 'lenses' && shardCount >= 2) prompt.push('Review shards: ' + (archivedShards[stage] ?? shardCount));
     prompt.push('Review fixture ends');

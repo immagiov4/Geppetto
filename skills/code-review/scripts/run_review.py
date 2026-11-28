@@ -1,17 +1,21 @@
 """Local review with independent sessions and verifiable evidence."""
 import argparse
+from base64 import b64decode
+from bisect import bisect_right, insort
 from codecs import escape_decode
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as replace_plan
 from fnmatch import fnmatchcase
 from itertools import zip_longest
 import hashlib
+from io import BytesIO
 import json
 import math
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import stat
 import subprocess
@@ -27,8 +31,24 @@ REQUIRED = ("before", "after", "diff.patch", "contract.md", "manifest.json")
 MAX_QUESTIONS = 20
 EFFORTS = ("low", "medium", "high", "xhigh")
 MAX_DIFF_BYTES = 120_000
-MAX_SHARDS = 4
+MAX_SHARDS = 5
+SYMBOL_LIMIT = 30
+SYMBOL_CONTEXT_BYTES = 12_000
+SYMBOL_SITES_PER_NAME = 4
+SYMBOL_SOURCE_BYTES = 512 * 1024
+SYMBOL_SCAN_SECONDS = 3.0
+SYMBOL_SCAN_NOTICE = "[Search stopped at its time limit. Inspect additional references in the case.]"
+SYMBOL_HUNK_DISTANCE = 40
+GAP_HUNK_DISTANCE = 15
+GAP_HUNK_LIMIT = 60
+CANDIDATE_CLUSTER_DISTANCE = 25
+COMPLETE_HUNK_HEADING = "## Complete hunk ranges by changed path\n"
+SYMBOL_HEADING = "## Unchanged callers, sibling handlers & symbol references in after/"
+PROBE_GUIDANCE = ("When a defect depends on a standard-library or runtime API signature, option name, "
+                  "regex, or pure expression result, confirm it with a short read-only in-memory "
+                  "probe when that runtime is available.")
 DIFF_SEPARATOR = "\n\n"
+ANNOTATED_HEADING = "\n\n## Annotated diff (b = before/ line, a = after/ line)\n"
 MAX_SOURCE_LINE_BYTES = 1_500
 PROCESS_CLEANUP_TIMEOUT = 5
 CONTRACT_LIMIT = 12_000
@@ -72,14 +92,16 @@ Walk repeated open/mutate/close and retry/reset cycles for accumulation or stuck
 Check loops, retries and waits for a total deadline. Compare regressions in before/ and after/.
 State the smallest supported input or event sequence that demonstrates each behavior defect."""
 
-CONTRACT_FOCUS = """Trace changed contracts, schemas, producers, consumers and async or failure
+CONTRACT_FOCUS = f"""Trace changed contracts, schemas, producers, consumers and async or failure
 ownership. Read relevant unchanged callers, callees and sibling modules in after/. Follow concrete
 runtime types and method or error signatures through handoffs, including sync versus async, absent
 values, accepted options and error returns. Check sibling switches, validators, normalizers,
 registries, serializers and cleanup. Verify readiness, status and lifecycle predicates against
 every state transition, shutdown configuration and pending deletion or termination. Trace partial
 success plus outer retry for duplicate effects, cancellation propagation, stale state or IDs during
-concurrent work, sticky errors and resource disposal."""
+concurrent work, sticky errors and resource disposal.
+Check the Unchanged callers, sibling handlers & symbol references section for concrete follow-up sites.
+{PROBE_GUIDANCE}"""
 
 RULES_TESTS_FOCUS = f"""Audit changed documentation, comments and prompts against implementation,
 AGENTS.md and applicable repository rules. Report factual contradictions with concrete operational,
@@ -89,16 +111,10 @@ Check alternate entry points and callers of the changed
 workflow. For changed UI markup, styles or selectors, trace the rendered element tree, layout,
 stacking and accessibility across viewports in before/ and after/."""
 
+CORRECTNESS_FOCUS = ADVERSARIAL_FOCUS + "\n\n" + CONTRACT_FOCUS
 LENSES = (
-    ("lens-adversarial", "L1-", ADVERSARIAL_FOCUS),
-    ("lens-contracts", "L2-", CONTRACT_FOCUS),
-    ("lens-rules-tests", "L3-", RULES_TESTS_FOCUS),
-)
-
-GAP_LENSES = (
-    ("gap-logic", "G1-", "Start with logic and input classes missing from Stage 1.\n" + ADVERSARIAL_FOCUS),
-    ("gap-contracts-docs", "G2-", "Start with files without a Stage 1 finding.\n" +
-     CONTRACT_FOCUS + "\n" + RULES_TESTS_FOCUS),
+    ("lens-correctness", "L1-", CORRECTNESS_FOCUS),
+    ("lens-rules-tests", "L2-", RULES_TESTS_FOCUS),
 )
 
 
@@ -218,6 +234,18 @@ class Shard:
         return {"files": self.files, "hunk_count": len(self.hunks), "byte_count": self.byte_count}
 
 
+@dataclass(frozen=True, order=True)
+class SymbolSite:
+    rank: int
+    symbol: str
+    path: str
+    line: int
+    text: str
+
+    def row(self):
+        return f"- {self.symbol}: {self.path}:{self.line}: {self.text}"
+
+
 @dataclass(frozen=True)
 class ReviewPlan:
     brief: str
@@ -229,6 +257,11 @@ class ReviewPlan:
     excluded_files: tuple[str, ...]
     truncated_hunk_ranges: tuple[str, ...]
     omitted_hunk_ranges: tuple[str, ...]
+    symbol_scan_limited: bool
+    symbol_sites: tuple[SymbolSite, ...]
+    shard_symbol_sites: tuple[tuple[SymbolSite, ...], ...]
+    changed_files: tuple[str, ...]
+    max_diff_bytes: int
 
     @property
     def sharded(self):
@@ -242,11 +275,12 @@ class ReviewPlan:
     def inline_diff_bytes(self):
         return sum(shard.byte_count for shard in self.shards)
 
-    def packet(self, annotated):
-        if not annotated:
-            return self.context
-        return (self.context + "\n\n## Annotated diff (b = before/ line, a = after/ line)\n" +
-                annotated)
+    def packet(self, annotated, *, shard_index=None):
+        context = self.context
+        if shard_index is not None:
+            head, _, tail = context.rpartition(symbol_section(self.symbol_sites, self.symbol_scan_limited))
+            context = head + symbol_section(self.shard_symbol_sites[shard_index], self.symbol_scan_limited) + tail
+        return context + (ANNOTATED_HEADING + annotated if annotated else "")
 
 
 def patch_path(header, snapshot, *, prefixed=True):
@@ -563,8 +597,247 @@ def priority_rules_hunks(by_file, limit):
     return selected.text
 
 
+
+GENERIC_SYMBOLS = set("""
+    init main test error value index length string return result config data item type name true false
+    null none self this void bool int float double char const class struct interface public private
+    static function func async await export import local module super default global undefined else
+    elif from with case when goto sizeof make append panic print println format assert require expect
+    describe yield range select chan defer package extern impl match loop where unsafe catch finally
+    throw break continue switch while onload get set then typeof
+    __init__ some open close read write text prompt request response context state status client server
+    handle parse check valid update create delete remove insert extend filter render build start stop
+    reset clear clone count empty first last next prev push pull send recv emit load save dump sync wait
+    join lock free drop copy move into unwrap option bytes slice array table field entry query event
+    input output lines items files paths nodes edges specs tests mocks props attrs style label title notes
+    flags debug trace fatal list dict keys vals size kind mode code info warn args opts meta body head tail
+    root base path port host user role time date step task work pool
+""".split())
+COMMENT_PREFIXES = ("//", "#", "/*", "*", "--", '"""', "'''")
+PROSE_SUFFIXES = (".md", ".rst", ".adoc", ".txt")
+CMAKE_ENTRY_POINT = "CMakeLists.txt"
+IDENTIFIER = r"[A-Za-z_][A-Za-z_0-9]*"
+DEFINITION = re.compile(
+    rf"\b(?:func\s+(?:\([^)]*\)\s*)?|(?:def|fn|function|class|struct|enum|interface|type|"
+    rf"protocol|trait|record)\s+|export\s+(?:const|let|var)\s+)(?P<named>{IDENTIFIER})\b"
+    rf"|^\s*(?:[A-Za-z_][\w:<>,*&?\[\].]*\s+)*(?P<method>{IDENTIFIER})\s*"
+    rf"\([^;{{}}]*\)\s*(?:[:]|(?:[^\n;=]*\{{))\s*$"
+)
+STATE_SYMBOL = re.compile(
+    rf"\b{IDENTIFIER}(?:\.{IDENTIFIER})+\b|\b(?:[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*|"
+    r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b"
+)
+WRITE_SITE = re.compile(r"(?<![=<>!])=(?![=>])|:\s*(?!=)")
+CALL_TARGET = re.compile(rf"\b(?P<call>{IDENTIFIER})\s*\(")
+
+
+def is_prose(path):
+    name = path.rsplit("/", 1)[-1].lower()
+    return name != CMAKE_ENTRY_POINT.lower() and name.endswith(PROSE_SUFFIXES)
+
+
+def changed_symbols(hunks):
+    """Return definitions, changed call targets, and state-like references in priority order."""
+    definitions, calls, states = {}, {}, {}
+    for hunk in sorted(hunks, key=lambda hunk: (inline_priority(hunk.file), hunk.file)):
+        if inline_priority(hunk.file) == 3 or is_prose(hunk.file):
+            continue
+        header, body = split_hunk_header(hunk)
+        header_context = header.rpartition(" @@")[2]
+        if header_context and not header_context.lstrip().startswith(COMMENT_PREFIXES):
+            for match in DEFINITION.finditer(header_context):
+                name = match["named"] or match["method"]
+                if 4 <= len(name) <= 128 and name.lower() not in GENERIC_SYMBOLS:
+                    definitions[name] = None
+        for row in body.split("\n"):
+            _, separator, content = row.partition(" | ")
+            if not separator or content[:1] not in ("+", "-"):
+                continue
+            line = content[1:]
+            if len(line) > MAX_SOURCE_LINE_BYTES or line.lstrip().startswith(COMMENT_PREFIXES):
+                continue
+            for match in DEFINITION.finditer(line):
+                name = match["named"] or match["method"]
+                if 4 <= len(name) <= 128 and name.lower() not in GENERIC_SYMBOLS:
+                    definitions[name] = None
+            for match in CALL_TARGET.finditer(line):
+                name = match["call"]
+                if 4 <= len(name) <= 128 and name.lower() not in GENERIC_SYMBOLS:
+                    calls[name] = None
+            for match in STATE_SYMBOL.finditer(line):
+                symbol = ".".join(match.group().rsplit(".", 2)[-2:])
+                member = symbol.rsplit(".", 1)[-1]
+                if (len(member) >= 4 and len(symbol) <= 128 and
+                        member[0].isupper() and member.lower() not in GENERIC_SYMBOLS):
+                    states[symbol] = None
+    return list(definitions), list(calls), list(states)
+
+
+def symbol_search_paths(after_paths):
+    for path in after_paths:
+        name = path.rsplit("/", 1)[-1].lower()
+        if (name in LOCKFILES or ".min." in name or "deepcopy" in name or
+                name.endswith((".map", ".lock")) or is_prose(path) or inline_priority(path) == 3):
+            continue
+        yield path
+
+
+def python_symbol_matches(after, paths, matcher, needles, deadline):
+    for path in sorted(paths):
+        if time.monotonic() >= deadline:
+            break
+        source = after / path
+        info = source.lstat()
+        if info.st_size > SYMBOL_SOURCE_BYTES or not stat.S_ISREG(info.st_mode):
+            continue
+        with source.open("rb") as handle:
+            data = handle.read(SYMBOL_SOURCE_BYTES + 1)
+        if len(data) > SYMBOL_SOURCE_BYTES or b"\x00" in data or not needles.search(data):
+            continue
+        for number, line in enumerate(data.decode("utf-8", errors="replace").split("\n"), 1):
+            if time.monotonic() >= deadline:
+                return
+            if matcher.search(line):
+                yield path, number, line
+
+
+def symbol_matches(after, paths, symbols, matcher, deadline):
+    rg = shutil.which("rg")
+    if rg:
+        ignored_dirs = ",".join(sorted(FIXTURES | {"snapshots", "generated", "__generated__"}))
+        command = [rg, "--no-config", "--hidden", "--no-ignore", "--fixed-strings", "--word-regexp",
+                   "--line-number", "--no-heading", "--json", "--max-filesize", str(SYMBOL_SOURCE_BYTES),
+                   "--iglob", "*", "--iglob", "!*.{" + ",".join(suffix[1:] for suffix in PROSE_SUFFIXES) + "}",
+                   "--iglob", CMAKE_ENTRY_POINT, "--iglob", f"!**/{{{ignored_dirs}}}/**",
+                   "--iglob", "!*.{map,lock,snap,snapshot,pb.go}", "--iglob", "!*.{min,generated}.*",
+                   "--iglob", "!*deepcopy*", "--iglob", "!{" + ",".join(sorted(LOCKFILES)) + "}"]
+        # Patterns on stdin keep the command line short even with one symbol set per shard.
+        output = None
+        try:
+            search = subprocess.run([*command, "-f", "-", "--", "."], cwd=after, capture_output=True,
+                                    input="\n".join(symbols).encode(), check=False,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                                    timeout=max(0, deadline - time.monotonic()))
+            if search.returncode in (0, 1):
+                output = search.stdout
+        except subprocess.TimeoutExpired as error:
+            output = error.stdout or b""
+        except OSError:
+            pass
+        if output is not None:
+            for row in BytesIO(output):
+                if time.monotonic() >= deadline:
+                    break
+                if not row.endswith(b"\n") or not row.startswith(b'{"type":"match"'):
+                    continue
+                match = json.loads(row)["data"]
+                path = match["path"].get("text", "").replace(os.sep, "/").removeprefix("./")
+                if path in paths:
+                    line = match["lines"]
+                    content = line["text"] if "text" in line else b64decode(line["bytes"]).decode(errors="replace")
+                    yield path, match["line_number"], content.rstrip("\r\n")
+            return
+    needles = re.compile(b"|".join(re.escape(symbol.encode()) for symbol in symbols))
+    yield from python_symbol_matches(after, paths, matcher, needles, deadline)
+
+
+def symbol_section(sites, scan_limited=False):
+    rows = "\n".join(site.row() for site in sites) or "(none found)"
+    notice = "\n" + SYMBOL_SCAN_NOTICE if scan_limited else ""
+    return SYMBOL_HEADING + "\n" + rows + notice
+
+
+def build_symbol_context(case, by_file, diffs, after_paths, shards=(), *, max_bytes=SYMBOL_CONTEXT_BYTES):
+    """Scan after/ once and retain bounded lexical hints globally and for each shard."""
+    deadline = time.monotonic() + SYMBOL_SCAN_SECONDS
+    global_hunks = (hunk for hunks in by_file.values() for hunk in hunks)
+    scopes = [changed_symbols(global_hunks), *(changed_symbols(shard.hunks) for shard in shards)]
+    selections = [list(dict.fromkeys(definitions + calls + states))[:SYMBOL_LIMIT]
+                  for definitions, calls, states in scopes]
+    if not any(selections):
+        return (), tuple(() for _ in shards), False
+
+    owners = [set(by_file), *(set(shard.files) for shard in shards)]
+    assigned_files = set().union(*owners[1:])
+    indexes = [{symbol: [] for symbol in selected} for selected in selections]
+    symbol_scopes = {}
+    for scope, selected in enumerate(selections):
+        for symbol in selected:
+            symbol_scopes.setdefault(symbol, []).append(scope)
+    matcher = re.compile(r"\b(?:" + "|".join(map(re.escape, sorted(symbol_scopes, key=lambda s: (-len(s), s)))) + r")\b")
+    ranges = {
+        path: sorted((start, start + max(count - 1, 0)) for _, _, start, count in diff.hunks)
+        for path, diff in diffs.items() if path == diff.after
+    }
+    paths = set(symbol_search_paths(after_paths))
+    calls = {symbol: re.compile(re.escape(symbol) + r"\s*\(") for symbol in symbol_scopes}
+    for path, number, line in symbol_matches(case / "after", paths, symbol_scopes, matcher, deadline):
+        if time.monotonic() >= deadline:
+            break
+        content = line.strip()
+        if len(line) > MAX_SOURCE_LINE_BYTES or content.startswith(COMMENT_PREFIXES):
+            continue
+        near_hunks = ranges.get(path, ())
+        preceding = bisect_right(near_hunks, (number + SYMBOL_HUNK_DISTANCE, math.inf))
+        near_change = preceding and near_hunks[preceding - 1][1] >= number - SYMBOL_HUNK_DISTANCE
+        if near_change:
+            containing = bisect_right(near_hunks, (number, math.inf))
+            inside_change = containing and near_hunks[containing - 1][1] >= number
+            if path not in assigned_files or not inside_change:
+                continue
+        matches = {match.group() for match in matcher.finditer(line)}
+        if not matches:
+            continue
+        has_write = WRITE_SITE.search(content)
+        definition = DEFINITION.match(content)
+        for symbol in matches:
+            direct_call = calls[symbol].search(content)
+            rank = 0 if has_write and not definition else 1 if direct_call and not definition else 2
+            for scope in symbol_scopes[symbol]:
+                if near_change and (scope == 0 or path in owners[scope]):
+                    continue
+                # Cross-shard sites compete ahead of sites in the assigned files.
+                site = SymbolSite(rank + 3 * (scope != 0 and path in owners[scope]),
+                                  symbol, path, number, content)
+                bucket = indexes[scope][symbol]
+                if len(bucket) < SYMBOL_SITES_PER_NAME or site < bucket[-1]:
+                    insort(bucket, site)
+                    del bucket[SYMBOL_SITES_PER_NAME:]
+
+    scan_limited = time.monotonic() >= deadline
+    notice_size = len(SYMBOL_SCAN_NOTICE.encode()) + 1 if scan_limited else 0
+    rows = []
+    for index in indexes:
+        selected = []
+        size = len(SYMBOL_HEADING.encode()) + notice_size
+        # Give each symbol a first site before allocating additional entries.
+        for position in range(SYMBOL_SITES_PER_NAME):
+            for bucket in index.values():
+                if position < len(bucket):
+                    site = bucket[position]
+                    row_size = len(site.row().encode()) + 1
+                    if size + row_size <= max_bytes:
+                        selected.append(site)
+                        size += row_size
+        rows.append(tuple(selected))
+    return rows[0], tuple(rows[1:]), scan_limited
+
+
+def hunk_range_rows(hunks):
+    """Summarize repetitive generated paths while keeping real source locations explicit."""
+    rows, generated = [], {}
+    for hunk in hunks:
+        if inline_priority(hunk.file) == 3:
+            generated[hunk.file] = generated.get(hunk.file, 0) + 1
+        else:
+            rows.append(hunk.extent)
+    rows.extend(f"{path}: {count} ranges (generated/fixture; inspect directly if relevant)"
+                for path, count in sorted(generated.items()))
+    return "\n".join(rows)
+
+
 def build_review_plan(case, changed, max_diff_bytes=MAX_DIFF_BYTES, max_shards=MAX_SHARDS, *, after_paths=None):
-    """Build a deterministic inline plan without revisiting unchanged source contents."""
+    """Build a deterministic inline plan and index related source locations."""
     require(type(max_diff_bytes) is int and max_diff_bytes >= 0, "Invalid inline diff byte limit")
     require(type(max_shards) is int and max_shards >= 1, "Invalid shard count limit")
     changed = sorted(changed)
@@ -578,6 +851,7 @@ def build_review_plan(case, changed, max_diff_bytes=MAX_DIFF_BYTES, max_shards=M
     if after_paths is None:
         after = case / "after"
         after_paths = (path.relative_to(after).as_posix() for path in after.rglob("*") if path.is_file())
+    after_paths = tuple(after_paths)
     anchors = repository_anchors(after_paths)
 
     by_file, excluded = {}, set()
@@ -622,24 +896,32 @@ def build_review_plan(case, changed, max_diff_bytes=MAX_DIFF_BYTES, max_shards=M
     omitted_files = {path for hunk in omitted for path in diffs[hunk.file].paths if path in changed_set}
     if not sharded:
         omitted_files.update(excluded)
-    truncated_ranges = tuple(hunk.extent for shard in shards for hunk in shard.hunks if hunk.truncated)
+    truncated = [hunk for shard in shards for hunk in shard.hunks if hunk.truncated]
+    truncated_ranges = tuple(hunk.extent for hunk in truncated)
 
-    parts = [brief, "## Repository anchors in after/\n" + ("\n".join(anchors) or "(none)")]
-    if overflow:
-        ranges = [f"{path}:\n" + "\n".join(f"  {extent}" for extent in diffs[path].ranges)
-                  if path in diffs and diffs[path].ranges else f"{path}: no text hunks"
-                  for path in changed]
-        parts.append("## Complete hunk ranges by changed path\n" + "\n".join(ranges))
+    symbol_sites, shard_symbol_sites, scan_limited = build_symbol_context(
+        case, by_file, diffs, after_paths, shards if sharded else ())
+    parts = [brief, "## Repository anchors in after/\n" + ("\n".join(anchors) or "(none)"),
+             symbol_section(symbol_sites, scan_limited)]
     if sharded:
         manifest = [f"shard-{index}: {shard.byte_count} bytes, {len(shard.hunks)} hunks, "
                     + (", ".join(shard.files) or "(no files)")
                     for index, shard in enumerate(shards, 1)]
         parts.append("## Shard manifest\n" + "\n".join(manifest))
     if omitted:
-        parts.append("## Hunk ranges beyond shard capacity (inspect directly in the case)\n" +
-                     "\n".join(hunk.extent for hunk in omitted))
+        parts.append("## Hunk ranges beyond shard capacity (inspect directly in the case)\n" + hunk_range_rows(omitted))
     if truncated_ranges:
-        parts.append("## Truncated hunk ranges (inspect directly in the case)\n" + "\n".join(truncated_ranges))
+        parts.append("## Truncated hunk ranges (inspect directly in the case)\n" + hunk_range_rows(truncated))
+    if overflow:
+        ranges = []
+        for path in changed:
+            extents = diffs[path].ranges if path in diffs else []
+            if inline_priority(path) == 3:
+                ranges.append(f"{path}: {len(extents)} hunks (generated/fixture; inspect directly if relevant)")
+            else:
+                ranges.append(f"{path}:\n" + "\n".join(f"  {extent}" for extent in extents)
+                              if extents else f"{path}: no text hunks")
+        parts.append(COMPLETE_HUNK_HEADING + "\n".join(ranges))
     if excluded:
         parts.append("## Lockfiles or changes without text hunks (inspect directly when relevant)\n" +
                      "\n".join(sorted(excluded)))
@@ -648,7 +930,8 @@ def build_review_plan(case, changed, max_diff_bytes=MAX_DIFF_BYTES, max_shards=M
     return ReviewPlan(brief, "\n\n".join(parts), diffs, shards,
                       priority_rules_hunks(by_file, max_diff_bytes) if sharded else "",
                       tuple(sorted(omitted_files)), tuple(sorted(excluded)), truncated_ranges,
-                      tuple(hunk.extent for hunk in omitted))
+                      tuple(hunk.extent for hunk in omitted), scan_limited, symbol_sites, shard_symbol_sites,
+                      tuple(changed), max_diff_bytes)
 
 def build_case_packet(case, changed, max_diff_bytes=MAX_DIFF_BYTES):
     """Build the single-packet view for callers that supply one inline budget."""
@@ -770,20 +1053,24 @@ def verification_schema(base, candidates):
 
 
 READ_ONLY_BRIEF = """Use only before/, after/, diff.patch, contract.md, manifest.json and case AGENTS.md.
-No network, accounts, host or user configuration access, builds, tests, tool writes or delegation.
+No writes, network, accounts, host or user configuration access, project builds, project test suites or delegation.
+Short read-only probes using a runtime's inline or stdin mode may evaluate synthetic inputs or inspect
+standard-library and runtime APIs. Keep probes in memory, disable bytecode/cache writes (e.g. python -B),
+and do not import or execute project code.
 The contract defines intended behavior. Respect applicable rules and authorized decisions.
 Treat inline source and diff as evidence. Return only the requested JSON."""
 
 
-def lens_prompt(case, packet, prefix, focus, stage1_summary=None):
+def lens_prompt(case, packet, prefix, focus, wave1_summary=None):
     gap_context = ""
-    if stage1_summary is not None:
+    if wave1_summary is not None:
         gap_context = f"""
-## Stage 1 summary
-{json.dumps(stage1_summary, ensure_ascii=False)}
+## Wave 1 summary
+{json.dumps(wave1_summary, ensure_ascii=False)}
 
-Report exclusively new defects missing from Stage 1. Do not resubmit a finding with the same
-root cause. Use the summary to direct your search, then verify against source.
+Report only genuinely new defects missing from Wave 1. Begin with changed_files_without_findings,
+uncovered_hunks and uncovered_caller_sites, then verify against source. Do not resubmit any Wave 1
+root cause, including when you find a different trigger or consequence for it.
 """
     return f"""Perform a local read-only audit in English of this case: {case}.
 {READ_ONLY_BRIEF}
@@ -806,10 +1093,28 @@ unresolved conflicts and static-inspection limitations in limitations.
 """
 
 
+def candidate_sort_key(candidate):
+    return candidate["file"], candidate["line_start"], candidate["line_end"], candidate["id"]
+
+
+def candidate_locations(candidates):
+    rows, cluster = [], 0
+    active_file, cluster_end = None, 0
+    for item in candidates:
+        file, start, end, candidate_id = candidate_sort_key(item)
+        if file != active_file or start - cluster_end > CANDIDATE_CLUSTER_DISTANCE:
+            cluster += 1
+            rows.append(f"[cluster C{cluster}]")
+            active_file, cluster_end = file, end
+        cluster_end = max(cluster_end, end)
+        rows.append(f"- {candidate_id}: {file}:{start}-{end}")
+    return "\n".join(rows)
+
+
 def verification_prompt(case, plan, candidates, *, include_observations=True):
+    candidates = sorted(candidates, key=candidate_sort_key)
     candidate_snippets = build_candidate_snippets(case, candidates, diffs=plan.diffs)
-    locations = "\n".join(f"- {item['id']}: {item['file']}:{item['line_start']}-{item['line_end']}"
-                          for item in candidates)
+    locations = candidate_locations(candidates)
     observations = ("Put new, unverified observations in additional_observations, with file, line range, "
                     "title and note. Return an empty array if there are none." if include_observations else "")
     return f"""Independently verify these local review candidates in English in this case: {case}.
@@ -845,6 +1150,7 @@ locations for deletions. {observations}
 Use only submitted IDs for
 decisions and accepted_findings.
 
+{PROBE_GUIDANCE}
 Read additional case source when these aligned excerpts do not settle a trigger or consequence.
 
 {plan.brief}
@@ -1168,7 +1474,7 @@ Questions:
     return report["findings"], [{"search": 2, "files": report["coverage"]}], limitations
 
 
-def run_lens_stage(args, frozen, changed, schema, metrics, lenses, effort, stage1_summary=None):
+def run_lens_stage(args, frozen, changed, schema, metrics, lenses, effort, wave1_summary=None):
     stage_args = argparse.Namespace(**(vars(args) | {"effort": effort}))
     changed_set = set(changed)
 
@@ -1176,7 +1482,7 @@ def run_lens_stage(args, frozen, changed, schema, metrics, lenses, effort, stage
         label, prefix, focus, packet = lens
         local = {"calls": [], "thread_ids": []}
         try:
-            response = run_call(stage_args, frozen, label, lens_prompt(args.case, packet, prefix, focus, stage1_summary),
+            response = run_call(stage_args, frozen, label, lens_prompt(args.case, packet, prefix, focus, wave1_summary),
                                 ROOT / "references/report.schema.json", local)
             validate(response, schema)
             covered = [entry["file"] for entry in response["coverage"]]
@@ -1262,27 +1568,132 @@ def run_stage_wave(args, metrics, stages, run_stage):
     return [response for _, response, _ in (results[index] for index in range(len(stages)))]
 
 
-def stage1_lenses(plan):
+def wave1_lenses(plan):
     if not plan.sharded:
         packet = plan.packet(plan.shards[0].text)
         return [(*lens, packet) for lens in LENSES]
-    shards = [
+    return [
         (f"shard-{index}", f"SH{index}-",
          f"Deep-audit the assigned shard's hunks and source files: {', '.join(shard.files) or '(none)'}. "
-         "Read affected callers and neighboring ranges as needed to settle local and cross-file contracts. "
-         "Inspect any omitted or truncated ranges for your files directly. "
+         "Scope the audit to those files, their callers and their applicable tests, rules and CI wiring. "
+         "Inspect omitted or truncated ranges for your assigned files directly. "
          "Give priority to the assigned hunks over the global index."
-         "\n\n" + ADVERSARIAL_FOCUS + "\n\n" + CONTRACT_FOCUS,
-         plan.packet(shard.text))
+         "\n\n" + CORRECTNESS_FOCUS + "\n\n" + RULES_TESTS_FOCUS,
+         plan.packet(shard.text, shard_index=index - 1))
         for index, shard in enumerate(plan.shards, 1)
     ]
-    return shards + [
-        (*LENSES[1][:2],
-         CONTRACT_FOCUS + "\nIndividual shards already audit intra-shard logic and local contracts. Focus on cross-shard boundaries, "
-         "shared schemas or interfaces spanning multiple shards, unchanged callers or entry points outside the diff, "
-         "and any omitted or truncated ranges. Do not duplicate single-file intra-shard defects.",
-         plan.context),
-        (*LENSES[2], plan.packet(plan.rules_hunks)),
+
+
+def wave1_coverage_summary(plan, candidates):
+    findings_by_path = {}
+    fields = ("id", "file", "line_start", "line_end", "title", "trigger")
+    candidates = sorted(candidates, key=candidate_sort_key)
+    for candidate in candidates:
+        findings_by_path.setdefault(candidate["file"], []).append((candidate["line_start"], candidate["line_end"]))
+    excluded = set(plan.excluded_files)
+    files = [path for path in plan.changed_files if inline_priority(path) < 3]
+    uncovered_by_file = {}
+    for file in sorted(files, key=lambda path: (inline_priority(path), path)):
+        if file in excluded:
+            continue
+        diff = plan.diffs[file]
+        if diff.after is not None and file != diff.after:
+            continue
+        for hunk_meta, annotated_text in zip(diff.hunks, diff.annotated):
+            before, before_count, after, after_count = hunk_meta
+            side, start, length = ("b", before, before_count) if diff.after is None else ("a", after, after_count)
+            end = start + max(0, length - 1)
+            if any(low <= end + GAP_HUNK_DISTANCE and high >= start - GAP_HUNK_DISTANCE
+                   for low, high in findings_by_path.get(file, ())):
+                continue
+            uncovered_by_file.setdefault(file, []).append((f"{file}: {side}{start}-{side}{end}", annotated_text))
+
+    uncovered_hunks, uncovered_annotated = [], []
+    for round_hunks in zip_longest(*uncovered_by_file.values()):
+        for entry in round_hunks:
+            if entry is None:
+                continue
+            label, annotated_text = entry
+            if len(uncovered_hunks) < GAP_HUNK_LIMIT:
+                uncovered_hunks.append(label)
+            uncovered_annotated.append(annotated_text)
+
+    # The global graph caps symbols independently of the shard graphs. Keep their extra caller sites.
+    unseen_sites, seen_locations, site_bytes = [], set(), 0
+    for sites in (plan.symbol_sites, *plan.shard_symbol_sites):
+        for site in sites:
+            location = (site.path, site.line)
+            if site.path in findings_by_path or location in seen_locations:
+                continue
+            row = f"{site.symbol}: {site.path}:{site.line}"
+            size = len(row.encode()) + 1
+            if site_bytes + size <= SYMBOL_CONTEXT_BYTES:
+                unseen_sites.append(row)
+                seen_locations.add(location)
+                site_bytes += size
+    return {
+        "candidates": [{field: candidate[field] for field in fields} for candidate in candidates],
+        "changed_files_without_findings": [path for path in files if path not in findings_by_path],
+        "uncovered_hunks": uncovered_hunks,
+        "uncovered_caller_sites": unseen_sites,
+    }, len(uncovered_annotated), uncovered_annotated
+
+
+def gap_packet(plan, uncovered_annotated=()):
+    """Keep the shared sharded gap packet within one inline budget, prioritizing uncovered hunks."""
+    context = plan.context
+    if len(context.encode()) > plan.max_diff_bytes:
+        before_ranges, heading, ranges_and_tail = context.rpartition("\n\n" + COMPLETE_HUNK_HEADING)
+        if heading:
+            _, separator, tail = ranges_and_tail.partition("\n\n")
+            context = before_ranges + separator + tail
+    context_bytes = context.encode()
+    available = plan.max_diff_bytes - len(context_bytes)
+    if available < 0:
+        notice = b"\n[Case context truncated. Inspect omitted ranges directly in the case.]"
+        if plan.max_diff_bytes < len(notice):
+            return context_bytes[:plan.max_diff_bytes].decode(errors="ignore")
+        return (context_bytes[:plan.max_diff_bytes - len(notice)] + notice).decode(errors="ignore")
+    if available <= len(ANNOTATED_HEADING.encode()):
+        return context
+    available -= len(ANNOTATED_HEADING.encode())
+    selected, used, seen = [], 0, set()
+    candidates_text = list(uncovered_annotated)
+    if plan.rules_hunks:
+        candidates_text.extend(plan.rules_hunks.split(DIFF_SEPARATOR))
+    for block in candidates_text:
+        if not block or block in seen:
+            continue
+        seen.add(block)
+        sep = len(DIFF_SEPARATOR) if selected else 0
+        block_bytes = len(block.encode("utf-8"))
+        if used + sep + block_bytes <= available:
+            selected.append(block)
+            used += sep + block_bytes
+    if not selected:
+        return context
+    return context + ANNOTATED_HEADING + DIFF_SEPARATOR.join(selected)
+
+
+def wave2_lenses(plan, profile, uncovered_annotated=()):
+    if plan.sharded:
+        packet = gap_packet(plan, uncovered_annotated)
+        seams = ("Focus on cross-shard boundaries, unchanged callers and entry points, and omitted or "
+                 "truncated production ranges. Inspect uncovered production hunks and shared state writers.")
+        rules_tests = ("Focus on rules, CI and test wiring across shards, documentation, alternate entry "
+                       "points, and uncovered non-production files and hunks.")
+        if profile == "standard":
+            return [("gap-audit", "G1-", "\n\n".join((seams, rules_tests, CORRECTNESS_FOCUS, RULES_TESTS_FOCUS)), packet)]
+        return [
+            ("gap-seams", "G1-", seams + "\n\n" + CORRECTNESS_FOCUS, packet),
+            ("gap-rules-tests", "G2-", rules_tests + "\n\n" + RULES_TESTS_FOCUS, packet),
+        ]
+    packet = plan.packet(plan.shards[0].text)
+    if profile == "standard":
+        return [("gap-audit", "G1-", CORRECTNESS_FOCUS + "\n\n" + RULES_TESTS_FOCUS, packet)]
+    return [
+        ("gap-logic", "G1-", ADVERSARIAL_FOCUS, packet),
+        ("gap-contracts-docs", "G2-", CONTRACT_FOCUS + "\n\n" + RULES_TESTS_FOCUS, packet),
     ]
 
 
@@ -1294,24 +1705,14 @@ def lens_discovery(args, frozen, changed, plan, schema, metrics):
             unchanged(args.case, frozen)
 
     unchanged(args.case, frozen)
-    candidates, coverage, limitations = checked_wave(stage1_lenses(plan), args.effort)
-    if args.profile == "ultra":
-        fields = ("id", "file", "line_start", "line_end", "title", "trigger")
-        finding_paths = {candidate["file"] for candidate in candidates}
-        stage1_summary = {
-            "candidates": [{field: candidate[field] for field in fields} for candidate in candidates],
-            "changed_files_without_findings": [path for path in changed if path not in finding_paths],
-        }
-        if plan.sharded:
-            packets = (plan.context, plan.packet(plan.rules_hunks))
-        else:
-            packets = (plan.packet(plan.shards[0].text),) * len(GAP_LENSES)
-        # The Stage 1 exit check is also the Stage 2 entry check; only memory is read between them.
-        gap_lenses = [(*lens, packet) for lens, packet in zip(GAP_LENSES, packets, strict=True)]
-        gap_candidates, gap_coverage, gap_limitations = checked_wave(gap_lenses, args.gap_effort, stage1_summary)
-        candidates.extend(gap_candidates)
-        coverage.extend(gap_coverage)
-        limitations.extend(gap_limitations)
+    candidates, coverage, limitations = checked_wave(wave1_lenses(plan), args.effort)
+    # The Wave 1 exit check is also the Wave 2 entry check; only memory is read between them.
+    summary, metrics["uncovered_hunk_count"], uncovered_annotated = wave1_coverage_summary(plan, candidates)
+    gap_candidates, gap_coverage, gap_limitations = checked_wave(
+        wave2_lenses(plan, args.profile, uncovered_annotated), args.gap_effort, summary)
+    candidates.extend(gap_candidates)
+    coverage.extend(gap_coverage)
+    limitations.extend(gap_limitations)
     examined = {entry["file"] for lens in coverage for entry in lens["files"]}
     limitations.extend(f"Changed path not covered by any lens: {path}" for path in changed if path not in examined)
     return candidates, coverage, limitations
@@ -1342,7 +1743,7 @@ def verify_response(case, response, candidates, changed, schema):
     return accepted
 
 
-def partition_verify_batches(candidates, threshold=18, min_batch=4, max_batches=2, *, parallel_discovery=True):
+def partition_verify_batches(candidates, threshold=12, min_batch=4, max_batches=2, *, parallel_discovery=True):
     """Balance module groups while keeping all candidates for a file together."""
     if len(candidates) <= threshold or not parallel_discovery or max_batches < 2:
         return [candidates]
@@ -1388,6 +1789,8 @@ def run_verification(args, frozen, changed, plan, base_schema, candidates, metri
                     batch_schema = verification_schema(base_schema, batch)
                     batch_path = args.output / f"{label}.schema.json"
                     save(batch_path, batch_schema)
+                    candidate_ids = json.dumps(sorted(candidate["id"] for candidate in batch), separators=(",", ":"))
+                    prompt = f"Review candidate IDs: {candidate_ids}\n\n{prompt}"
                     result = run_call(verify_args, frozen, label, prompt, batch_path, local)
                     verify_response(args.case, result, batch, changed, batch_schema)
                     return local, result, None
@@ -1432,7 +1835,7 @@ def main(args):
     args.verify_effort = getattr(args, "verify_effort", None) or ("high" if uses_lenses else args.effort)
     args.gap_effort = getattr(args, "gap_effort", "medium")
     active_efforts = [args.effort, args.verify_effort]
-    if args.profile == "ultra":
+    if uses_lenses:
         active_efforts.append(args.gap_effort)
     require("xhigh" not in active_efforts or bool(args.effort_reason and args.effort_reason.strip()),
             "xhigh requires an explicit rationale with --effort-reason")
@@ -1465,7 +1868,8 @@ def main(args):
                "timeout_seconds": args.timeout_seconds, "effort_reason": args.effort_reason,
                "calls": [], "thread_ids": [], "profile": args.profile,
                "parallel_discovery": args.parallel_discovery, "candidate_count": 0,
-               "prep_seconds": None, "shard_count": 0, "shards": []}
+               "prep_seconds": None, "shard_count": 0, "shards": [], "uncovered_hunk_count": 0,
+               "symbol_context_bytes": 0, "symbol_context_count": 0, "symbol_scan_limited": False}
     args.processes = ReviewProcesses()
     accepted, decisions, coverage, limitations, observations = [], [], [], [], []
     try:
@@ -1478,6 +1882,9 @@ def main(args):
         if uses_lenses:
             args.shard_count = plan.shard_count
             metrics.update(shard_count=args.shard_count,
+                           symbol_context_bytes=len(symbol_section(plan.symbol_sites, plan.symbol_scan_limited).encode()),
+                           symbol_context_count=len(plan.symbol_sites),
+                           symbol_scan_limited=plan.symbol_scan_limited,
                            shards=[shard.metadata() for shard in plan.shards],
                            inline_diff_bytes=plan.inline_diff_bytes,
                            inline_diff_omitted_files=list(plan.omitted_files),
@@ -1523,7 +1930,7 @@ def main(args):
         save(args.output / "findings.json", {"findings": findings, "decisions": decisions,
                                              "coverage": coverage, "limitations": limitations})
         lines = ["# Local review", "", f"Confirmed findings: {len(findings)}. Candidates: {len(candidates)}.",
-                 "", "Results from static source inspection.", ""]
+                 "", "Results from source inspection and any in-memory probes cited in the evidence.", ""]
         for field in ("target", "base", "head"):
             if field in manifest:
                 lines.append(f"{field}: {manifest[field]}")
@@ -1671,6 +2078,7 @@ def selfcheck():
                 continue
             raise AssertionError("Model or effort mismatch accepted")
     selfcheck_shards()
+    selfcheck_symbol_context()
     print("Self-check passed: model selection, safety, canonical integrity, deduplication, deleted-file locations, "
           "diff packets, aligned snippets, verifier schema and parallel evidence.")
 
@@ -1740,8 +2148,13 @@ def check_launches(case, output, plan, labels, profile, max_diff_bytes, max_shar
                              {"id": entry["id"], "decision": "accept", "canonical_id": candidate["id"],
                               "evidence": entry["evidence"]} for entry in (candidate, duplicate)
                          ]}
-    gap_labels = ["gap-logic", "gap-contracts-docs"] if profile == "ultra" else []
-    waves = [labels] + ([gap_labels] if gap_labels else [])
+    if plan.sharded:
+        gap_labels = ["gap-audit"] if profile == "standard" else ["gap-seams", "gap-rules-tests"]
+    else:
+        gap_labels = ["gap-audit"] if profile == "standard" else ["gap-logic", "gap-contracts-docs"]
+    waves = [labels, gap_labels]
+    expected_summary, expected_uncovered, expected_uncovered_annotated = wave1_coverage_summary(
+        plan, [candidate, duplicate])
     check_points = []
     finished = []
     gates = {label: Barrier(len(wave), timeout=10) for wave in waves for label in wave[:1]}
@@ -1775,26 +2188,46 @@ def check_launches(case, output, plan, labels, profile, max_diff_bytes, max_shar
                 expected = verification_schema(output_schemas["verification"], [candidate, duplicate])
                 require(self.schema == expected and f"- {candidate['id']}: {primary}:1-1" in prompt,
                         "Verify prompt or dynamic schema differs")
-                require("after/" + primary in prompt and "Consolidate by underlying defect" in prompt,
-                        "Verifier lost evidence or consolidation criteria")
+                require("after/" + primary in prompt and "Consolidate by underlying defect" in prompt and
+                        "[cluster C1]" in prompt and PROBE_GUIDANCE in prompt and "No writes, network" in prompt,
+                        "Verifier lost evidence, cluster, probe or consolidation criteria")
                 response = accepted_response
             else:
                 require(self.schema == output_schemas["report"], "Incorrect report schema")
                 if label in gap_labels:
-                    require('"changed_files_without_findings"' in prompt and candidate["id"] in prompt,
-                            "Missing gap-lens seed")
+                    actual_summary = next(line for line in prompt.splitlines() if line.startswith('{"candidates":'))
+                    require(json.loads(actual_summary) == expected_summary and
+                            "Do not resubmit any Wave 1" in prompt and
+                            set(labels) <= set(finished), "Missing gap evidence or Wave 1 barrier")
+                    if plan.sharded:
+                        expected_gap_packet = gap_packet(plan, expected_uncovered_annotated)
+                        require(expected_gap_packet in prompt and len(expected_gap_packet.encode()) <= max_diff_bytes,
+                                "Sharded gap packet differs or exceeds its cap")
+                        if label in ("gap-audit", "gap-seams"):
+                            require("cross-shard boundaries" in prompt and "shared state writers" in prompt,
+                                    "Global gap prompt lost boundary focus")
+                            if profile == "standard":
+                                require("CI and test wiring across shards" in prompt,
+                                        "Standard global gap prompt lost rules/test focus")
+                    else:
+                        require(plan.packet(plan.shards[0].text) in prompt,
+                                "Single-packet gap prompt lost inline diff packet")
                 if label.startswith("shard-"):
                     require(plan.shards[labels.index(label)].text in prompt, "Shard lost assigned inline hunks")
                     require("Aim for up to eight high-impact findings." in prompt and "up to six" not in prompt,
                             "Shard finding headroom differs from the materiality bar")
                 if not plan.sharded and label in labels:
                     require(plan.shards[0].text in prompt, "Single packet lost inline hunks")
-                if plan.sharded and label == "lens-contracts":
-                    require("## Shard manifest" in prompt and "## Complete hunk ranges" in prompt and
-                            CONTRACT_FOCUS in prompt and "Focus on cross-shard boundaries" in prompt,
-                            "Global contracts lack cross-shard context")
-                if plan.sharded and label == "lens-rules-tests":
-                    require(plan.rules_hunks in prompt, "Global rules lens lost its inline selection")
+                if label.startswith("shard-"):
+                    require("## Shard manifest" in prompt and CONTRACT_FOCUS in prompt and
+                            RULES_TESTS_FOCUS in prompt and SYMBOL_HEADING in prompt,
+                            "Shard lost contract, rules/test or caller context")
+                if label == "lens-correctness":
+                    require(CORRECTNESS_FOCUS in prompt and SYMBOL_HEADING in prompt,
+                            "Correctness lens lost unified focus or caller context")
+                if label == "lens-rules-tests":
+                    require(RULES_TESTS_FOCUS in prompt and TEST_ORACLE_BAR in prompt,
+                            "Rules/test lens lost entry-point, UI or test focus")
                 wave, index = order[label]
                 gates[wave[0]].wait(timeout=timeout)
                 if index + 1 < len(wave):
@@ -1818,7 +2251,7 @@ def check_launches(case, output, plan, labels, profile, max_diff_bytes, max_shar
     args = argparse.Namespace(case=case, output=output, codex="codex", timeout_seconds=10, model=MODEL,
                               strategy="lenses", profile=profile, effort="medium", effort_reason=None,
                               tool_budget=None, max_diff_bytes=max_diff_bytes, max_shards=max_shards)
-    with patch.object(subprocess, "Popen", FakeProcess), patch.dict(globals(), {
+    with patch.object(shutil, "which", return_value=None), patch.object(subprocess, "Popen", FakeProcess), patch.dict(globals(), {
         "unchanged": record_check,
         "effective_context": lambda _, model, effort: {"model": model, "effort": effort, "sandbox": "read-only"},
     }):
@@ -1835,6 +2268,10 @@ def check_launches(case, output, plan, labels, profile, max_diff_bytes, max_shar
     require(metrics["status"] == "complete" and metrics["candidate_count"] == 2 and metrics["prep_seconds"] >= 0 and
             metrics["case_fingerprint"] == fast_fixture and metrics["shard_count"] == plan.shard_count and
             metrics["inline_diff_bytes"] == plan.inline_diff_bytes and
+            metrics["uncovered_hunk_count"] == expected_uncovered and
+            metrics["symbol_context_count"] == len(plan.symbol_sites) and
+            metrics["symbol_context_bytes"] == len(symbol_section(plan.symbol_sites, plan.symbol_scan_limited).encode()) and
+            metrics["symbol_scan_limited"] == plan.symbol_scan_limited and
             metrics["shards"] == [shard.metadata() for shard in plan.shards] and
             metrics["totals"]["usage"] == {"input_tokens": len(stages)} and
             all(call["status"] == "completed" for call in metrics["calls"]), "Incorrect complete-run metrics")
@@ -1865,19 +2302,19 @@ def check_parallel_verification(case, output, plan, changed):
     candidates = [{"id": f"L1-{index}", "file": files[index % len(files)], "line_start": 1, "line_end": 1,
                    "severity": "P2", "title": "Behavior defect", "trigger": "Input", "consequence": "Result",
                    "evidence": "Checked line", "contract_basis": "Source"}
-                  for index in range(21)]
+                  for index in range(13)]
     batches = partition_verify_batches(candidates)
-    require([len(batch) for batch in batches] == [14, 7] and
+    require([len(batch) for batch in batches] == [5, 8] and
             not ({item["file"] for item in batches[0]} & {item["file"] for item in batches[1]}) and
             all(batch == [item for item in candidates if item["file"] in {entry["file"] for entry in batch}]
                 for batch in batches) and
-            partition_verify_batches(candidates[:18]) == [candidates[:18]] and
+            partition_verify_batches(candidates[:12]) == [candidates[:12]] and
             partition_verify_batches(candidates, parallel_discovery=False) == [candidates] and
             partition_verify_batches([candidates[0]] * 18 + candidates[:3]) == [[candidates[0]] * 18 + candidates[:3]],
             "Batch selection lost order, split a file or dropped the minimum-size fallback")
     across_modules = [{**item, "file": f"module{index % 3}/{item['file']}"}
                       for index, item in enumerate(candidates)]
-    require(partition_verify_batches(across_modules) == [[item for index, item in enumerate(across_modules) if index % 3 in (0, 2)], across_modules[1::3]],
+    require(partition_verify_batches(across_modules) == [across_modules[::3], [item for index, item in enumerate(across_modules) if index % 3 != 0]],
             "Module assignment was not deterministic")
 
     skewed_modules = [{"file": f"module-a/file-{index // 5}.py"} for index in range(15)]
@@ -1892,8 +2329,11 @@ def check_parallel_verification(case, output, plan, changed):
 
     def fake_batch(args, frozen, label, prompt, schema_path, metrics):
         batch = batches[int(label[-1]) - 1]
+        assignment, body = prompt.split("\n\n", 1)
         require(args.effort == "high" and json.loads(schema_path.read_bytes()) == verification_schema(base_schema, batch)
-                and prompt == verification_prompt(case, plan, batch), "Verification did not use its own prompt and schema")
+                and assignment.startswith("Review candidate IDs: ")
+                and json.loads(assignment.removeprefix("Review candidate IDs: ")) == sorted(item["id"] for item in batch)
+                and body == verification_prompt(case, plan, batch), "Verification did not use its own prompt and schema")
         barrier.wait()
         if label == "verify-1":
             require(released.wait(10), "Second verifier did not complete concurrently")
@@ -1971,9 +2411,31 @@ def selfcheck_shards():
                 "Single-packet boundary lost source hunks or inlined an excluded file")
         check_launches(small, root / "small-output", small_plan, [lens[0] for lens in LENSES],
                        "standard", byte_limit)
-        print("PASS single-packet coverage, three parallel lenses, and output contracts")
+        check_launches(small, root / "small-ultra-output", small_plan, [lens[0] for lens in LENSES],
+                       "ultra", byte_limit)
+        print("PASS single-packet complementary standard and ultra waves, coverage, and output contracts")
         check_parallel_verification(small, root / "parallel-verify", small_plan, small_changed)
-        print("PASS module-partitioned parallel verification and merged output contracts")
+        print("PASS verification threshold and 13-candidate parallel verification with merged output")
+
+        require(MAX_DIFF_BYTES == 120_000 and MAX_SHARDS == 5, "Default inline capacity differs")
+        medium = root / "medium"
+        medium_changed = make_review_fixture(medium, [
+            ("source/core.py", ["old"] * 3, ["x" * 35_000] * 3),
+        ])
+        medium_plan = build_review_plan(medium, medium_changed)
+        require(medium_plan.shard_count == 1 and medium_plan.inline_diff_bytes > 105_000 and
+                not medium_plan.omitted_hunk_ranges and not medium_plan.truncated_hunk_ranges,
+                "A 105 KB diff should fit in one default packet")
+        mega = root / "mega"
+        mega_changed = make_review_fixture(mega, [
+            (f"module{index}/core.py", ["old"] * 2, ["x" * 50_000] * 2)
+            for index in range(MAX_SHARDS)
+        ])
+        mega_plan = build_review_plan(mega, mega_changed)
+        require(mega_plan.shard_count == 5 and 500_000 < mega_plan.inline_diff_bytes <= 600_000 and
+                not mega_plan.omitted_files and not mega_plan.omitted_hunk_ranges and
+                not mega_plan.truncated_hunk_ranges, "A 500 KB diff should fit in five complete shards")
+        print("PASS default single-packet and five-shard diff capacity")
 
         giant = root / "giant"
         giant_file = "src/large.go"
@@ -2011,7 +2473,7 @@ def selfcheck_shards():
                 "Oversized header without source lines should be omitted")
         zero = build_review_plan(giant, giant_changed, 0)
         require(zero.inline_diff_bytes == 0 and len(zero.omitted_hunk_ranges) == 4 and
-                not zero.sharded and [stage[0] for stage in stage1_lenses(zero)] == [lens[0] for lens in LENSES],
+                not zero.sharded and [stage[0] for stage in wave1_lenses(zero)] == [lens[0] for lens in LENSES],
                 "A zero budget should omit all hunk ranges")
 
         added = root / "added"
@@ -2037,11 +2499,11 @@ def selfcheck_shards():
         exact = root / "exact"
         exact_changed = make_review_fixture(exact, [
             (f"{module}/core.py", ["old"], ["x" * length])
-            for module, length in (("alpha", 59_000), ("beta", 54_000), ("gamma", 42_000))
+            for module, length in (("alpha", 49_000), ("beta", 45_000), ("gamma", 35_000))
         ])
         exact_plan = build_review_plan(exact, exact_changed)
         require(exact_plan.shard_count == 2 and not exact_plan.omitted_hunk_ranges and
-                1.28 < exact_plan.inline_diff_bytes / MAX_DIFF_BYTES < 1.32,
+                MAX_DIFF_BYTES < exact_plan.inline_diff_bytes <= 2 * MAX_DIFF_BYTES,
                 "The 1.3-packet multi-module diff should fit in two shards")
         dense = root / "dense"
         dense_sizes = [598, 498, 298, 198, 198, 198]
@@ -2057,6 +2519,14 @@ def selfcheck_shards():
                 [shard.byte_count for shard in dense_plan.shards] == [998, 998] and
                 not dense_plan.omitted_hunk_ranges,
                 "Dense shard packing should fit all six hunks in two shards")
+        wide = root / "wide"
+        wide_changed = make_review_fixture(wide, [
+            (f"module{index}/core.py", ["old"], ["x" * 95_700]) for index in range(MAX_SHARDS)
+        ])
+        wide_plan = build_review_plan(wide, wide_changed)
+        require(wide_plan.shard_count == 5 and not wide_plan.omitted_hunk_ranges and
+                len(wave1_lenses(wide_plan)) + len(wave2_lenses(wide_plan, "standard")) == 6,
+                "The roughly 479 KB diff should fit in five shards and use six standard discovery calls")
         print("PASS line-aligned hunk splitting, oversized single lines, and exact-fit shard count")
 
         grouped = root / "grouped"
@@ -2075,8 +2545,9 @@ def selfcheck_shards():
                 "tests/fixtures/sample.txt" not in grouped_plan.rules_hunks,
                 "Directory affinity, tier priority or global rules selection differs")
         check_launches(grouped, root / "grouped-output", grouped_plan,
-                       ["shard-1", "shard-2", "lens-contracts", "lens-rules-tests"], "ultra", group_limit, 2)
-        print("PASS bounded hunk sharding, directory and tier packing, and ordered parallel ultra waves")
+                       ["shard-1", "shard-2"], "ultra", group_limit, 2)
+        check_launches(exact, root / "exact-output", exact_plan, ["shard-1", "shard-2"], "standard", MAX_DIFF_BYTES)
+        print("PASS bounded hunk sharding, directory and tier packing, and complementary standard and ultra waves")
 
         renamed = root / "renamed"
         (renamed / "before").mkdir(parents=True)
@@ -2101,6 +2572,194 @@ def selfcheck_shards():
         print("PASS aligned rename-aware excerpts, verifier schema, and strict locations")
 
 
+def selfcheck_symbol_context():
+    with tempfile.TemporaryDirectory() as folder:
+        case = Path(folder).resolve()
+        go = "go/controller.go"
+        peer = "workers/peer.go"
+        fixture = "tests/fixtures/catalog.json"
+        definitions = [
+            (go, "func (r Receiver) PublishSnapshot() { r.phase = PhaseSnapshotting }"),
+            (peer, "func RescheduleWork() { PublishSnapshot() }"),
+            ("py/runner.py", "def update_checkpoint(): return Mode.Terminal"),
+            ("rust/worker.rs", "pub fn persist_snapshot() { let mode = MODE_TERMINAL; }"),
+            ("ts/index.ts", "export const StatusReady = \"ready\""),
+            ("tasks/entry.sh", "refresh_cache() {"),
+        ]
+        edits = []
+        for file, new in definitions:
+            near = "PublishSnapshot() // nearby" if file == go else ""
+            far = "PublishSnapshot() // distant" if file in (go, peer) else ""
+            tail = [near] + [""] * 40 + [far]
+            edits.append((file, ["unchangedContract = false", *tail], [new, *tail]))
+        edits.extend([
+            ("py/noise.py", ["def init(): pass"], ["def main(): return False",
+             "open(); read(); write(); render(); __init__()", *(
+                 f"  {prefix} CommentOnlyCall()" for prefix in COMMENT_PREFIXES
+             )]),
+            (fixture, ["before"] * 80, ["after"] * 80),
+        ])
+        changed = make_review_fixture(case, edits)
+
+        unchanged_files = {
+            "aaa/comments.py": "# PublishSnapshot = None\n" * SYMBOL_SITES_PER_NAME + "# PublishSnapshot()\n",
+            "go/handlers.go": "job.PublishSnapshot()\njob.phase = PhaseSnapshotting\nPublishSnapshotLater()\n",
+            "py/consumer.py": "update_checkpoint()\njob.mode = Mode.Terminal\n",
+            "rust/consumer.rs": "persist_snapshot();\njob.mode = MODE_TERMINAL;\n",
+            "ts/consumer.ts": "job.status = StatusReady;",
+            "tasks/runner.sh": "refresh_cache\n",
+            ".github/workflows/caller.yml": "run: update_checkpoint()\n",
+            "py/noise_consumer.py": "CommentOnlyCall(); open(); read(); write(); render(); __init__()\n",
+            "docs/guide.md": "PublishSnapshot()\n",
+            "docs/guide.rst": "PublishSnapshot()\n",
+            "docs/guide.adoc": "PublishSnapshot()\n",
+            "docs/guide.TXT": "PublishSnapshot()\n",
+            "go/zz_generated.deepcopy.go": "PublishSnapshot()\n",
+            "go/fixture.min.js": "PublishSnapshot()\n",
+            "testdata/noise.go": "PublishSnapshot()\n",
+            "go/binary.go": "\x00PublishSnapshot()\n",
+            "go/too-large.go": "PublishSnapshot()\n" + "x" * SYMBOL_SOURCE_BYTES,
+        }
+        for file, content in unchanged_files.items():
+            for side in ("before", "after"):
+                target = case / side / file
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+
+        plan = build_review_plan(case, changed, 500)
+        scoped_rows = [site for sites in plan.shard_symbol_sites for site in sites]
+        rows = {(site.symbol, site.path, site.line) for site in (*plan.symbol_sites, *scoped_rows)}
+        expected = {
+            ("PublishSnapshot", "go/handlers.go", 1), ("PhaseSnapshotting", "go/handlers.go", 2),
+            ("PublishSnapshot", go, 43), ("PublishSnapshot", peer, 43),
+            ("update_checkpoint", "py/consumer.py", 1), ("Mode.Terminal", "py/consumer.py", 2),
+            ("update_checkpoint", ".github/workflows/caller.yml", 1),
+            ("persist_snapshot", "rust/consumer.rs", 1), ("MODE_TERMINAL", "rust/consumer.rs", 2),
+            ("StatusReady", "ts/consumer.ts", 1), ("refresh_cache", "tasks/runner.sh", 1),
+        }
+        expected.update({("PublishSnapshot", peer, 1), ("PublishSnapshot", go, 1)})
+        require(rows == expected, f"Symbol sites differ: missing {expected - rows}, extra {rows - expected}")
+        require(not any(site.path == peer and site.line == 1 for site in plan.symbol_sites),
+                "The global graph included a line inside a changed hunk")
+        require(plan.sharded and any(
+            go in shard.files and peer not in shard.files and any(site.path == peer for site in sites)
+            for shard, sites in zip(plan.shards, plan.shard_symbol_sites)
+        ), "Shard lost external changed-file caller")
+        require(f"{fixture}: 80 hunks (generated/fixture; inspect directly if relevant)" in plan.context and
+                f"{fixture}:" in plan.context and f"  before/{fixture}" not in plan.context,
+                "Generated hunk index did not collapse")
+        with patch.object(shutil, "which", return_value=None):
+            fallback = build_review_plan(case, changed, 500)
+        require(plan.symbol_sites == fallback.symbol_sites and plan.shard_symbol_sites == fallback.shard_symbol_sites,
+                "Python and ripgrep chose different source references")
+        paths = [path.removeprefix("after/") for path in fingerprint(case) if path.startswith("after/")]
+        selected = {hunk.file: [hunk] for shard in plan.shards for hunk in shard.hunks
+                    if hunk.file in {go, peer}}
+        cap = 150
+        clipped, _, _ = build_symbol_context(case, selected, plan.diffs, paths, max_bytes=cap)
+        require(clipped and len(symbol_section(clipped).encode()) <= cap and len(clipped) < len(plan.symbol_sites),
+                "Symbol section did not respect its byte cap")
+        findings = [{"id": "L1-1", "file": go, "line_start": 16, "line_end": 16, "title": "Defect", "trigger": "input"}]
+        summary, uncovered, _ = wave1_coverage_summary(plan, findings)
+        require(go not in summary["changed_files_without_findings"] and peer in summary["changed_files_without_findings"]
+                and not any(row.startswith(go + ":") for row in summary["uncovered_hunks"])
+                and f"{peer}: a1-a1" in summary["uncovered_hunks"]
+                and not any(fixture in row for row in summary["uncovered_hunks"])
+                and uncovered == 14 and any(row.endswith(f" {peer}:43") for row in summary["uncovered_caller_sites"])
+                and not any(row.endswith(f" {go}:43") for row in summary["uncovered_caller_sites"]),
+                "Wave 1 gap hints lost exact ranges, the finding window, or untouched callers")
+        require(SYMBOL_SCAN_SECONDS == 3.0, "Symbol scan time budget differs")
+        with patch.dict(globals(), {"SYMBOL_SCAN_SECONDS": 0}):
+            timed_out = build_review_plan(case, changed, 500)
+        require(timed_out.symbol_scan_limited and SYMBOL_SCAN_NOTICE in timed_out.context,
+                "The time-limited search did not report incomplete coverage")
+        print("PASS multilingual symbol graph, comment and generic-symbol exclusion, prose and generated-file exclusion, and scan caps")
+
+        cmake_case = case / "cmake"
+        cmake_changed = make_review_fixture(cmake_case, [
+            ("aaa/examples.md", [], [f"def example_{index}(): pass" for index in range(SYMBOL_LIMIT)]),
+            ("src/build.cmake", ["function(OldSnapshot)"], ["function(ConfigureSnapshot)"]),
+        ])
+        cmake_entry = "cMaKeLiStS.TxT"
+        for side in ("before", "after"):
+            (cmake_case / side / cmake_entry).write_bytes(b"ConfigureSnapshot()\n")
+        for ripgrep in (shutil.which("rg"), None):
+            with patch.object(shutil, "which", return_value=ripgrep):
+                cmake = build_review_plan(cmake_case, cmake_changed)
+            require(any(site.symbol == "ConfigureSnapshot" and site.path == cmake_entry
+                        for site in cmake.symbol_sites), "Documentation hid an unchanged CMake caller")
+
+        started = time.perf_counter()
+        matches = list(STATE_SYMBOL.finditer("Aa" + "B" * 80 + "\u00e9"))
+        require(not matches and time.perf_counter() - started < 0.05,
+                "State symbol scan backtracked over a long uppercase identifier")
+        require(STATE_SYMBOL.fullmatch("HttpURL") and STATE_SYMBOL.fullmatch("Mode.Terminal"),
+                "State symbol scan lost CamelCase acronyms or dotted references")
+        print("PASS CMake callers, changed prose exclusion, and bounded CamelCase scan")
+
+        path = "go/handlers.go"
+        row = json.dumps({"type": "match", "data": {"path": {"text": path}, "line_number": 1,
+                         "lines": {"text": "PublishSnapshot()"}}}, separators=(",", ":")).encode() + b"\n"
+        with patch.object(shutil, "which", return_value="rg"), patch.object(
+            subprocess, "run", return_value=argparse.Namespace(returncode=0, stdout=row)
+        ) as search, patch.object(time, "monotonic", side_effect=(0, 1)):
+            results = list(symbol_matches(case / "after", {path}, ["PublishSnapshot"], None, 1))
+            require(not results and search.call_args.kwargs["creationflags"] ==
+                    getattr(subprocess, "CREATE_NO_WINDOW", 0), "Ripgrep exceeded its deadline or could open a console")
+        with patch.dict(globals(), {"symbol_matches": lambda *_: iter([(path, 1, "PublishSnapshot()")])}), patch.object(
+            time, "monotonic", side_effect=(0, SYMBOL_SCAN_SECONDS, SYMBOL_SCAN_SECONDS)
+        ):
+            expired_sites, _, limited = build_symbol_context(case, selected, plan.diffs, paths)
+        require(limited and not expired_sites, "Symbol context processed matches after its deadline")
+
+        candidates = [
+            {**findings[0], "id": name, "file": file, "line_start": start, "line_end": end}
+            for name, file, start, end in (
+                ("D", peer, 1, 1), ("C", go, 57, 57), ("B", go, 31, 31), ("A", go, 1, 6), ("AA", go, 1, 4)
+            )
+        ]
+        prompt = verification_prompt(case, plan, candidates)
+        locations = prompt.split("## Candidate locations\n", 1)[1].split("\n\n", 1)[0]
+        require(locations.splitlines() == [
+            "[cluster C1]", f"- AA: {go}:1-4", f"- A: {go}:1-6", f"- B: {go}:31-31",
+            "[cluster C2]", f"- C: {go}:57-57", "[cluster C3]", f"- D: {peer}:1-1",
+        ], "Verifier did not sort or cluster overlapping and nearby ranges")
+        dense_case = case / "dense_gaps"
+        untracked = "src/zz_untracked.py"
+        dense_changed = make_review_fixture(dense_case, [
+            ("docs/guide.md", ["old"] * 55, ["new"] * 55),
+            ("src/core.py", ["old"] * 65, ["new"] * 65),
+            ("tests/test_core.py", ["old"] * 55, ["new"] * 55),
+            ("tasks/entry.sh", ["old"], ["new"]),
+        ], extras=[("after", untracked, b"untracked_contract()\n")])
+        dense = build_review_plan(dense_case, dense_changed)
+        dense_summary, count, annotated = wave1_coverage_summary(dense, [])
+        files = ["src/core.py", "tasks/entry.sh", "docs/guide.md", "tests/test_core.py"]
+        first_round = [dense.diffs[file].annotated[0] for file in files]
+        expected_gaps = [f"{file}: a1-a1" for file in files] + [
+            f"{file}: a{line}-a{line}" for line in range(2, 66)
+            for file in files if line <= len(dense.diffs[file].annotated)
+        ]
+        require(count == len(annotated) == 176 and dense_summary["uncovered_hunks"] == expected_gaps[:60] and
+                annotated[:len(files)] == first_round, "Gap hints did not interleave files before applying the cap")
+        gap_limit = len(dense.context.encode()) + len(ANNOTATED_HEADING.encode()) + len(DIFF_SEPARATOR.join(first_round).encode())
+        packet = gap_packet(replace_plan(dense, max_diff_bytes=gap_limit), annotated)
+        require(packet.endswith(DIFF_SEPARATOR.join(first_round)) and len(packet.encode()) <= gap_limit,
+                "A full source file crowded out other files in the gap packet")
+        sharded = build_review_plan(dense_case, dense_changed, max_diff_bytes=500, max_shards=2)
+        before_ranges, ranges_and_tail = sharded.context.split("\n\n" + COMPLETE_HUNK_HEADING, 1)
+        _, tail = ranges_and_tail.split("\n\n", 1)
+        gap_limit = len((before_ranges + "\n\n" + tail).encode())
+        packet = gap_packet(replace_plan(sharded, max_diff_bytes=gap_limit))
+        require(len(packet.encode()) <= gap_limit and COMPLETE_HUNK_HEADING not in packet
+                and all(heading in packet for heading in ("## contract.md", "## Changed files", SYMBOL_HEADING,
+                        "## Shard manifest", "## Hunk ranges beyond shard capacity"))
+                and untracked in packet.split("## Lockfiles or changes without text hunks", 1)[1]
+                and untracked in dense_summary["changed_files_without_findings"],
+                "The complete hunk index crowded out required context or an untracked source lead")
+        print("PASS deterministic candidate clusters, uncovered caller hints, and round-robin gap coverage")
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--selfcheck"]:
         selfcheck()
@@ -2113,7 +2772,7 @@ if __name__ == "__main__":
         parser.add_argument("--model", default=MODEL, help=f"Codex model (default: {MODEL})")
         parser.add_argument("--effort", choices=EFFORTS, default="medium")
         parser.add_argument("--verify-effort", choices=EFFORTS, help="Default: high for lenses, otherwise --effort")
-        parser.add_argument("--gap-effort", choices=EFFORTS, default="medium", help="Effort for ultra gap lenses")
+        parser.add_argument("--gap-effort", choices=EFFORTS, default="medium", help="Effort for the focused second discovery wave")
         parser.add_argument("--effort-reason")
         parser.add_argument("--strategy", choices=("lenses", "questions", "generic"), default="lenses",
                             help="Review strategy (default: lenses)")

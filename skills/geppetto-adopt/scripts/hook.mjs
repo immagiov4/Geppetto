@@ -358,14 +358,14 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
   if (strategy === 'lenses') {
     if (!['standard', 'ultra'].includes(profile)) fail();
     if (shardCount === 1) {
-      required.push('lens-adversarial');
+      required.push('lens-correctness', 'lens-rules-tests',
+        ...(profile === 'ultra' ? ['gap-logic', 'gap-contracts-docs'] : ['gap-audit']));
     } else {
       if (!Number.isSafeInteger(shardCount) || shardCount < 2 ||
           !Array.isArray(metrics.shards) || metrics.shards.length !== shardCount) fail();
       for (let index = 1; index <= shardCount; index++) required.push('shard-' + index);
+      required.push(...(profile === 'ultra' ? ['gap-seams', 'gap-rules-tests'] : ['gap-audit']));
     }
-    required.push('lens-contracts', 'lens-rules-tests');
-    if (profile === 'ultra') required.push('gap-logic', 'gap-contracts-docs');
   }
   const { calls, thread_ids: threads, case_fingerprint: fingerprint, changed_paths: paths } = metrics;
   if (!required.length || !Array.isArray(calls) || !Array.isArray(threads) ||
@@ -377,13 +377,20 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
   const seal = reviewMaterialSeal(fingerprint);
   const expectedShards = strategy === 'lenses' && shardCount >= 2 ? shardCount : undefined;
   for (const [index, call] of calls.entries()) {
-    if (!call || !/^(questions|investigate|search-[12]|shard-[1-9]\d*|lens-(?:adversarial|contracts|rules-tests)|gap-(?:logic|contracts-docs)|verify(?:-[12])?)$/.test(call.stage) || call.status !== 'completed' ||
+    if (!call || !/^(questions|investigate|search-[12]|shard-[1-9]\d*|lens-(?:correctness|rules-tests)|gap-(?:audit|seams|rules-tests|logic|contracts-docs)|verify(?:-[12])?)$/.test(call.stage) || call.status !== 'completed' ||
         call.exit_code !== 0 || typeof threads[index] !== 'string' || !threads[index]) fail();
     const response = await readFile(resolve(directory, call.stage + '.json'), 'utf8');
+    const result = JSON.parse(response);
     const expectedStage = strategy === 'lenses' ? call.stage : undefined;
+    let assignedIds;
+    if (expectedStage === 'verify-1' || expectedStage === 'verify-2') {
+      if (!Array.isArray(result?.decisions) || !result.decisions.length ||
+          !result.decisions.every(decision => typeof decision?.id === 'string')) fail();
+      assignedIds = result.decisions.map(decision => decision.id).sort();
+    }
     if (digest(response) !== call.response_sha256 ||
-        !await completedReviewSession(codexHome, threads[index], call, response, seal, expectedStage, expectedShards)) fail();
-    responses[call.stage] = JSON.parse(response);
+        !await completedReviewSession(codexHome, threads[index], call, response, seal, expectedStage, expectedShards, assignedIds)) fail();
+    responses[call.stage] = result;
     const events = (await readFile(resolve(directory, call.stage + '.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
     if (!events.some(event => event.type === 'thread.started' && event.thread_id === threads[index]) ||
         !events.some(event => event.type === 'turn.completed' && event.usage && Number(event.usage.output_tokens) > 0) ||
@@ -400,7 +407,7 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
       !(strategy === 'lenses' && isDeepStrictEqual(verifyStages, ['verify-1', 'verify-2']))) fail();
   const verification = verifyStages.map(stage => responses[stage]);
   if (!verification.every(response => Array.isArray(response?.accepted_findings))) fail();
-  if (verification.length > 1 || Array.isArray(verification[0]?.decisions)) {
+  if (verification.length && (strategy === 'lenses' || Array.isArray(verification[0]?.decisions))) {
     for (const { decisions, accepted_findings } of verification) {
       if (!Array.isArray(decisions) || !decisions.every(decision => typeof decision?.id === 'string' &&
           ['accept', 'reject', 'unverified'].includes(decision.decision) && typeof decision.canonical_id === 'string' &&

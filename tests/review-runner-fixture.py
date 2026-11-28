@@ -94,7 +94,7 @@ class ReviewStrategyTests(unittest.TestCase):
         self.assertIn('Confirmed findings: 0. Candidates: 0.', (self.args.output / 'report.md').read_text(encoding='utf8'))
 
     def test_cli_defaults_to_lenses_and_preserves_explicit_legacy_strategies(self):
-        for strategy, stages in ((None, ['lens-adversarial', 'lens-contracts', 'lens-rules-tests']),
+        for strategy, stages in ((None, ['lens-correctness', 'lens-rules-tests']),
                                  ('questions', ['questions']), ('generic', ['search-1'])):
             with self.subTest(strategy=strategy):
                 output = self.case.parent / (strategy or 'default-output')
@@ -255,19 +255,19 @@ class ReviewStrategyTests(unittest.TestCase):
                 self.assertFalse((self.args.output / 'report.md').exists())
 
 
-    lens_stages = ('lens-adversarial', 'lens-contracts', 'lens-rules-tests')
+    lens_stages = ('lens-correctness', 'lens-rules-tests')
     gap_stages = ('gap-logic', 'gap-contracts-docs')
 
     def prepare_lenses(self, profile='standard'):
         self.args.strategy = 'lenses'
         self.args.profile = profile
-        for stage in self.lens_stages + self.gap_stages:
+        for stage in (*self.lens_stages, 'gap-audit', *self.gap_stages):
             self.outputs[stage] = deepcopy(self.report)
         finding = {'id': 'L1-1', 'severity': 'P2', 'file': 'producer.py', 'line_start': 1, 'line_end': 1,
                    'title': 'Producer changes the output', 'trigger': 'Consumer reads value',
                    'consequence': 'Wrong output', 'evidence': 'Value changes on line 1',
                    'contract_basis': 'Preserve the consuming behavior.'}
-        self.outputs['lens-adversarial']['findings'] = [finding]
+        self.outputs['lens-correctness']['findings'] = [finding]
         self.outputs['verify'] = {'accepted_findings': [finding], 'decisions': [
             {'id': 'L1-1', 'decision': 'accept', 'evidence': 'Verified output.', 'canonical_id': 'L1-1'}],
             'limitations': [], 'additional_observations': [
@@ -291,6 +291,9 @@ class ReviewStrategyTests(unittest.TestCase):
                 self.assertEqual([(record['stage'], record['status']) for record in self.read_metrics()['calls']],
                                  [(stage, 'running') for stage in self.lens_stages])
                 barrier.wait()
+            elif label == 'gap-audit':
+                self.assertEqual(args.effort, 'medium')
+                self.assertIn('"id": "L1-1"', prompt)
             else:
                 self.assertEqual(args.effort, 'high')
             if label == self.lens_stages[0]:
@@ -315,7 +318,7 @@ class ReviewStrategyTests(unittest.TestCase):
             result = self.run_review()
         prompts = dict(self.calls)
         self.assertLess(list(prompts).index(self.lens_stages[-1]), list(prompts).index(self.lens_stages[0]))
-        self.assertIn('b1 | -value = 1', prompts['lens-adversarial'])
+        self.assertIn('b1 | -value = 1', prompts['lens-correctness'])
         self.assertIn('a1 | +value = 2', prompts['lens-rules-tests'])
         self.assertIn('after/producer.py\n1: value = 2', prompts['verify'])
         self.assertIn('before/producer.py\n1: value = 1', prompts['verify'])
@@ -330,7 +333,7 @@ class ReviewStrategyTests(unittest.TestCase):
         self.assertIn('## Additional observations (unverified)', report)
         self.assertIn('Other observation', report)
         metrics = self.read_metrics()
-        stages = [*self.lens_stages, 'verify']
+        stages = [*self.lens_stages, 'gap-audit', 'verify']
         self.assertEqual([call['stage'] for call in metrics['calls']], stages)
         self.assertEqual(metrics['thread_ids'], ['session-' + stage for stage in stages])
         self.assertEqual(metrics['totals'], {'elapsed_seconds': 4, 'usage': {'input_tokens': 28}})
@@ -339,12 +342,21 @@ class ReviewStrategyTests(unittest.TestCase):
         self.assertTrue(metrics['parallel_discovery'])
         self.assertGreater(metrics['inline_diff_bytes'], 0)
         self.assertEqual(metrics['inline_diff_omitted_files'], [])
+        self.assertEqual(metrics['shard_count'], 1)
+        self.assertEqual(metrics['uncovered_hunk_count'], 0)
+        self.assertGreaterEqual(metrics['prep_seconds'], 0)
+        self.assertEqual(metrics['symbol_context_count'], 0)
+        self.assertGreater(metrics['symbol_context_bytes'], 0)
+        self.assertFalse(metrics['symbol_scan_limited'])
         self.assertEqual(metrics['candidate_count'], 1)
 
     def test_ultra_sends_first_round_summary_to_two_parallel_gap_lenses(self):
         self.prepare_lenses('ultra')
         self.args.gap_effort = 'low'
         (self.case / 'after/new.py').write_text('result = True\n', encoding='utf8')
+        with (self.case / 'diff.patch').open('ab') as diff:
+            diff.write(b'diff --git a/new.py b/new.py\n--- /dev/null\n+++ b/new.py\n'
+                       b'@@ -0,0 +1 @@\n+result = True\n')
         runner.save(self.case / 'manifest.json', {'changed_files': ['new.py', 'producer.py']})
         barrier = Barrier(2, timeout=5)
         original_call = self.call
@@ -361,6 +373,7 @@ class ReviewStrategyTests(unittest.TestCase):
         for stage in self.gap_stages:
             self.assertIn('"id": "L1-1"', prompts[stage])
             self.assertIn('"changed_files_without_findings": ["new.py"]', prompts[stage])
+            self.assertIn('"uncovered_hunks": ["new.py: a1-a1"]', prompts[stage])
         self.assertEqual([record['stage'] for record in self.read_metrics()['calls']],
                          [*self.lens_stages, *self.gap_stages, 'verify'])
 
@@ -486,7 +499,7 @@ class ReviewStrategyTests(unittest.TestCase):
                 self.calls.clear()
                 finding = self.prepare_lenses()
                 self.args.output = self.case.parent / f'invalid-{index}'
-                report = self.outputs['lens-adversarial']
+                report = self.outputs['lens-correctness']
                 if problem == 'prefix':
                     finding['id'] = 'L2-1'
                 elif problem == 'duplicate':
@@ -526,7 +539,7 @@ class ReviewStrategyTests(unittest.TestCase):
 
         def call(args, frozen, label, *rest):
             result = original_call(args, frozen, label, *rest)
-            if label == 'lens-contracts':
+            if label == 'lens-rules-tests':
                 raise ValueError('Session time limit reached')
             return result
 
@@ -535,17 +548,17 @@ class ReviewStrategyTests(unittest.TestCase):
         metrics = self.read_metrics()
         self.assertEqual(metrics['status'], 'failed')
         self.assertEqual([(call['stage'], call['status']) for call in metrics['calls']],
-                         list(zip(self.lens_stages, ('completed', 'failed', 'completed'))))
+                         list(zip(self.lens_stages, ('completed', 'failed'))))
         self.assertFalse((self.args.output / 'report.md').exists())
 
     def test_case_mutation_in_lens_is_rejected_even_without_candidates(self):
         self.prepare_lenses()
-        self.outputs['lens-adversarial']['findings'] = []
+        self.outputs['lens-correctness']['findings'] = []
         original_call = self.call
 
         def call(args, frozen, label, *rest):
             result = original_call(args, frozen, label, *rest)
-            if label == 'lens-adversarial':
+            if label == 'lens-correctness':
                 (self.case / 'after/producer.py').write_text('value = 3\n', encoding='utf8')
             return result
 
