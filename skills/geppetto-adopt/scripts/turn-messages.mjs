@@ -1,9 +1,11 @@
 import { createReadStream } from 'node:fs';
-import { stat, mkdir, writeFile, readFile, link, unlink } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { jsonFile } from './common.mjs';
+import { stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { jsonFile, userHome } from './common.mjs';
+import { withLocalLock } from './local-lock.mjs';
+import { recordLockRecovery } from './health.mjs';
 import { randomUUID, createHash } from 'node:crypto';
-import { setTimeout as delay } from 'node:timers/promises';
+
 
 const digest = text => createHash('sha256').update(text).digest('hex'); export const decisionPath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `decision-${digest(session)}-${digest(turn)}.json`);
 export const currentDecision = decision => decision && typeof decision.epoch === 'string' && decision.value && Array.isArray(decision.decisions) && decision.decisions.length ? decision : null; export const turnStatePath = (root, session, turn) => resolve(root, '.geppetto/hook-state', `review-turn-${digest(session)}${turn ? '-' + digest(turn) : ''}.json`);
@@ -44,17 +46,9 @@ export async function messageCheckpoint(path, cursor) {
   return { cursor: { path, identity, offset }, userMessage, userMessages, bytesRead };
 }
 
-/** Serialize one session's state changes; an abandoned owner is reported for recovery. */
-export async function withTurnLock(path, action) {
-  const owner = `${path}.${process.pid}.${randomUUID()}`, lockPollMs = 10;
-  await mkdir(dirname(path), { recursive: true }); await writeFile(owner, String(process.pid), { mode: 0o600 });
-  try {
-    for (;;) {
-      try { await link(owner, path); break; } catch (error) { if (error.code !== 'EEXIST') throw error; }
-      let pid; try { pid = Number(await readFile(path, 'utf8')); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
-      try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') throw new Error(`Inactive turn-state lock owner ${pid}; verify it has exited before removing ${path}.`); throw error; }
-      await delay(lockPollMs);
-    }
-    try { return await action(); } finally { await unlink(path); }
-  } finally { await unlink(owner); }
+/** Serialize one session's state changes and recover a verified abandoned owner. */
+export function withTurnLock(path, action, { home = userHome(), now = Date.now } = {}) {
+  return withLocalLock(path, action, { wait: true, now, onRecovery: healed => recordLockRecovery(home, 'lock:turn', 'an abandoned turn lock', now(), healed).catch(() => {
+    console.error('Geppetto could not record the abandoned turn lock recovery attempt.');
+  }) });
 }

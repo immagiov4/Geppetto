@@ -17,19 +17,30 @@ export function memoryDescription(memory) {
   return memory?.localPath ? `${memory.choice === 'github' ? 'Private GitHub repo' : 'Git folder'} ${memory.localPath} (${memory.repo})` : 'choice required';
 }
 export const memoryGit = (root, args, execute = run, options = {}) => gitOutput(root, args, { execute, label: `Memory Git ${args[0]}`, ...options });
+export class MemoryRemoteError extends Error {}
+
+export function verifiedMemoryRemote(memory, git) {
+  const remotes = git(['remote']).split(/\r?\n/).filter(Boolean);
+  const remote = remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : null;
+  if (remotes.length && !remote) throw new MemoryRemoteError('Choose one memory remote before registering jobs');
+  if (remote) {
+    const identity = value => value.replace(/\.git$/, '').replaceAll('\\', '/');
+    for (const args of [['remote', 'get-url', '--all', remote], ['remote', 'get-url', '--push', '--all', remote]]) {
+      if (!memory.repo || git(args).split(/\r?\n/).some(url => identity(url) !== identity(memory.repo))) {
+        throw new MemoryRemoteError('Memory remote differs from memory.repo; reconcile the configuration.');
+      }
+    }
+  }
+  return remote;
+}
+
 export async function syncMemory(memory, execute = run) {
   const root = memory.localPath;
   const git = args => memoryGit(root, args, execute);
   if (await realpath(git(['rev-parse', '--show-toplevel'])) !== await realpath(root)) throw new Error('Memory needs the configured repository root');
-  const remotes = git(['remote']).split(/\r?\n/).filter(Boolean);
-  const remote = remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : null;
-  if (remotes.length && !remote) throw new Error('Choose one memory remote before registering jobs');
+  const remote = verifiedMemoryRemote(memory, git);
   let branch;
   if (remote) {
-    const identity = value => value.replace(/\.git$/, '').replaceAll('\\', '/');
-    for (const args of [['remote', 'get-url', '--all', remote], ['remote', 'get-url', '--push', '--all', remote]]) {
-      if (git(args).split(/\r?\n/).some(url => identity(url) !== identity(memory.repo))) throw new Error('Memory remote differs from memory.repo; reconcile it before installation');
-    }
     git(['fetch', remote]);
     branch = git(['symbolic-ref', '--short', 'HEAD']);
     const heads = git(['for-each-ref', '--format=%(refname)', `refs/remotes/${remote}/`]);

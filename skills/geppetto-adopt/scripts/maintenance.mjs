@@ -3,13 +3,14 @@ import { newWeeklyDraft, disposeWeeklyDraft, publishWeeklyReport, weeklyWindowMs
 
 import { randomUUID } from 'node:crypto';
 import { readdirSync } from 'node:fs';
-import { readFile, writeFile, open, mkdir, readdir, access, rename } from 'node:fs/promises';
+import { readFile, writeFile, open, mkdir, readdir, access, rename, link, unlink, realpath } from 'node:fs/promises';
 import { resolve, basename, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cli, isMain, userHome, jsonFile, run, exists, filesUnder, rejectSymlinks, foundationReport } from './common.mjs';
 import { learningCommand, executeLearning } from './learn-runner.mjs';
 import { credentialAssignment, redact } from './signal.mjs';
 import { memorySettings } from './memory-config.mjs';
+import { maintainMemory } from './memory-maintenance.mjs';
 export const maintenanceJobs = ['curate-skills', 'maintain-memory'];
 const maintenanceWrapper = home => resolve(home, '.geppetto/maintenance.vbs');
 const windowsAction = 'wscript.exe';
@@ -104,7 +105,7 @@ export async function compileIntegrations(project, { home = userHome(), catalog,
   if (!await exists(destination) || await readFile(destination, 'utf8') !== text) { const temporary = `${destination}.${randomUUID()}.tmp`; await writeFile(temporary, text, { mode: 0o600, flag: 'wx' }); await rename(temporary, destination); }
   return { installed: selected.sort(), suggestions: suggestions.sort(), gaps }; }
 /** Resolve disposable version directories while preserving source checkouts. */
-async function maintenanceSource(source) {
+export async function maintenanceSource(source) {
   if (!/^\d+\.\d+\.\d+$/.test(basename(source))) return source;
   const cache = dirname(source), versions = await readdir(cache).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
   for (const version of versions.filter(name => /^\d+\.\d+\.\d+$/.test(name)).sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))) {
@@ -119,6 +120,21 @@ async function maintenanceSource(source) {
   }
   throw new Error('No installed Geppetto maintenance package in ' + cache + '; reinstall the plugin.');
 }
+async function publishLauncher(path, content, missingOnly) {
+  await rejectSymlinks(path);
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = path + '.' + randomUUID() + '.tmp';
+  await writeFile(temporary, content, { mode: 0o600, flag: 'wx' });
+  if (!missingOnly) {
+    await rename(temporary, path);
+    return;
+  }
+  // Healing may race adoption. Preserve any launcher published by the installer.
+  try { await link(temporary, path); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  finally { await unlink(temporary); }
+}
+
 export function maintenanceLauncherText(home, source) {
   return `import { readdir, readFile, access, appendFile, mkdir } from 'node:fs/promises';
 import { resolve, basename, dirname } from 'node:path';
@@ -129,6 +145,7 @@ const directory = ${JSON.stringify(resolve(home, '.geppetto'))};
 const credentialAssignment = ${credentialAssignment};
 ${redact.toString()}
 let outcome = 'success';
+if (job === 'maintain-memory') outcome = process.argv.includes('--dry-run') ? 'dry run' : 'exit=0';
 try {
   const scripts = resolve(await maintenanceSource(${JSON.stringify(source.path)}), 'skills/geppetto-adopt/scripts'); const { main } = await import(pathToFileURL(resolve(scripts, 'maintenance.mjs')).href);
   process.exitCode = (await main(process.argv.slice(2))) ?? 0;
@@ -138,14 +155,32 @@ finally { await mkdir(directory, { recursive: true }); await appendFile(resolve(
 `;
 }
 /** Refresh the fixed OS entrypoint while the installer holds the machine lock. */
-export async function refreshMaintenanceLauncher(home, source) {
+export async function refreshMaintenanceLauncher(home, source, { missingOnly = false } = {}) {
   const script = resolve(home, '.geppetto/bin/maintenance-launcher.mjs');
-  await mkdir(dirname(script), { recursive: true });
   // Embed the resolver so deleting its original plugin cache cannot break this entrypoint.
-  const temporary = script + '.' + randomUUID() + '.tmp';
-  await writeFile(temporary, maintenanceLauncherText(home, source));
-  await rename(temporary, script);
+  await publishLauncher(script, maintenanceLauncherText(home, source), missingOnly);
   return script;
+}
+export async function refreshWindowsMaintenanceLauncher(home, script, { missingOnly = false } = {}) {
+  const launcher = maintenanceWrapper(home);
+  const action = `"${process.execPath}" "${script}" --run `;
+  await publishLauncher(launcher, `job = "unknown"
+If WScript.Arguments.Count = 1 Then job = WScript.Arguments(0)
+Select Case job
+Case "${maintenanceJobs.join('", "')}"
+Case Else: job = "unknown"
+End Select
+On Error Resume Next
+status = CreateObject("WScript.Shell").Run("${action.replaceAll('"', '""')}" & job, 0, True)
+If Err.Number <> 0 Then
+  Set outputLog = CreateObject("Scripting.FileSystemObject").OpenTextFile("${dirname(launcher)}\\" & job & ".log", 8, True)
+  outputLog.WriteLine Now & " " & job & " failure could not start the Node maintenance launcher"
+  outputLog.Close
+  WScript.Quit 1
+End If
+WScript.Quit status
+`, missingOnly);
+  return launcher;
 }
 function nextWeeklyRun(expression) {
   const match = /^(\d+) (\d+) \* \* ([0-6])$/.exec(expression);
@@ -174,25 +209,7 @@ export async function scheduleMaintenance(name, { home = userHome(), host, sourc
       }
       throw new Error(`Install ${host} CLI and sign in before attaching maintenance.`);
     }
-    const launcher = maintenanceWrapper(home);
-    await mkdir(resolve(home, '.geppetto'), { recursive: true });
-    const action = `"${process.execPath}" "${script}" --run `;
-    await writeFile(launcher, `job = "unknown"
-If WScript.Arguments.Count = 1 Then job = WScript.Arguments(0)
-Select Case job
-Case "${maintenanceJobs.join('", "')}"
-Case Else: job = "unknown"
-End Select
-On Error Resume Next
-status = CreateObject("WScript.Shell").Run("${action.replaceAll('"', '""')}" & job, 0, True)
-If Err.Number <> 0 Then
-  Set outputLog = CreateObject("Scripting.FileSystemObject").OpenTextFile("${dirname(launcher)}\\" & job & ".log", 8, True)
-  outputLog.WriteLine Now & " " & job & " failure could not start the Node maintenance launcher"
-  outputLog.Close
-  WScript.Quit 1
-End If
-WScript.Quit status
-`);
+    await refreshWindowsMaintenanceLauncher(home, script);
     const args = windowsJobArguments(home, name);
     const owned = previous?.id === id && previous.scheduler === 'windows-task-scheduler';
     const observed = owned && maintenanceRegistrationStatus(name, { status: 'scheduled', scheduler: 'windows-task-scheduler' }, { home, execute });
@@ -244,14 +261,26 @@ export async function disableMaintenance(name, job, { execute = run } = {}) {
 /** Run only active registrations with the subscription CLI, inheriting its model settings. */
 export async function main(args) {
   if (![2, 3].includes(args.length) || args[0] !== '--run' || !maintenanceJobs.includes(args[1]) || (args.length === 3 && args[2] !== '--dry-run')) throw new Error('Usage: maintenance.mjs --run <curate-skills|maintain-memory> [--dry-run]');
-  const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json')); const job = machine.jobs[args[1]];
+  const machine = await jsonFile(resolve(userHome(), '.geppetto/machine.json')); const job = machine.jobs?.[args[1]];
   if (job?.status !== 'scheduled') return 0;
+  const source = new URL('../assets/templates/jobs/' + args[1] + '.md', import.meta.url);
+  if (args[1] === 'maintain-memory') {
+    const home = userHome();
+    if (args[2] === '--dry-run') {
+      const checkout = (await memorySettings(home, home))?.localPath;
+      console.log(JSON.stringify({ job: args[1], host: 'codex', source: fileURLToPath(source), roots: checkout ? [await realpath(checkout)] : [] }));
+      return 0;
+    }
+    return maintainMemory({ home, job, template: await readFile(source, 'utf8') });
+  }
   for (const project of Object.keys(machine.projects ?? {})) if (!await exists(project)) { await writeFile(resolve(userHome(), `.geppetto/${args[1]}.log`), `${new Date().toISOString()} ${args[1]} skipped missing project ${redact(project)}\n`, { flag: 'a' }); delete machine.projects[project]; }
   for (const targets of Object.values(machine.projects ?? {})) for (const [target, source] of Object.entries(targets)) targets[target] = await maintenanceSource(source);
-  const memory = args[1] === 'maintain-memory' ? await memorySettings(userHome()) : null; const procedure = new URL(`../../${args[1] === 'maintain-memory' ? 'geppetto-memory' : 'skill-learning-patterns'}/SKILL.md`, import.meta.url); const source = new URL(`../assets/templates/jobs/${args[1]}.md`, import.meta.url); const roots = args[1] === 'maintain-memory' ? [memory?.localPath ?? machine.memory?.localPath].filter(Boolean) : [...new Set([...Object.keys(machine.projects), ...Object.values(machine.projects).flatMap(project => Object.values(project))])];
+  const procedure = new URL('../../skill-learning-patterns/SKILL.md', import.meta.url);
+  const projects = machine.projects ?? {};
+  const roots = [...new Set([...Object.keys(projects), ...Object.values(projects).flatMap(Object.values)])];
   if (args[2] === '--dry-run') { console.log(JSON.stringify({ job: args[1], host: job.host ?? 'codex', source: fileURLToPath(source), roots })); return 0; }
   const observedAt = Date.now();
-  const { learningAudit } = await import('./audit.mjs'); const reports = await Promise.all(Object.keys(machine.projects ?? {}).map(async project => ({ project, foundations: foundationReport(await jsonFile(resolve(project, '.geppetto/config.json'), {})), evidence: await learningAudit(project), ...(args[1] === 'curate-skills' ? { metrics: await boundedMetricsAudit(project, { since: new Date(observedAt - weeklyWindowMs).toISOString(), now: observedAt }).catch(error => ({ status: 'unavailable', reason: error.message })) } : {}), companions: await compileIntegrations(project) }))); const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(source, 'utf8')}`; const log = resolve(userHome(), `.geppetto/${args[1]}.log`);
+  const { learningAudit } = await import('./audit.mjs'); const reports = await Promise.all(Object.keys(machine.projects ?? {}).map(async project => ({ project, foundations: foundationReport(await jsonFile(resolve(project, '.geppetto/config.json'), {})), evidence: await learningAudit(project), metrics: await boundedMetricsAudit(project, { since: new Date(observedAt - weeklyWindowMs).toISOString(), now: observedAt }).catch(error => ({ status: 'unavailable', reason: error.message })), companions: await compileIntegrations(project) }))); const prompt = `${await readFile(procedure, 'utf8')}\n${await readFile(source, 'utf8')}`; const log = resolve(userHome(), `.geppetto/${args[1]}.log`);
   if (!roots.length) await writeFile(log, 'No configured maintenance destination.\n', { flag: 'a' });
   const output = await open(log, 'a');
   try {
@@ -262,10 +291,10 @@ export async function main(args) {
       const draft = available ? await newWeeklyDraft(cwd) : undefined;
       try {
         const localReports = reports.map(({ metrics, ...report }) => report.project === cwd && metrics ? { ...report, metrics } : report);
-        const context = JSON.stringify({ projects: machine.projects, memory: memory ?? machine.memory, reports: localReports });
+        const context = JSON.stringify({ projects: machine.projects, memory: machine.memory, reports: localReports });
         const request = prompt + '\nResolved machine context: ' + context + '. Work within the supplied file tools. Keep changes local for review.\n';
         await executeLearning({ cwd, prompt: request, host: job.host ?? 'codex', output: output.fd,
-          maintenance: args[1] === 'curate-skills', weeklyDraft: draft });
+          maintenance: true, weeklyDraft: draft });
         if (available) {
           const path = await publishWeeklyReport(cwd, metrics, { draft });
           await output.write('Weekly metrics report: ' + path + '\n');

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.29.0
+
+- Scheduled memory maintenance verifies a receipt tied to each run and keeps the previous cursor when a run is incomplete.
+- Memory maintenance scans before invoking a model. It verifies proposed changes in an isolated Git worktree, sends them to a separate Codex reviewer, and integrates approved edits in a single local fast-forward.
+- Geppetto records maintenance health and verified repairs. It can rebuild missing launchers, reclaim abandoned resources and report recurring failures at session start.
+- Migration: update the plugins and reapprove the Codex hooks. The machine running memory maintenance needs a signed-in Codex CLI.
+
 ## 0.28.0
 
 - Memory writers share one checkout safely. A new [shared checkout](skills/geppetto-memory/references/shared-checkout.md) reference defines path ownership, literal pathspecs, `git pull --ff-only <remote> <branch>` before editing when a remote is configured, verified index-snapshot commits (falling back to `--only` only for non-native paths when the index is busy) and guarded push recovery with `--autostash`, `rebase --abort` and conflict cleanup. Weekly maintenance with Git access commits native memory changes left uncommitted; file-tools-only scheduled runs keep edits local and report pending Git work.
