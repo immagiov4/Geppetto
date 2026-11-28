@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir, readdir, lstat, realpath } from 'node:fs/promises';
 import { resolve, relative, dirname, sep, matchesGlob } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -29,7 +30,8 @@ async function listFiles(root, directory = root) {
   const names = [];
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
     const path = resolve(directory, entry.name);
-    if (blockedPath(relative(root, path).split(sep), entry.isDirectory()) || entry.isSymbolicLink()) continue;
+    const name = relative(root, path);
+    if (blockedPath(name.split(sep), entry.isDirectory()) || entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) names.push(...await listFiles(root, path));
     else if (entry.isFile()) names.push(relative(root, path).split(sep).join('/'));
   }
@@ -76,6 +78,14 @@ export async function learningFileTool(root, name, args, readOnly = false, refer
   const content = original === null ? args.content : original.replace(args.oldText, () => args.newText);
   await mkdir(dirname(path), { recursive: true }); await writeFile(path, content);
   return 'Saved project file'; }
+export const memoryPathKey = name => (process.platform === 'win32' ? name.toLowerCase() : name).replaceAll('\\', '/');
+export const memoryDigest = content => createHash('sha256').update(content).digest('hex');
+export function memoryScope(name, buckets = []) {
+  const [, bucket] = /^buckets\/([^/]+)/.exec(memoryPathKey(name)) ?? [];
+  if (!bucket) return true;
+  return buckets.length ? buckets.includes(bucket) : bucket !== 'private';
+}
+export const memoryMarkdown = name => /\.md$/i.test(name) && !/(^|[/\\])(?:AGENTS|jobs)\.md$/i.test(name) && !blockedPath(name.split(/[/\\]/));
 const schemas = JSON.parse(readFileSync(new URL('./learning-contracts.json', import.meta.url), 'utf8')).tools;
 if (isMain(import.meta.url)) {
   const weeklyDraft = process.argv[6] || null;

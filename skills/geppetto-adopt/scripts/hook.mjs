@@ -9,11 +9,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { completedReviewSession, reviewMaterialSeal } from './review-evidence.mjs';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { cli, isMain, hookMain, run, UsageError, projectRoot, userHome, jsonFile, atomicJson, ignoreLocalFiles, gitOutput, reviewGateDefaults, parseArgs, claimFile, appendRecord, recordContext, exists, contained, rejectSymlinks } from './common.mjs';
 import { messageCheckpoint, withTurnLock, turnStatePath, readTurnState, decisionPath, currentDecision } from './turn-messages.mjs';
 import { logHookEvent, logReads } from './hook-events.mjs';
 import { compileIntegrations } from './maintenance.mjs';
+import { healthContext } from './health.mjs';
 import { redact, localRecords, signalArchive, resolveSignals, redactValue, learningPolicy } from './signal.mjs';
 import { learningEvent } from './learn-nudge.mjs';
 import { nativeMemoryEvent, handleMemoryEvent } from './memory-hook.mjs';
@@ -553,13 +555,22 @@ async function completionEvent(event, reviewArchive) {
   }
   let review_blocked = false; try { review_blocked = !['reviewed', 'below-threshold'].includes(status) && (await readFile(blockPath, 'utf8')) === 'block'; } catch (error) { if (error.code !== 'ENOENT') throw error; }
   return { ...(block ? { decision: 'block', reason: [...reasons, ...(strict ? [`For an explicit override, run ${overrideCommand(event, state, 'stop')} with the real reason.`] : [])].join('\n') } : {}), review_blocked }; }); }
-async function dispatch(event, { runCommand = run, now = Date.now, home, codexHome = nativeReviewHome() } = {}) {
+function queueHealthRepair(home) {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('./heal.mjs', import.meta.url))], { cwd: tmpdir(), detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, HOME: home, USERPROFILE: home } });
+  child.on('error', () => {});
+  child.unref();
+}
+async function dispatch(event, { runCommand = run, now = Date.now, home, codexHome = nativeReviewHome(), queueHealthRepair: queueRepair = queueHealthRepair } = {}) {
   if (!event || typeof event !== 'object') throw new UsageError('Hook input must be an event object');
   const learningChild = process.env.GEPPETTO_LEARNING_CHILD === '1';
   if (event.hook_event_name === 'SessionStart') {
     if (learningChild) return {};
     if (event.session_id) await captureResources(event, { home, runCommand });
-    return sessionStart(event, { home, now });
+    const result = await sessionStart(event, { home, now });
+    const extra = await healthContext({ home, now: now(), queueRepair }).catch(() => '');
+    if (!extra) return result;
+    const additionalContext = [result.hookSpecificOutput?.additionalContext, extra].filter(Boolean).join('\n');
+    return { ...result, hookSpecificOutput: { ...result.hookSpecificOutput, hookEventName: 'SessionStart', additionalContext } };
   }
   const { review_blocked, ...review } = await completionEvent(event, resolve(codexHome));
   if (!learningChild) {

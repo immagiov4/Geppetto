@@ -13,6 +13,8 @@ Source procedures live in `skills/`; root manifests expose the plugin. `install.
 | Shared hooks, job identities and memory | `machine.mjs` |
 | Weekly analysis and experiment proposals | `weekly-report.mjs`, `maintenance.mjs` |
 | OS maintenance attachment and subscription CLI execution | `maintenance.mjs` |
+| Memory consolidation from revision scan to local fast-forward | `memory-maintenance.mjs`, `memory-scan.mjs`, `memory-ops.mjs`, `memory-runner.mjs` |
+| Machine health, repair evidence and session notices | `health.mjs`, `heal.mjs`, `local-lock.mjs` |
 | PR feedback, pre-edit decisions and completion review | `hook.mjs`, `turn-checks.mjs` |
 | Antigravity hook contract adapter and context delivery | `antigravity.mjs` |
 | Learning activity and in-turn reminders | `learn-nudge.mjs` |

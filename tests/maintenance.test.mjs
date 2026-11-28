@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
+import { delimiter, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { rmSync, existsSync, cpSync } from 'node:fs';
-import { fixture, get, put, repo, invoke, restoreEnv } from './helpers.mjs';
+import { fixture, get, put, repo, invoke, restoreEnv, git } from './helpers.mjs';
 import { reconcileMachine } from '../skills/geppetto-adopt/scripts/machine.mjs';
 import { scheduleMaintenance, disableMaintenance } from '../skills/geppetto-adopt/scripts/maintenance.mjs';
 
@@ -34,7 +34,7 @@ for (const host of ['claude', 'codex']) test(`${host} jobs run after the install
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
     assert.equal(plan.source, resolve(newSource, `skills/geppetto-adopt/assets/templates/jobs/${name}.md`));
-    assert.equal(plan.host, host);
+    assert.equal(plan.host, name === 'maintain-memory' ? 'codex' : host);
     if (name === 'curate-skills') assert.deepEqual(plan.roots, [project, newSource]);
   }
   assert.equal(get(home, '.geppetto/machine.json'), registered);
@@ -123,18 +123,38 @@ test('Windows hidden launcher propagates the actual child exit status', { skip: 
   assert.equal(result.status, 7, result.stderr);
 });
 
-test('maintenance runs the subscription CLI in the memory checkout with inherited settings and no API credentials', t => {
+test('the scheduled job exchanges JSON with isolated subscription CLI contexts', t => {
   const home = fixture(t), memory = fixture(t);
-  put(home, 'node_modules/@openai/codex/bin/codex.js', `const fs=require('node:fs'); let prompt=''; process.stdin.on('data',d=>prompt+=d); process.stdin.on('end',()=>{fs.writeFileSync('maintenance-proof.json',JSON.stringify({args:process.argv.slice(2),prompt,cwd:process.cwd(),key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD}));console.log('fixture complete');});`);
-  put(home, 'memory-prompt.md', 'Maintain relevant memory.');
-  put(home, '.geppetto/machine.json', { memory: { localPath: memory }, jobs: { 'maintain-memory': { status: 'scheduled', host: 'codex', source: resolve(home, 'memory-prompt.md') } } });
-  const result = invoke('maintenance.mjs', ['--run', 'maintain-memory'], { cwd: home, home, env: { PATH: home, OPENAI_API_KEY: 'synthetic-secret' } });
-  assert.equal(result.status, 0, result.stderr);
-  const proof = JSON.parse(get(memory, 'maintenance-proof.json'));
-  assert.equal(proof.cwd, memory); assert.match(proof.prompt, /maintain the buckets/); assert.equal(proof.key, undefined); assert.equal(proof.child, '1');
-  assert.ok(proof.args.includes('exec')); assert.ok(proof.args.every(arg => !/--model|service_tier/.test(arg)));
-  assert.ok(proof.args.includes('features.shell_tool=false')); assert.ok(proof.args.includes('features.multi_agent=false')); assert.ok(proof.args.includes('read-only'));
-  assert.match(get(home, '.geppetto/maintain-memory.log'), /fixture complete/);
+  put(memory, 'index.md', '# Memory\n\n- [Sample](buckets/sample/index.md)\n');
+  put(memory, 'buckets/sample/index.md', '# Sample\n\n- [Page](page.md)\n');
+  put(memory, 'buckets/sample/page.md', '# Page\n\nPreserve the exception.\n\nSource: https://example.test/evidence\n');
+  assert.equal(git(memory, ['init']).status, 0);
+  assert.equal(git(memory, ['add', '.']).status, 0);
+  assert.equal(git(memory, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Fixture']).status, 0);
+  put(home, '.codex/auth.json', { fake: true });
+  put(home, '.codex/AGENTS.md', 'Never enters the job');
+  put(home, '.codex/plugins/example/manifest.json', {});
+  put(home, 'node_modules/@openai/codex/bin/codex.js', "const fs=require('node:fs'); let raw='';\nprocess.stdin.on('data', data => raw+=data);\nprocess.stdin.on('end', () => {\n  const input=JSON.parse(raw), profile=process.env.CODEX_HOME;\n  fs.appendFileSync(process.env.GEPPETTO_TEST_PROOF,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),profile,contents:fs.readdirSync(profile).sort(),key:process.env.OPENAI_API_KEY,child:process.env.GEPPETTO_LEARNING_CHILD})+'\\n');\n  const output = input.items ? {items:input.items.map(item => item.path.endsWith('/page.md') ? {\n    id:item.id, status:'rewrite', newText:item.blocks.map(block=>block.text).join('\\n\\n').replace('Preserve the exception.','Preserve the documented exception.')+'\\n',\n    claims:item.blocks.map(block=>({blockId:block.id,claim:block.text,status:'preserved',evidenceIds:[]})),behaviorChange:'No change.'\n  }:{id:item.id,status:'unchanged'})} : {verdicts:input.ops.map(op=>({id:op.id,verdict:'approve',reason:'Exception preserved.'}))};\n  console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:JSON.stringify(output)}}));\n  console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:20,output_tokens:10}}));\n});");
+  put(home, '.geppetto/machine.json', { memory: { localPath: memory }, jobs: { 'maintain-memory': { status: 'scheduled', host: 'claude' } } });
+  const result = invoke('maintenance.mjs', ['--run', 'maintain-memory'], { cwd: home, home, env: { PATH: home + delimiter + process.env.PATH, OPENAI_API_KEY: 'synthetic-secret', GEPPETTO_TEST_PROOF: resolve(home, 'maintenance-proof.jsonl') } });
+  assert.equal(result.status, 0, result.stderr + get(home, '.geppetto/maintain-memory.log'));
+  const proof = get(home, 'maintenance-proof.jsonl').trim().split('\n').map(JSON.parse);
+  assert.equal(proof.length, 2);
+  assert.notEqual(proof[0].profile, proof[1].profile);
+  for (const row of proof) {
+    assert.notEqual(row.cwd, memory);
+    assert.equal(row.key, undefined);
+    assert.equal(row.child, '1');
+    assert.deepEqual(row.contents, ['auth.json', 'config.toml']);
+    assert.ok(row.args.includes('exec'));
+    assert.ok(row.args.every(arg => !/--model|service_tier/.test(arg)));
+    assert.ok(row.args.includes('features.shell_tool=false'));
+    assert.ok(row.args.includes('read-only'));
+    assert.ok(row.args.includes('mcp_servers={}'));
+    assert.equal(existsSync(row.profile), false);
+  }
+  assert.match(get(memory, 'buckets/sample/page.md'), /Preserve the documented exception/);
+  assert.match(get(home, '.geppetto/maintain-memory.log'), /"outcome":"done"/);
 });
 
 test('uninstall disables only owned OS jobs and requires external confirmation', async () => {

@@ -35,6 +35,7 @@ test('both shipped hook fragments deliver internal context from nested directori
     assert.equal(JSON.parse(get(cwd, projectDataPath(cwd, 'hook-events.jsonl'))).hook, 'learnNudge');
     const memory = fixture(t); git(memory, ['init', '-q']); put(memory, 'index.md', '| Bucket | Scope | Holds |\n|---|---|---|\n| preferences | global | Working preferences. |\n');
     put(cwd, '.geppetto/config.json', { ...config(), memory: { repo: 'https://example.invalid/memory', localPath: memory, buckets: [] } });
+    put(home, '.geppetto/health.json', { v: 1, writtenAt: new Date().toISOString(), checks: {} });
     assert.match(event('SessionStart').hookSpecificOutput.additionalContext, /preferences — Working preferences/);
     assert.equal(get(home, '.geppetto/integrations.md').split('\n').find(line => line.startsWith('Project: ')), `Project: ${cwd.replaceAll('\\', '/')}`);
     assert.equal(hooks.UserPromptSubmit.flatMap(group => group.hooks).some(handler => handler.command.includes('memory-hook.mjs')), false);

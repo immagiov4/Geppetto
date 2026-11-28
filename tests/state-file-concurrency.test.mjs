@@ -17,15 +17,18 @@ test('learning activity releases its real state reader before a session writer r
   await atomicJson(path, state);
   let entered, release, contended;
   const opened = new Promise(done => { entered = done; }), held = new Promise(done => { release = done; }), waiting = new Promise(done => { contended = done; });
-  const original = fs.promises.readFile; let first = true, reader, writer;
+  const original = fs.promises.readFile, originalOpen = fs.promises.open; let first = true, reader, writer;
   fs.promises.readFile = async (file, ...args) => {
     if (String(file) === path && first) {
       first = false; const handle = await open(file, 'r'); entered();
       try { await held; return await handle.readFile(...args); } finally { await handle.close(); }
     }
-    const value = await original(file, ...args);
-    if (String(file) === lock) contended();
-    return value;
+    return original(file, ...args);
+  };
+  fs.promises.open = async (file, ...args) => {
+    const handle = await originalOpen(file, ...args);
+    if (String(file) === lock && args[0] === 'r') contended();
+    return handle;
   };
   syncBuiltinESMExports();
   try {
@@ -40,7 +43,7 @@ test('learning activity releases its real state reader before a session writer r
     assert.equal(JSON.parse((await readFile(activity, 'utf8')).trim()).turn, 'parent:message');
   } finally {
     release(); await Promise.allSettled([reader, writer].filter(Boolean));
-    fs.promises.readFile = original; syncBuiltinESMExports();
+    fs.promises.readFile = original; fs.promises.open = originalOpen; syncBuiltinESMExports();
   }
 });
 

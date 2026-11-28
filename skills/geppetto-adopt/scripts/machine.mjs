@@ -101,6 +101,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
         const registry = await memoryJobs(memory, execute);
         if (registry) await registry.update(rows => { rows.splice(0, rows.length, ...rows.filter(row => row.machine !== machineName)); });
         delete machine.memory;
+        delete machine.maintenanceSource;
       }
       delete machine.projects[project][target];
       if (!Object.keys(machine.projects[project]).length) { delete machine.projects[project]; await bridgeNativeMemory(project, machine, null); }
@@ -182,6 +183,7 @@ export async function reconcileMachine(project, target, source, { pluginHooks = 
     }
     delete machine.jobs.learn;
     await refreshMaintenanceLauncher(home, source);
+    machine.maintenanceSource = source.path;
     if (local.maintenance?.enabled === false) await stopJobs(machine, path, jobs, unscheduler, execute); else await attachJobs(machine, path, registry, { home, harness, source, jobs, scheduler, addJobs, machineName });
     await atomicJson(path, machine);
     return machine;
