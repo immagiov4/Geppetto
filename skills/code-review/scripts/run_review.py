@@ -391,10 +391,19 @@ def annotated_size(hunks):
     return sum(hunk.byte_count for hunk in hunks) + len(DIFF_SEPARATOR) * max(0, len(hunks) - 1)
 
 
+def split_hunk_header(hunk):
+    prefix = f"@@ {hunk.extent}"
+    require(hunk.text.startswith(prefix), "Annotated hunk header differs from its range")
+    header_end = hunk.text.find("\n", len(prefix))
+    if header_end == -1:
+        return hunk.text, ""
+    return hunk.text[:header_end], hunk.text[header_end + 1:]
+
+
 def fit_hunk(hunk, limit):
     if hunk.byte_count <= limit:
         return hunk
-    header, _, body = hunk.text.partition("\n")
+    header, body = split_hunk_header(hunk)
     marker = "\n[Hunk truncated by byte limit. Read the full range in the case.]"
     prefix = header + "\n"
     remaining = limit - len((prefix + marker).encode("utf-8"))
@@ -410,7 +419,7 @@ def split_hunk(hunk, limit):
     """Return bounded parts, plus parts whose headers alone leave no usable space."""
     if hunk.byte_count <= limit:
         return [hunk], []
-    header, _, body = hunk.text.partition("\n")
+    header, body = split_hunk_header(hunk)
     prefix = f"@@ {hunk.extent}"
     suffix = header.removeprefix(prefix)
     require(suffix.startswith(" @@"), "Annotated hunk header differs from its range")
@@ -466,10 +475,11 @@ def contiguous_chunks(hunks, limit):
         yield chunk
 
 
-def pack_shards(by_file, limit, count, *, prefer_affinity=True):
+def pack_shards(by_file, limit, count, *, prefer_affinity=True, choose_fullest=True):
     """Pack by tier and directory, preserving the largest groups and hunk boundaries when possible."""
     shards = []
     omitted = []
+    select_shard = max if choose_fullest else min
 
     def place(hunks, module):
         size = annotated_size(hunks)
@@ -479,13 +489,13 @@ def pack_shards(by_file, limit, count, *, prefer_affinity=True):
                    if shard.byte_count + len(DIFF_SEPARATOR) + size <= limit]
         affinity = [shard for shard in fitting if module in shard.modules]
         if prefer_affinity and affinity:
-            shard = max(affinity, key=lambda candidate: candidate.byte_count)
+            shard = select_shard(affinity, key=lambda candidate: candidate.byte_count)
         elif len(shards) < count and (not fitting or
                                      (prefer_affinity and module and any(candidate.modules - {""} for candidate in fitting))):
             shard = Shard()
             shards.append(shard)
         elif fitting:
-            shard = max(fitting, key=lambda candidate: candidate.byte_count)
+            shard = select_shard(fitting, key=lambda candidate: candidate.byte_count)
         else:
             return False
         shard.add(hunks, size, module)
@@ -596,9 +606,12 @@ def build_review_plan(case, changed, max_diff_bytes=MAX_DIFF_BYTES, max_shards=M
             for target in range(min_shards, max_shards + 1):
                 if not omitted:
                     break
-                for prefer_affinity in ((False,) if target == min_shards else (True, False)):
+                placements = [(False, True), (False, False)]
+                if target != min_shards:
+                    placements.insert(0, (True, True))
+                for prefer_affinity, choose_fullest in placements:
                     candidate, outside = pack_shards(by_file, max_diff_bytes, target,
-                                                     prefer_affinity=prefer_affinity)
+                                                     prefer_affinity=prefer_affinity, choose_fullest=choose_fullest)
                     if omission_score(outside) < omission_score(omitted):
                         shards, omitted = candidate, outside
                     if not omitted:
@@ -989,6 +1002,9 @@ def failure_message(error):
 def run_call(args, frozen, label, prompt, schema_path, metrics):
     seal = args.seal if hasattr(args, "seal") else material_seal(frozen)
     prompt += f"\nReview material SHA-256: {seal}\nReview stage: {label}\n"
+    shard_count = getattr(args, "shard_count", 1)
+    if shard_count >= 2 and args.strategy == "lenses":
+        prompt += f"Review shards: {shard_count}\n"
     prompt += f"\nBudget: up to {getattr(args, 'tool_budget', 24)} effective tool calls and {args.timeout_seconds:g} seconds per session. Tool count is an instructed limit.\n"
     (args.output / f"{label}.prompt.txt").write_bytes(prompt.encode("utf-8"))
     response_path = args.output / f"{label}.json"
@@ -1133,6 +1149,7 @@ Account for every supplied question once, including those you could not examine.
 checked_sources paths are relative to after/ (before/ for a deleted file), with no after/ or before/ prefix.
 Questions:
 """ + json.dumps(questions, ensure_ascii=False)
+    unchanged(args.case, frozen)
     response = run_call(args, frozen, "investigate", prompt, args.output / "investigation.schema.json", metrics)
     validate(response, schemas["investigation"])
     report, triage = response["report"], response["triage"]
@@ -1338,15 +1355,13 @@ def partition_verify_batches(candidates, threshold=18, min_batch=4, max_batches=
             groups.setdefault(key, []).append(index)
         return groups
 
-    groups = group(by_file=False)
-    if max(map(len, groups.values())) * 4 > len(candidates) * 3:
-        groups = group(by_file=True)
-    batches = [[], []]
-    for _, indexes in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0])):
-        min(batches, key=len).extend(indexes)
-    if min(map(len, batches)) < min_batch:
-        return [candidates]
-    return [[candidates[index] for index in sorted(batch)] for batch in batches]
+    for by_file in (False, True):
+        batches = [[], []]
+        for _, indexes in sorted(group(by_file).items(), key=lambda item: (-len(item[1]), item[0])):
+            min(batches, key=len).extend(indexes)
+        if min(map(len, batches)) >= min_batch:
+            return [[candidates[index] for index in sorted(batch)] for batch in batches]
+    return [candidates]
 
 
 def run_verification(args, frozen, changed, plan, base_schema, candidates, metrics):
@@ -1359,28 +1374,28 @@ def run_verification(args, frozen, changed, plan, base_schema, candidates, metri
         schema_path = args.output / "verification.schema.json"
         save(schema_path, schema)
     try:
+        prompts = [verification_prompt(args.case, plan, batch, include_observations=uses_lenses) for batch in batches]
+        unchanged(args.case, frozen)
         if len(batches) == 1:
-            response = run_call(verify_args, frozen, "verify",
-                                verification_prompt(args.case, plan, candidates, include_observations=uses_lenses),
-                                schema_path, metrics)
+            response = run_call(verify_args, frozen, "verify", prompts[0], schema_path, metrics)
             verify_response(args.case, response, candidates, changed, schema)
             metrics["calls"][-1]["status"] = "completed"
         else:
             def run_batch(stage):
-                label, batch = stage
+                label, batch, prompt = stage
                 local = {"calls": [], "thread_ids": []}
                 try:
                     batch_schema = verification_schema(base_schema, batch)
                     batch_path = args.output / f"{label}.schema.json"
                     save(batch_path, batch_schema)
-                    result = run_call(verify_args, frozen, label, verification_prompt(args.case, plan, batch),
-                                      batch_path, local)
+                    result = run_call(verify_args, frozen, label, prompt, batch_path, local)
                     verify_response(args.case, result, batch, changed, batch_schema)
                     return local, result, None
                 except Exception as error:
                     return local, None, error
 
-            stages = [(f"verify-{index}", batch) for index, batch in enumerate(batches, 1)]
+            stages = [(f"verify-{index}", batch, prompt)
+                      for index, (batch, prompt) in enumerate(zip(batches, prompts), 1)]
             responses = run_stage_wave(args, metrics, stages, run_batch)
             response = {key: [item for result in responses for item in result[key]] for key in responses[0]}
             verify_response(args.case, response, candidates, changed, schema)
@@ -1461,7 +1476,8 @@ def main(args):
         finally:
             metrics["prep_seconds"] = round(time.monotonic() - prep_started, 3)
         if uses_lenses:
-            metrics.update(shard_count=plan.shard_count,
+            args.shard_count = plan.shard_count
+            metrics.update(shard_count=args.shard_count,
                            shards=[shard.metadata() for shard in plan.shards],
                            inline_diff_bytes=plan.inline_diff_bytes,
                            inline_diff_omitted_files=list(plan.omitted_files),
@@ -1481,6 +1497,8 @@ def main(args):
                 else:
                     base = prompt_base(args.case, changed)
                     for index, focus in enumerate(("contract and correctness", "flows, regressions and security"), 1):
+                        if index > 1:
+                            unchanged(args.case, frozen)
                         response = run_call(args, frozen, f"search-{index}", base +
                                             f"\nIndependent search: {focus}. Prefix IDs with S{index}-.",
                                             ROOT / "references/report.schema.json", metrics)
@@ -1749,8 +1767,9 @@ def check_launches(case, output, plan, labels, profile, max_diff_bytes, max_shar
 
         def communicate(self, prompt, timeout):
             label = self.stage
-            require(f"\nReview material SHA-256: {material_seal(fast_fixture)}\nReview stage: {label}\n" in prompt,
-                    "Prompt lost exact material seal or stage")
+            footer = f"\nReview material SHA-256: {material_seal(fast_fixture)}\nReview stage: {label}\n"
+            footer += f"Review shards: {plan.shard_count}\n" if plan.sharded else ""
+            require(footer + "\nBudget:" in prompt, "Prompt lost exact material seal, stage or shard count")
             require("up to 16 effective tool calls" in prompt, "Incorrect lens budget")
             if label == "verify":
                 expected = verification_schema(output_schemas["verification"], [candidate, duplicate])
@@ -1811,7 +1830,7 @@ def check_launches(case, output, plan, labels, profile, max_diff_bytes, max_shar
             finished == [label for wave in waves for label in reversed(wave)] + ["verify"],
             "Discovery or metrics evidence order differs")
     expected_checks = [0, len(labels)] + ([len(labels) + len(gap_labels)] if gap_labels else [])
-    expected_checks.append(len(stages))
+    expected_checks.extend([len(stages) - 1, len(stages)])
     require(check_points == expected_checks, f"Integrity checks ran outside coordinator boundaries: {check_points}")
     require(metrics["status"] == "complete" and metrics["candidate_count"] == 2 and metrics["prep_seconds"] >= 0 and
             metrics["case_fingerprint"] == fast_fixture and metrics["shard_count"] == plan.shard_count and
@@ -1860,6 +1879,11 @@ def check_parallel_verification(case, output, plan, changed):
                       for index, item in enumerate(candidates)]
     require(partition_verify_batches(across_modules) == [[item for index, item in enumerate(across_modules) if index % 3 in (0, 2)], across_modules[1::3]],
             "Module assignment was not deterministic")
+
+    skewed_modules = [{"file": f"module-a/file-{index // 5}.py"} for index in range(15)]
+    skewed_modules += [{"file": "module-b/file.py"} for _ in range(4)]
+    require(partition_verify_batches(skewed_modules) == [skewed_modules[:15], skewed_modules[15:]],
+            "A valid module partition should keep each module intact")
 
     barrier = Barrier(2, timeout=10)
     released = Event()
@@ -1971,6 +1995,20 @@ def selfcheck_shards():
                 "b1 | -old" in parts[0].text and "[part 2/2]" in parts[1].extent and
                 all(part.byte_count <= 180 for part in parts),
                 "Only the oversized source line should be truncated")
+        newline_file = "src/line\nbreak.go"
+        extent = f"{newline_file} b1-1 a1-2"
+        header = f"@@ {extent} @@"
+        newline_text = f"{header}\nb1 | -old\na1 | +" + "x" * 250 + "\na2 | +tail"
+        newline_hunk = Hunk(newline_file, newline_text, len(newline_text.encode()), extent)
+        clipped = fit_hunk(newline_hunk, 180)
+        parts, outside = split_hunk(newline_hunk, 180)
+        require(clipped.text.startswith(header + "\nb1 | -old") and not outside and
+                len(parts) == 3 and parts[1].truncated and parts[2].text.endswith("a2 | +tail") and
+                all(part.text.startswith(f"@@ {extent} [part") and part.byte_count <= 180 for part in parts),
+                "Oversized hunk with a newline in its filename lost its header or source lines")
+        header_only = Hunk(newline_file, header, len(header.encode()), extent)
+        require(split_hunk(header_only, header_only.byte_count - 1) == ([], [header_only]),
+                "Oversized header without source lines should be omitted")
         zero = build_review_plan(giant, giant_changed, 0)
         require(zero.inline_diff_bytes == 0 and len(zero.omitted_hunk_ranges) == 4 and
                 not zero.sharded and [stage[0] for stage in stage1_lenses(zero)] == [lens[0] for lens in LENSES],
@@ -2005,6 +2043,20 @@ def selfcheck_shards():
         require(exact_plan.shard_count == 2 and not exact_plan.omitted_hunk_ranges and
                 1.28 < exact_plan.inline_diff_bytes / MAX_DIFF_BYTES < 1.32,
                 "The 1.3-packet multi-module diff should fit in two shards")
+        dense = root / "dense"
+        dense_sizes = [598, 498, 298, 198, 198, 198]
+        dense_edits = []
+        for module, size in enumerate(dense_sizes):
+            file = f"module{module}/core.py"
+            diff = FileDiff(file, file)
+            annotate_hunk(diff, HUNK_HEADER.match("@@ -1 +1 @@"), "\n-old\n+\n")
+            dense_edits.append((file, ["old"], ["x" * (size - len(diff.annotated[0].encode()))]))
+        dense_changed = make_review_fixture(dense, dense_edits)
+        dense_plan = build_review_plan(dense, dense_changed, 998, 2)
+        require([len(diff.annotated[0].encode()) for diff in dense_plan.diffs.values()] == dense_sizes and
+                [shard.byte_count for shard in dense_plan.shards] == [998, 998] and
+                not dense_plan.omitted_hunk_ranges,
+                "Dense shard packing should fit all six hunks in two shards")
         print("PASS line-aligned hunk splitting, oversized single lines, and exact-fit shard count")
 
         grouped = root / "grouped"

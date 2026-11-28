@@ -352,11 +352,11 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
   if (metrics?.status !== 'complete' || !Array.isArray(report?.findings) ||
       (outcome === 'findings') !== Boolean(report.findings.length)) fail();
   const { strategy, profile } = metrics;
+  const shardCount = metrics.shard_count ?? 1;
   const required = strategy === 'questions' ? ['questions', 'investigate']
     : strategy === 'generic' ? ['search-1', 'search-2'] : [];
   if (strategy === 'lenses') {
     if (!['standard', 'ultra'].includes(profile)) fail();
-    const shardCount = metrics.shard_count ?? 1;
     if (shardCount === 1) {
       required.push('lens-adversarial');
     } else {
@@ -375,13 +375,14 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
       !Array.isArray(paths) || !fingerprint) fail();
   const responses = {};
   const seal = reviewMaterialSeal(fingerprint);
+  const expectedShards = strategy === 'lenses' && shardCount >= 2 ? shardCount : undefined;
   for (const [index, call] of calls.entries()) {
     if (!call || !/^(questions|investigate|search-[12]|shard-[1-9]\d*|lens-(?:adversarial|contracts|rules-tests)|gap-(?:logic|contracts-docs)|verify(?:-[12])?)$/.test(call.stage) || call.status !== 'completed' ||
         call.exit_code !== 0 || typeof threads[index] !== 'string' || !threads[index]) fail();
     const response = await readFile(resolve(directory, call.stage + '.json'), 'utf8');
     const expectedStage = strategy === 'lenses' ? call.stage : undefined;
     if (digest(response) !== call.response_sha256 ||
-        !await completedReviewSession(codexHome, threads[index], call, response, seal, expectedStage)) fail();
+        !await completedReviewSession(codexHome, threads[index], call, response, seal, expectedStage, expectedShards)) fail();
     responses[call.stage] = JSON.parse(response);
     const events = (await readFile(resolve(directory, call.stage + '.events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
     if (!events.some(event => event.type === 'thread.started' && event.thread_id === threads[index]) ||
@@ -399,16 +400,30 @@ async function verifiedReview(root, base, outcome, directory, session, codexHome
       !(strategy === 'lenses' && isDeepStrictEqual(verifyStages, ['verify-1', 'verify-2']))) fail();
   const verification = verifyStages.map(stage => responses[stage]);
   if (!verification.every(response => Array.isArray(response?.accepted_findings))) fail();
-  const accepted = verification.flatMap(response => response.accepted_findings);
-  const byId = (left, right) => left.id.localeCompare(right.id, 'en');
-  if (!isDeepStrictEqual(accepted.toSorted(byId), report.findings.toSorted(byId))) fail();
-  if (verification.length > 1) {
-    if (!verification.every(response => Array.isArray(response.decisions))) fail();
+  if (verification.length > 1 || Array.isArray(verification[0]?.decisions)) {
+    for (const { decisions, accepted_findings } of verification) {
+      if (!Array.isArray(decisions) || !decisions.every(decision => typeof decision?.id === 'string' &&
+          ['accept', 'reject', 'unverified'].includes(decision.decision) && typeof decision.canonical_id === 'string' &&
+          (decision.decision === 'accept' || decision.canonical_id === '-'))) fail();
+      const acceptedIds = accepted_findings.map(finding => finding?.id);
+      const canonicalIds = new Set();
+      const selfAccepted = new Set();
+      for (const { id, decision, canonical_id } of decisions) {
+        if (decision !== 'accept') continue;
+        canonicalIds.add(canonical_id);
+        if (id === canonical_id) selfAccepted.add(id);
+      }
+      if (new Set(acceptedIds).size !== acceptedIds.length || canonicalIds.size !== acceptedIds.length ||
+          !acceptedIds.every(id => typeof id === 'string' && canonicalIds.has(id) && selfAccepted.has(id))) fail();
+    }
     const expected = candidates.map(candidate => candidate?.id).sort();
-    const decided = verification.flatMap(response => response.decisions.map(decision => decision?.id)).sort();
+    const decided = verification.flatMap(response => response.decisions.map(decision => decision.id)).sort();
     if (!expected.every(id => typeof id === 'string' && id) || new Set(expected).size !== expected.length ||
         !isDeepStrictEqual(decided, expected)) fail();
   }
+  const accepted = verification.flatMap(response => response.accepted_findings);
+  const byId = (left, right) => left.id.localeCompare(right.id, 'en');
+  if (!isDeepStrictEqual(accepted.toSorted(byId), report.findings.toSorted(byId))) fail();
   if (fingerprint['diff.patch'] !== await diffDigest(root, ['diff', '--binary', '--no-ext-diff', base, '--'], '')) fail();
   const changed = gitOutput(root, ['diff', '--name-only', '--no-renames', '-z', base, '--'], { trim: false }).split('\0').filter(Boolean);
   const untracked = gitOutput(root, ['ls-files', '--others', '--exclude-standard', '-z'], { trim: false })

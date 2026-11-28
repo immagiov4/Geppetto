@@ -52,7 +52,6 @@ class ReviewStrategyTests(unittest.TestCase):
         self.calls = []
 
     def call(self, args, frozen, label, prompt, schema, metrics):
-        runner.unchanged(args.case, frozen)
         self.calls.append((label, prompt))
         metrics['calls'].append({'stage': label, 'status':'returned', 'usage': {'input_tokens': 7}, 'elapsed_seconds': 1})
         response = deepcopy(self.outputs[label])
@@ -212,15 +211,48 @@ class ReviewStrategyTests(unittest.TestCase):
         with patch.object(self, 'call', side_effect=timeout):
             self.assert_failure('time limit', ['questions'])
 
-    def test_changed_source_is_not_a_complete_review(self):
+    def test_changed_source_stops_before_next_serial_discovery_session(self):
         original = self.call
+
         def mutate(*args):
             result = original(*args)
-            (self.case / 'after/producer.py').write_text('value = 3\n')
-            runner.unchanged(args[0].case, args[1])
+            if args[2] in ('questions', 'search-1'):
+                (self.case / 'after/producer.py').write_text('value = 3\n', encoding='utf8')
             return result
-        with patch.object(self, 'call', side_effect=mutate):
-            self.assert_failure('contents changed', ['questions'])
+
+        for strategy, first in (('questions', 'questions'), ('generic', 'search-1')):
+            with self.subTest(strategy=strategy):
+                self.args.strategy = strategy
+                self.args.output = self.case.parent / strategy
+                self.calls.clear()
+                (self.case / 'after/producer.py').write_text('value = 2\n', encoding='utf8')
+                with patch.object(self, 'call', side_effect=mutate), self.assertRaisesRegex(ValueError, 'contents changed'):
+                    self.run_review()
+                self.assertEqual([label for label, _ in self.calls], [first])
+                self.assertEqual(self.read_metrics()['status'], 'failed')
+                self.assertFalse((self.args.output / 'report.md').exists())
+
+    def test_source_changed_during_excerpt_construction_stops_before_verification(self):
+        finding = self.prepare_lenses()
+        snippets = runner.build_candidate_snippets
+
+        def mutate(*args, **kwargs):
+            (self.case / 'after/producer.py').write_text('value = 3\n', encoding='utf8')
+            return snippets(*args, **kwargs)
+
+        for candidates in ([finding], [{**finding, 'id': f'L1-{index}', 'file': path}
+                                       for index, path in enumerate(['producer.py'] * 15 + ['consumer.py'] * 4)]):
+            with self.subTest(candidate_count=len(candidates)):
+                self.args.output = self.case.parent / f'verify-{len(candidates)}'
+                self.calls.clear()
+                (self.case / 'after/producer.py').write_text('value = 2\n', encoding='utf8')
+                with patch.object(runner, 'lens_discovery', return_value=(candidates, [], [])), \
+                     patch.object(runner, 'build_candidate_snippets', side_effect=mutate), \
+                     self.assertRaisesRegex(ValueError, 'contents changed'):
+                    self.run_review()
+                self.assertEqual(self.calls, [])
+                self.assertEqual(self.read_metrics()['status'], 'failed')
+                self.assertFalse((self.args.output / 'report.md').exists())
 
 
     lens_stages = ('lens-adversarial', 'lens-contracts', 'lens-rules-tests')

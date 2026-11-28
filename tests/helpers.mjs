@@ -75,7 +75,7 @@ export function parallel(script, args, { cwd, home = cwd }) {
 export function git(dir, args, options = {}) { return spawnSync('git', args, { cwd: dir, encoding: 'utf8', windowsHide: true, ...options }); }
 
 /** Fake runner artifacts for hook tests; these fixtures do not invoke a model. */
-export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome, { strategy = 'questions', profile = 'standard', stages, candidates, findings, shardCount, verifyStages, verifyResponses = {}, archivedStages = {} } = {}) {
+export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', nativeHome, { strategy = 'questions', profile = 'standard', stages, candidates, findings, shardCount, verifyStages, verifyResponses = {}, archivedStages = {}, archivedShards = {} } = {}) {
   const directory = fixture(t);
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const patch = git(root, ['diff', '--binary', '--no-ext-diff', base, '--'], { maxBuffer: 8 * 1024 * 1024 }).stdout;
@@ -100,8 +100,10 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
   const verification = stage => {
     if (stage === 'verify') return { accepted_findings: findings };
     const batch = stage === 'verify-1' ? candidates.slice(0, batchBoundary) : candidates.slice(batchBoundary);
-    return { accepted_findings: findings.filter(finding => batch.some(candidate => candidate.id === finding.id)),
-      decisions: batch.map(({ id }) => ({ id })) };
+    const accepted_findings = findings.filter(finding => batch.some(candidate => candidate.id === finding.id));
+    return { accepted_findings, decisions: batch.map(({ id }) => accepted_findings.some(finding => finding.id === id)
+      ? { id, decision: 'accept', canonical_id: id }
+      : { id, decision: 'reject', canonical_id: '-' }) };
   };
   const threads = stages.map(() => randomUUID());
   const started = Date.now();
@@ -118,6 +120,7 @@ export function reviewFixture(t, root, outcome = 'passed', base = 'HEAD', native
     put(directory, stage + '.events.jsonl', events.map(JSON.stringify).join('\n'));
     const prompt = ['Review fixture begins', 'Review material SHA-256: ' + reviewMaterialSeal(hashes)];
     if (strategy === 'lenses') prompt.push('Review stage: ' + (archivedStages[stage] ?? stage));
+    if (strategy === 'lenses' && shardCount >= 2) prompt.push('Review shards: ' + (archivedShards[stage] ?? shardCount));
     prompt.push('Review fixture ends');
     put(nativeHome ?? resolve(directory, '.codex'), 'sessions/' + day + '/rollout-fixture-' + threads[index] + '.jsonl', [
       { type: 'session_meta', payload: { id: threads[index] } },
